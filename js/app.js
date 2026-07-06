@@ -410,6 +410,7 @@
     const showSeg = piece && sel.kind === 'seg';
     $('sel-props').hidden = !(showNode || showSeg);
     $('sel-node-row').hidden = !showNode;
+    $('sel-handle-row').hidden = true;
     $('sel-seg-row').hidden = !showSeg;
     $('sel-seg-anchor-row').hidden = !showSeg;
     $('sel-fold-row').hidden = !showSeg;
@@ -417,7 +418,12 @@
       const nd = piece.path.nodes[sel.idx];
       $('sp-x').value = fmt(nd.x);
       $('sp-y').value = fmt(nd.y);
-      $('sel-hint').textContent = 'Double-click the point to toggle corner / smooth.';
+      $('sel-handle-row').hidden = !(nd.hin || nd.hout);
+      $('sp-del-hin').disabled = !nd.hin;
+      $('sp-del-hout').disabled = !nd.hout;
+      $('sel-hint').textContent = (nd.hin || nd.hout)
+        ? 'Drag a handle onto its point (or double-click it) to delete just that handle.'
+        : 'Double-click the point to toggle corner / smooth.';
     } else if (showSeg) {
       const n = piece.path.nodes.length;
       const a = piece.path.nodes[sel.idx], b = piece.path.nodes[(sel.idx + 1) % n];
@@ -567,9 +573,11 @@
     if (drag.type === 'handle') {
       const nd = pieceById(drag.pieceId).path.nodes[drag.idx];
       const v = { x: w.x - nd.x, y: w.y - nd.y };
-      nd[drag.key] = v;
+      // dropping a handle onto its own point deletes it
+      const kill = Geo.len(v) < px(5);
+      nd[drag.key] = kill ? null : v;
       const other = drag.key === 'hout' ? 'hin' : 'hout';
-      if (!ev.altKey && nd[other]) nd[other] = { x: -v.x, y: -v.y };
+      if (!kill && !ev.altKey && nd[other]) nd[other] = { x: -v.x, y: -v.y };
       renderAll(true);
       return;
     }
@@ -629,6 +637,21 @@
     const piece = selPiece();
     if (!piece) return;
     const nodes = piece.path.nodes;
+    // double-click a handle dot: delete that handle
+    if (sel.kind === 'node' && nodes[sel.idx]) {
+      const nd = nodes[sel.idx];
+      for (const key of ['hin', 'hout']) {
+        if (!nd[key]) continue;
+        const hp = { x: nd.x + nd[key].x, y: nd.y + nd[key].y };
+        if (Geo.dist(hp, w) < px(8)) {
+          beginChange();
+          nd[key] = null;
+          endChange();
+          renderAll();
+          return;
+        }
+      }
+    }
     // double-click node: toggle corner/smooth
     const ni = hitNode(piece, w);
     if (ni >= 0) {
@@ -1098,6 +1121,159 @@
     rd.readAsText(file);
   }
 
+  // ---------- cloud save (GitHub) ----------
+  // Each user connects with their own fine-grained PAT scoped to one repo;
+  // patterns live in that repo under patterns/ — every save is a commit.
+  const GH_KEY = 'patternStudioGH.v1';
+  let gh = null; // { token, repo, login }
+
+  const b64encode = (s) => {
+    const bytes = new TextEncoder().encode(s);
+    let bin = '';
+    for (const b of bytes) bin += String.fromCharCode(b);
+    return btoa(bin);
+  };
+  const b64decode = (s) => {
+    const bin = atob(s.replace(/\s/g, ''));
+    return new TextDecoder().decode(Uint8Array.from(bin, (c) => c.charCodeAt(0)));
+  };
+
+  async function ghApi(path, opts) {
+    const res = await fetch('https://api.github.com' + path, Object.assign({}, opts, {
+      headers: Object.assign({
+        Authorization: 'Bearer ' + gh.token,
+        Accept: 'application/vnd.github+json',
+      }, (opts && opts.headers) || {}),
+    }));
+    if (!res.ok && res.status !== 404) {
+      const body = await res.text().catch(() => '');
+      throw new Error('GitHub said ' + res.status + (res.status === 401 ? ' — token rejected' : '') +
+        (body ? ': ' + body.slice(0, 140) : ''));
+    }
+    return res;
+  }
+
+  function ghRender() {
+    $('gh-disconnected').hidden = !!gh;
+    $('gh-connected').hidden = !gh;
+    if (gh) $('gh-status').textContent = `Connected as ${gh.login} · ${gh.repo}`;
+  }
+
+  async function ghConnect() {
+    const token = $('gh-token').value.trim();
+    if (!token) { alert('Paste a GitHub token first.'); return; }
+    gh = { token, repo: '', login: '' };
+    try {
+      const user = await (await ghApi('/user')).json();
+      if (!user.login) throw new Error('token rejected');
+      gh.login = user.login;
+      let repo = $('gh-repo').value.trim() || 'my-patterns';
+      if (!repo.includes('/')) repo = user.login + '/' + repo;
+      gh.repo = repo;
+      const check = await ghApi('/repos/' + repo);
+      if (check.status === 404) {
+        throw new Error(`repo "${repo}" not found (or the token can't see it). ` +
+          'Create it on github.com/new, and give the token Contents read & write on it.');
+      }
+      localStorage.setItem(GH_KEY, JSON.stringify(gh));
+      $('gh-token').value = '';
+      ghRender();
+      ghList();
+    } catch (e) {
+      gh = null;
+      ghRender();
+      alert('Could not connect: ' + e.message);
+    }
+  }
+
+  async function ghSave() {
+    if (!gh) return;
+    const path = 'patterns/' + safeName() + '.pattern.json';
+    const btn = $('gh-save');
+    btn.disabled = true; btn.textContent = 'Saving…';
+    try {
+      const existing = await ghApi('/repos/' + gh.repo + '/contents/' + encodeURI(path));
+      const sha = existing.status === 200 ? (await existing.json()).sha : undefined;
+      const body = {
+        message: (sha ? 'Update ' : 'Add ') + safeName(),
+        content: b64encode(JSON.stringify(doc, null, 1)),
+      };
+      if (sha) body.sha = sha;
+      await ghApi('/repos/' + gh.repo + '/contents/' + encodeURI(path), {
+        method: 'PUT',
+        body: JSON.stringify(body),
+      });
+      $('gh-status').textContent = `Saved "${safeName()}" ✓ · ${gh.repo}`;
+      ghList();
+    } catch (e) {
+      alert('Cloud save failed: ' + e.message);
+    } finally {
+      btn.disabled = false; btn.textContent = 'Save to cloud';
+    }
+  }
+
+  async function ghList() {
+    if (!gh) return;
+    const ul = $('gh-files');
+    clear(ul);
+    try {
+      const res = await ghApi('/repos/' + gh.repo + '/contents/patterns');
+      const items = res.status === 200 ? await res.json() : [];
+      const files = (Array.isArray(items) ? items : []).filter((f) => f.name.endsWith('.json'));
+      if (!files.length) {
+        const li = document.createElement('li');
+        li.className = 'empty';
+        li.textContent = 'No saved patterns yet';
+        ul.appendChild(li);
+      }
+      for (const f of files) {
+        const li = document.createElement('li');
+        li.textContent = f.name.replace(/\.pattern\.json$|\.json$/, '');
+        li.title = 'Load ' + f.path;
+        li.addEventListener('click', () => ghLoad(f.path));
+        ul.appendChild(li);
+      }
+    } catch (e) {
+      $('gh-status').textContent = 'Could not list patterns: ' + e.message;
+    }
+  }
+
+  async function ghLoad(path) {
+    if (!gh) return;
+    try {
+      const res = await ghApi('/repos/' + gh.repo + '/contents/' + encodeURI(path));
+      if (res.status === 404) throw new Error('file disappeared');
+      const file = await res.json();
+      const parsed = JSON.parse(b64decode(file.content));
+      if (!parsed || !Array.isArray(parsed.pieces)) throw new Error('not a Pattern Studio project');
+      beginChange();
+      doc = parsed;
+      endChange();
+      clearSel();
+      $('doc-name').value = doc.name || 'Untitled pattern';
+      renderAll();
+      zoomFit();
+      $('gh-status').textContent = `Loaded "${doc.name}" · ${gh.repo}`;
+    } catch (e) {
+      alert('Cloud load failed: ' + e.message);
+    }
+  }
+
+  $('gh-connect').addEventListener('click', ghConnect);
+  $('gh-save').addEventListener('click', ghSave);
+  $('gh-logout').addEventListener('click', () => {
+    localStorage.removeItem(GH_KEY);
+    gh = null;
+    ghRender();
+  });
+  (function ghBoot() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(GH_KEY));
+      if (saved && saved.token && saved.repo) { gh = saved; ghList(); }
+    } catch (e) { /* ignore */ }
+    ghRender();
+  })();
+
   // ---------- wire up UI ----------
   document.querySelectorAll('#toolbar .tool').forEach((b) =>
     b.addEventListener('click', () => setTool(b.dataset.tool)));
@@ -1175,6 +1351,16 @@
     endChange();
     renderAll();
   });
+  for (const key of ['hin', 'hout']) {
+    $('sp-del-' + key).addEventListener('click', () => {
+      const p = selPiece();
+      if (!p || sel.kind !== 'node' || !p.path.nodes[sel.idx]) return;
+      beginChange();
+      p.path.nodes[sel.idx][key] = null;
+      endChange();
+      renderAll();
+    });
+  }
   $('sp-fold').addEventListener('click', () => {
     const p = selPiece();
     if (!p || sel.kind !== 'seg' || !p.path.closed) return;

@@ -21,7 +21,7 @@ can be saved/opened as `.pattern.json` files.
 | | |
 |---|---|
 | **Pen tool** | click = corner point, click-drag = curve (bezier handles), click the first point to close the piece |
-| **Edit** | drag points and handles · double-click a point to toggle corner↔smooth · double-click an edge to insert a point · Del removes |
+| **Edit** | drag points and handles · double-click a point to toggle corner↔smooth · double-click an edge to insert a point · Del removes · delete a single curve handle by dragging it onto its point, double-clicking it, or the ×&nbsp;in / ×&nbsp;out buttons |
 | **Seam allowance** | per-piece width (cm); the dashed line is the cutting line, computed as a true outward offset — also what goes on the DXF `CUT` layer |
 | **Notches** | click an edge; exported as short slits from the cutting line inward (so the laser cuts them) |
 | **Drill holes** | marked circles on the `MARK` layer |
@@ -33,6 +33,7 @@ can be saved/opened as `.pattern.json` files.
 | **Measure** | drag to measure any distance; edge lengths and piece perimeters shown live (for walking seams) |
 | **Snap** | to grid (0.1–1 cm) and to existing points |
 | **Undo/redo** | Ctrl+Z / Ctrl+Y, 100 steps |
+| **Cloud save (GitHub)** | connect with your own fine-grained token (Contents read/write on one repo you own) — patterns save as versioned files in that repo, load from any device; the token stays in your browser |
 
 ## DXF export (laser cutting)
 
@@ -67,6 +68,9 @@ outward-normal orientation, curve splitting, and DXF structure/scale/notch geome
 
 - [x] Edge-length editing (type a number, the curve adjusts) for walking seams
 - [x] Weld/join two pieces along matching edges
+- [ ] GarmentCode importer — open [GarmentCode](https://github.com/maria-korosteleva/GarmentCode) /
+      Design2GarmentCode specification JSONs as editable pieces (verified compatible:
+      cm units, panels map to pieces, quadratic/cubic curves map to handles exactly)
 - [ ] Grading (multi-size nests)
 - [ ] Basic block generators from body measurements (bodice / sleeve / skirt)
 - [ ] Tiled A4/Letter PDF export for home printers

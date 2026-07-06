@@ -97,6 +97,11 @@
           <input id="sp-x" type="number" step="0.1" title="x (cm)">
           <input id="sp-y" type="number" step="0.1" title="y (cm)">
         </div>
+        <div class="row" id="sel-handle-row" hidden>
+          <label>Handles</label>
+          <button id="sp-del-hin" title="Delete the incoming handle (edge arriving at this point)">× in</button>
+          <button id="sp-del-hout" title="Delete the outgoing handle (edge leaving this point)">× out</button>
+        </div>
         <div class="row" id="sel-seg-row" hidden>
           <label>Length</label>
           <input id="sp-seglen" type="number" min="0.1" step="0.1" title="Edge length (cm)"> <em>cm</em>
@@ -113,6 +118,25 @@
           <button id="sp-fold" title="Draft half the piece and mirror it across this edge — the piece unfolds to the full shape on export">Make fold line</button>
         </div>
         <div class="row hint" id="sel-hint"></div>
+      </section>
+      <section id="cloud">
+        <h3>Cloud (GitHub)</h3>
+        <div id="gh-disconnected">
+          <div class="row"><label>Token</label><input id="gh-token" type="password" spellcheck="false" placeholder="github_pat_…"></div>
+          <div class="row"><label>Repo</label><input id="gh-repo" type="text" spellcheck="false" placeholder="you/my-patterns"></div>
+          <div class="row btns"><button id="gh-connect">Connect</button></div>
+          <div class="row hint">Patterns save as versioned files in your own GitHub repo. Create a repo, then a
+            <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">fine-grained token</a>
+            with <b>Contents: read &amp; write</b> on just that repo. The token never leaves this browser.</div>
+        </div>
+        <div id="gh-connected" hidden>
+          <div class="row hint" id="gh-status"></div>
+          <div class="row btns">
+            <button id="gh-save" class="accent" title="Save the current pattern to your repo (one commit per save)">Save to cloud</button>
+            <button id="gh-logout" title="Forget the token in this browser">Disconnect</button>
+          </div>
+          <ul id="gh-files"></ul>
+        </div>
       </section>
       <section id="help">
         <h3>Quick help</h3>
