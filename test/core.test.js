@@ -208,6 +208,16 @@ t('weldClosedPaths rejects mismatched edge lengths', () => {
   assert(Math.abs(res.dA - 10) < 1e-9 && Math.abs(res.dB - 5) < 1e-9);
 });
 
+t('reflectPoint / reflectNodes mirror across a line', () => {
+  const a = { x: 10, y: 0 }, b = { x: 10, y: 10 }; // vertical x=10
+  const r = Geo.reflectPoint({ x: 3, y: 4 }, a, b);
+  assert(Math.abs(r.x - 17) < 1e-9 && Math.abs(r.y - 4) < 1e-9, JSON.stringify(r));
+  const m = Geo.reflectNodes([N(2, 2, { x: 1, y: 3 }, null)], a, b)[0];
+  assert(Math.abs(m.x - 18) < 1e-9 && Math.abs(m.y - 2) < 1e-9);
+  assert(Math.abs(m.hin.x - -1) < 1e-9 && Math.abs(m.hin.y - 3) < 1e-9, 'handle mirrored: ' + JSON.stringify(m.hin));
+  assert(m.hout === null);
+});
+
 console.log('dxf');
 
 const doc = {
@@ -276,6 +286,53 @@ t('notch slit sits on the cutting line and points inward', () => {
   assert(Math.abs(notch.a.x - 21) < 0.01, 'starts at cut line, x=' + notch.a.x);
   assert(Math.abs(notch.b.x - 20.6) < 0.01, 'ends inward, x=' + notch.b.x);
   assert(Math.abs(notch.a.y - 15) < 0.01 && Math.abs(notch.b.y - 15) < 0.01);
+});
+
+// folded piece: right half of a 20x10 rect, fold on the x=10 edge (seg 1... no,
+// half is 10x10 with fold on its right edge) — unfolds to the full 20x10
+const foldedPiece = () => ({
+  id: 'pf', name: 'Half', visible: true, seamAllowance: 1, notchLength: 0.4,
+  path: { closed: true, nodes: [N(0, 0), N(10, 0), N(10, 10), N(0, 10)] },
+  notches: [{ seg: 0, t: 0.3 }],
+  holes: [{ x: 5, y: 5, r: 0.15 }, { x: 10, y: 8, r: 0.15 }],
+  grain: null, foldSeg: 1,
+});
+
+t('unfoldPiece mirrors the half into the full outline', () => {
+  const u = DXF.unfoldPiece(foldedPiece());
+  assert(u.path.nodes.length === 6, 'nodes=' + u.path.nodes.length);
+  const poly = Geo.pathPolyline(u.path.nodes, true, 0.01);
+  assert(Math.abs(Math.abs(Geo.polyArea(poly)) - 200) < 0.01, 'area=' + Geo.polyArea(poly));
+  assert(Math.abs(Geo.pathLength(u.path.nodes, true) - 60) < 0.01);
+  const bb = Geo.bbox(poly);
+  assert(bb.minX === 0 && Math.abs(bb.maxX - 20) < 1e-9, JSON.stringify(bb));
+});
+
+t('unfoldPiece mirrors notches and holes, keeps axis holes single', () => {
+  const u = DXF.unfoldPiece(foldedPiece());
+  assert(u.notches.length === 2, 'notches=' + u.notches.length);
+  const pts = u.notches.map((nt) =>
+    Geo.segPoint(u.path.nodes[nt.seg], u.path.nodes[(nt.seg + 1) % 6], nt.t));
+  pts.sort((p, q) => p.x - q.x);
+  assert(Geo.dist(pts[0], { x: 3, y: 0 }) < 1e-9, JSON.stringify(pts[0]));
+  assert(Geo.dist(pts[1], { x: 17, y: 0 }) < 1e-9, 'mirrored notch: ' + JSON.stringify(pts[1]));
+  // hole at (5,5) doubles to (15,5); hole on the axis (10,8) stays single
+  assert(u.holes.length === 3, 'holes=' + JSON.stringify(u.holes));
+  assert(u.holes.some((h) => Geo.dist(h, { x: 15, y: 5 }) < 1e-9), 'mirrored hole');
+});
+
+t('folded piece exports at full size with fold on MARK layer', () => {
+  const out = DXF.exportDXF({ pieces: [foldedPiece()] });
+  const lines = out.split('\r\n');
+  const xs = [];
+  for (let i = 0; i < lines.length - 1; i++) {
+    if (lines[i] === '10' && lines[i - 1] !== '$EXTMIN' && lines[i - 1] !== '$EXTMAX') xs.push(parseFloat(lines[i + 1]));
+  }
+  // 20cm piece + 2x1cm allowance = 220mm wide
+  assert(Math.abs(Math.max(...xs) - 220) < 0.5, 'max x ≈ 220mm, got ' + Math.max(...xs));
+  const shapes = DXF.pieceShapes(foldedPiece());
+  const fold = shapes.lines.find((l) => l.layer === 'MARK');
+  assert(fold && Math.abs(fold.a.x - 10) < 1e-9 && Math.abs(fold.b.x - 10) < 1e-9, 'fold marked at x=10');
 });
 
 t('open path exports without allowance', () => {

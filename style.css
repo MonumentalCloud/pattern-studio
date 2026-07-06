@@ -83,7 +83,11 @@ label.chk { display: flex; align-items: center; gap: 4px; color: var(--dim); cur
 /* pieces */
 .piece-fill { fill: #4fa3ff14; stroke: var(--text); stroke-width: 1.4; vector-effect: non-scaling-stroke; }
 .piece-fill.open { fill: none; }
+.piece-fill.nostroke { stroke: none; }
 .piece.selected .piece-fill { stroke: var(--accent); stroke-width: 2; }
+.piece.selected .piece-fill.nostroke { stroke: none; }
+.piece-mirror { fill: none; stroke: var(--dim); stroke-width: 1.2; vector-effect: non-scaling-stroke; opacity: 0.7; }
+.piece-fold { stroke: var(--accent2); stroke-width: 1.4; stroke-dasharray: 8 3 2 3; vector-effect: non-scaling-stroke; }
 .piece-cut {
   fill: none; stroke: var(--cut); stroke-width: 1.2;
   stroke-dasharray: 5 4; vector-effect: non-scaling-stroke; opacity: 0.9;

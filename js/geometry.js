@@ -292,6 +292,30 @@
     };
   }
 
+  // Reflect point p across the line through a and b.
+  function reflectPoint(p, a, b) {
+    const d = norm(sub(b, a));
+    if (!d.x && !d.y) return { x: p.x, y: p.y };
+    const v = sub(p, a);
+    const proj = add(a, scale(d, dot(v, d)));
+    return { x: 2 * proj.x - p.x, y: 2 * proj.y - p.y };
+  }
+
+  // Reflect a node list (positions and handles) across the line through a-b.
+  // Node order is kept, so the winding flips — weldClosedPaths reconciles that.
+  function reflectNodes(nodes, a, b) {
+    const d = norm(sub(b, a));
+    const rv = (v) => {
+      if (!v) return null;
+      const t = dot(v, d);
+      return { x: 2 * t * d.x - v.x, y: 2 * t * d.y - v.y };
+    };
+    return nodes.map((nd) => {
+      const p = reflectPoint(nd, a, b);
+      return { x: p.x, y: p.y, hin: rv(nd.hin), hout: rv(nd.hout) };
+    });
+  }
+
   // Reverse a path's direction: node order flipped, hin/hout swapped.
   function reverseNodes(nodes) {
     return nodes.slice().reverse().map((nd) => ({
@@ -371,6 +395,6 @@
     cubicPoint, cubicTangent, flattenCubic,
     pathPolyline, pathLength, polyArea, bbox, centroid, dedupe,
     outwardSign, offsetClosed, nearestOnPath, pointInPolygon, splitSeg, setSegLength,
-    reverseNodes, weldClosedPaths,
+    reverseNodes, weldClosedPaths, reflectPoint, reflectNodes,
   };
 });

@@ -92,10 +92,54 @@
     w.pair(40, NUM(r));
   }
 
+  // Resolve a fold-line piece into its full (unfolded) outline: the half is
+  // mirrored across the fold edge and welded to itself along it, so the fold
+  // edge disappears inside the outline. Notches and holes are mirrored too
+  // (holes sitting on the axis are not duplicated). Returns a new piece-like
+  // object, or the piece unchanged if it has no valid fold.
+  // mirrorStart: index in the result where the mirrored half's nodes begin.
+  function unfoldPiece(piece) {
+    const nodes = piece.path.nodes;
+    const n = nodes.length;
+    const f = piece.foldSeg;
+    if (f == null || !piece.path.closed || f >= n || n < 3) return piece;
+    const a = nodes[f], b = nodes[(f + 1) % n];
+    const res = Geo.weldClosedPaths(nodes, f, Geo.reflectNodes(nodes, a, b), f, 0.01);
+    if (res.error) return piece;
+    const notches = [];
+    for (const nt of piece.notches || []) {
+      const s1 = res.segMapA[nt.seg];
+      if (s1 != null) notches.push({ seg: s1, t: nt.t });
+      const s2 = res.segMapB[nt.seg];
+      if (s2 != null) notches.push({ seg: s2, t: res.flipT ? 1 - nt.t : nt.t });
+    }
+    const holes = [];
+    for (const h of piece.holes || []) {
+      holes.push({ x: h.x, y: h.y, r: h.r });
+      const m = res.xform(Geo.reflectPoint(h, a, b));
+      if (Geo.dist(h, m) > 0.05) holes.push({ x: m.x, y: m.y, r: h.r });
+    }
+    const out = Object.assign({}, piece, {
+      path: { closed: true, nodes: res.nodes },
+      notches, holes, foldSeg: null, mirrorStart: n - 1,
+    });
+    return out;
+  }
+
   // Collect exportable shapes for one piece, in document coords (cm, y-down).
   // Returns { polylines: [{layer, pts, closed}], lines: [{layer,a,b}], circles: [{layer,c,r}] }
   function pieceShapes(piece) {
+    let foldLine = null;
+    if (piece.foldSeg != null) {
+      const fn = piece.path.nodes, f = piece.foldSeg;
+      const unfolded = unfoldPiece(piece);
+      if (unfolded !== piece) {
+        foldLine = { a: { x: fn[f].x, y: fn[f].y }, b: { x: fn[(f + 1) % fn.length].x, y: fn[(f + 1) % fn.length].y } };
+      }
+      piece = unfolded;
+    }
     const out = { polylines: [], lines: [], circles: [] };
+    if (foldLine) out.lines.push({ layer: 'MARK', a: foldLine.a, b: foldLine.b });
     const nodes = piece.path.nodes;
     const closed = piece.path.closed;
     if (nodes.length < 2) return out;
@@ -192,5 +236,5 @@
     return w.toString();
   }
 
-  return { exportDXF, pieceShapes };
+  return { exportDXF, pieceShapes, unfoldPiece };
 });

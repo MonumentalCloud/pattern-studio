@@ -86,6 +86,7 @@
         <div class="row btns">
           <button id="pp-dup">Duplicate</button>
           <button id="pp-mirror" title="Mirrored copy (for asymmetric pieces / left+right)">Mirror copy</button>
+          <button id="pp-bake" title="Replace the folded half with the full unfolded outline (editable everywhere)" hidden>Unfold now</button>
           <button id="pp-del" class="danger">Delete</button>
         </div>
       </section>
@@ -108,6 +109,9 @@
             <option value="end">End</option>
           </select>
         </div>
+        <div class="row" id="sel-fold-row" hidden>
+          <button id="sp-fold" title="Draft half the piece and mirror it across this edge — the piece unfolds to the full shape on export">Make fold line</button>
+        </div>
         <div class="row hint" id="sel-hint"></div>
       </section>
       <section id="help">
@@ -117,6 +121,7 @@
           <li><b>Select</b>: drag points/handles · double-click point = corner↔smooth · double-click edge = add point</li>
           <li>Click an edge, then type a length in the sidebar to resize it</li>
           <li><b>Weld</b>: click an edge on each of two pieces to fuse them into one (the seam disappears)</li>
+          <li><b>Fold</b>: select a straight edge → "Make fold line" — draft half, the mirror updates live</li>
           <li><b>Del</b> removes point · <b>Space</b>+drag pans · wheel zooms</li>
           <li>Dashed line = cutting line (seam allowance)</li>
         </ul>

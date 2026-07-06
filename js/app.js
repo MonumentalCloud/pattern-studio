@@ -42,9 +42,13 @@
       notches: [],
       holes: [],
       grain: null,
+      foldSeg: null,
     };
   }
   function pieceById(id) { return doc.pieces.find((p) => p.id === id) || null; }
+  // folded pieces store only one half — this resolves the full outline
+  function isFolded(p) { return p.foldSeg != null && p.path.closed && p.foldSeg < p.path.nodes.length; }
+  function effPiece(p) { return isFolded(p) ? DXF.unfoldPiece(p) : p; }
 
   // ---------- undo / redo ----------
   const undoStack = [];
@@ -129,7 +133,8 @@
     const pts = [];
     for (const p of doc.pieces) {
       if (p.visible === false) continue;
-      pts.push(...Geo.pathPolyline(p.path.nodes, p.path.closed, 0.1));
+      const ep = effPiece(p);
+      pts.push(...Geo.pathPolyline(ep.path.nodes, ep.path.closed, 0.1));
     }
     const r = svg.getBoundingClientRect();
     if (!pts.length) { view.x = -5; view.y = -5; view.scale = 12; applyView(); return; }
@@ -201,8 +206,11 @@
     for (const piece of doc.pieces) {
       if (piece.visible === false) continue;
       const g = el('g', { class: 'piece' + (piece.id === sel.pieceId ? ' selected' : ''), 'data-id': piece.id }, gPieces);
-      const nodes = piece.path.nodes;
-      const closed = piece.path.closed;
+      // rp = full geometry (folded pieces resolve to their unfolded outline)
+      const rp = effPiece(piece);
+      const folded = rp !== piece;
+      const nodes = rp.path.nodes;
+      const closed = rp.path.closed;
       if (nodes.length < 2) continue;
 
       // cutting line (seam allowance)
@@ -214,13 +222,29 @@
       }
 
       // main outline
-      el('path', { class: 'piece-fill' + (closed ? '' : ' open'), d: pathD(nodes, closed) }, g);
+      if (folded) {
+        // fill the whole unfolded shape; solid stroke on the drafted half,
+        // dimmed stroke on the mirrored half, dash-dot on the fold itself
+        el('path', { class: 'piece-fill nostroke', d: pathD(nodes, true) }, g);
+        const rn = piece.path.nodes, n0 = rn.length, f = piece.foldSeg;
+        const half = [];
+        for (let k = 0; k < n0; k++) half.push(rn[(f + 1 + k) % n0]);
+        el('path', { class: 'piece-fill open', d: pathD(half, false) }, g);
+        const msub = nodes.slice(n0 - 1).concat([nodes[0]]);
+        el('path', { class: 'piece-mirror', d: pathD(msub, false) }, g);
+        el('line', {
+          class: 'piece-fold',
+          x1: rn[f].x, y1: rn[f].y, x2: rn[(f + 1) % n0].x, y2: rn[(f + 1) % n0].y,
+        }, g);
+      } else {
+        el('path', { class: 'piece-fill' + (closed ? '' : ' open'), d: pathD(nodes, closed) }, g);
+      }
 
       // notches
-      if (closed && seamPts && (piece.notches || []).length) {
+      if (closed && seamPts && (rp.notches || []).length) {
         const s = Geo.outwardSign(seamPts);
         const nl = piece.notchLength || 0.4;
-        for (const nt of piece.notches) {
+        for (const nt of rp.notches) {
           if (nt.seg >= nodes.length) continue;
           const a = nodes[nt.seg], b = nodes[(nt.seg + 1) % nodes.length];
           const p = Geo.segPoint(a, b, nt.t);
@@ -233,7 +257,7 @@
       }
 
       // holes
-      for (const h of piece.holes || []) {
+      for (const h of rp.holes || []) {
         el('circle', { class: 'piece-hole', cx: h.x, cy: h.y, r: h.r || 0.15 }, g);
         el('line', { class: 'piece-hole', x1: h.x - 0.25, y1: h.y, x2: h.x + 0.25, y2: h.y }, g);
         el('line', { class: 'piece-hole', x1: h.x, y1: h.y - 0.25, x2: h.x, y2: h.y + 0.25 }, g);
@@ -361,7 +385,8 @@
       nm.textContent = piece.name;
       const ln = document.createElement('span');
       ln.className = 'len';
-      ln.textContent = fmt(Geo.pathLength(piece.path.nodes, piece.path.closed)) + ' cm';
+      const ep = effPiece(piece);
+      ln.textContent = fmt(Geo.pathLength(ep.path.nodes, ep.path.closed)) + ' cm';
       li.append(eye, nm, ln);
       li.addEventListener('click', () => { selectPiece(piece.id); renderAll(); });
       list.appendChild(li);
@@ -374,7 +399,10 @@
       $('pp-name').value = piece.name;
       $('pp-sa').value = piece.seamAllowance;
       $('pp-notch').value = piece.notchLength || 0.4;
-      $('pp-perim').textContent = fmt(Geo.pathLength(piece.path.nodes, piece.path.closed)) + ' cm';
+      const ep = effPiece(piece);
+      $('pp-perim').textContent = fmt(Geo.pathLength(ep.path.nodes, ep.path.closed)) + ' cm' +
+        (isFolded(piece) ? ' (unfolded)' : '');
+      $('pp-bake').hidden = !isFolded(piece);
     }
 
     // selection props
@@ -384,6 +412,7 @@
     $('sel-node-row').hidden = !showNode;
     $('sel-seg-row').hidden = !showSeg;
     $('sel-seg-anchor-row').hidden = !showSeg;
+    $('sel-fold-row').hidden = !showSeg;
     if (showNode) {
       const nd = piece.path.nodes[sel.idx];
       $('sp-x').value = fmt(nd.x);
@@ -395,7 +424,11 @@
       if (document.activeElement !== $('sp-seglen')) {
         $('sp-seglen').value = fmt(Geo.segLength(a, b));
       }
-      $('sel-hint').textContent = 'Type a length to resize the edge — ● marks its start. Double-click the edge to insert a point.';
+      $('sel-fold-row').hidden = !piece.path.closed;
+      $('sp-fold').textContent = piece.foldSeg === sel.idx ? 'Remove fold line' : 'Make fold line';
+      $('sel-hint').textContent = piece.foldSeg === sel.idx
+        ? 'This edge is the fold — the piece unfolds across it on export.'
+        : 'Type a length to resize the edge — ● marks its start. Double-click the edge to insert a point.';
     }
   }
 
@@ -464,6 +497,10 @@
   // ---------- pointer interaction ----------
   let drag = null; // active drag descriptor
   let spaceDown = false;
+  // Double-clicks are detected manually from pointerdown timing: the native
+  // dblclick event is unreliable once setPointerCapture is involved, and
+  // doesn't exist at all for some touch/pen input.
+  let lastDown = { t: -1e9, x: 0, y: 0 };
 
   svg.addEventListener('pointerdown', (ev) => {
     if (ev.button === 1 || spaceDown) { // pan
@@ -476,6 +513,14 @@
     if (ev.button !== 0) return;
     svg.focus();
     const w = screenToWorld(ev);
+    const isDbl = ev.timeStamp - lastDown.t < 400 &&
+      Math.hypot(ev.clientX - lastDown.x, ev.clientY - lastDown.y) < 6;
+    lastDown = { t: ev.timeStamp, x: ev.clientX, y: ev.clientY };
+    if (isDbl) {
+      lastDown.t = -1e9; // a triple-click shouldn't count as two doubles
+      drag = null;
+      return handleDoubleClick(w);
+    }
     svg.setPointerCapture(ev.pointerId);
 
     if (tool === 'pen') return penDown(w);
@@ -578,8 +623,7 @@
     }
   });
 
-  svg.addEventListener('dblclick', (ev) => {
-    const w = screenToWorld(ev);
+  function handleDoubleClick(w) {
     if (tool === 'pen') { finishDraft(false); return; }
     if (tool !== 'select') return;
     const piece = selPiece();
@@ -607,6 +651,10 @@
     // double-click edge: insert node
     const hit = Geo.nearestOnPath(nodes, piece.path.closed, w);
     if (hit && hit.dist < px(8)) {
+      if (piece.foldSeg === hit.seg) {
+        $('status-hint').textContent = 'The fold line must stay a single straight edge — remove the fold first.';
+        return;
+      }
       beginChange();
       const n = nodes.length;
       const a = nodes[hit.seg], b = nodes[(hit.seg + 1) % n];
@@ -615,11 +663,12 @@
       nodes[(hit.seg + 1) % n] = b2;
       nodes.splice(hit.seg + 1, 0, mid);
       remapAfterInsert(piece, hit.seg, hit.t);
+      if (piece.foldSeg != null && piece.foldSeg > hit.seg) piece.foldSeg += 1;
       endChange();
       sel.kind = 'node'; sel.idx = hit.seg + 1;
       renderAll();
     }
-  });
+  }
 
   svg.addEventListener('wheel', (ev) => {
     ev.preventDefault();
@@ -702,9 +751,10 @@
     for (let i = doc.pieces.length - 1; i >= 0; i--) {
       const p = doc.pieces[i];
       if (p.visible === false || p.path.nodes.length < 2) continue;
-      const poly = Geo.pathPolyline(p.path.nodes, p.path.closed, 0.1);
-      const onEdge = Geo.nearestOnPath(p.path.nodes, p.path.closed, w);
-      const inside = p.path.closed && Geo.pointInPolygon(poly, w);
+      const ep = effPiece(p); // clicking the mirrored half of a folded piece counts too
+      const poly = Geo.pathPolyline(ep.path.nodes, ep.path.closed, 0.1);
+      const onEdge = Geo.nearestOnPath(ep.path.nodes, ep.path.closed, w);
+      const inside = ep.path.closed && Geo.pointInPolygon(poly, w);
       if (inside || (onEdge && onEdge.dist < px(6))) {
         selectPiece(p.id);
         beginChange();
@@ -809,6 +859,10 @@
   }
 
   function weldPieces(pA, segA, pB, segB) {
+    if (isFolded(pA) || isFolded(pB)) {
+      alert('One of these pieces has a fold line. Unfold it first (select the piece and press "Unfold now"), then weld.');
+      return;
+    }
     const res = Geo.weldClosedPaths(pA.path.nodes, segA, pB.path.nodes, segB, 0.3);
     if (res.error) {
       if (res.error === 'length-mismatch') {
@@ -907,6 +961,11 @@
         const segA = (sel.idx - 1 + n) % n, segB = sel.idx;
         piece.notches = (piece.notches || []).filter((nt) => nt.seg !== segA && nt.seg !== segB);
         for (const nt of piece.notches) if (nt.seg > sel.idx) nt.seg -= 1;
+        if (piece.foldSeg != null) {
+          // deleting a fold-edge endpoint destroys the fold
+          if (sel.idx === piece.foldSeg || sel.idx === (piece.foldSeg + 1) % n) piece.foldSeg = null;
+          else if (piece.foldSeg > sel.idx) piece.foldSeg -= 1;
+        }
         piece.path.nodes.splice(sel.idx, 1);
         sel.kind = null;
       }
@@ -943,6 +1002,7 @@
         nt.seg = copy.path.closed ? (2 * n - 2 - nt.seg) % n : (n - 2 - nt.seg);
         nt.t = 1 - nt.t;
       }
+      if (copy.foldSeg != null && copy.path.closed) copy.foldSeg = (2 * n - 2 - copy.foldSeg) % n;
       for (const h of copy.holes || []) h.x = 2 * cx - h.x;
       if (copy.grain) {
         copy.grain.x1 = 2 * cx - copy.grain.x1;
@@ -1113,6 +1173,34 @@
     nodes[ai] = res.a;
     nodes[bi] = res.b;
     endChange();
+    renderAll();
+  });
+  $('sp-fold').addEventListener('click', () => {
+    const p = selPiece();
+    if (!p || sel.kind !== 'seg' || !p.path.closed) return;
+    if (p.foldSeg === sel.idx) {
+      beginChange(); p.foldSeg = null; endChange(); renderAll();
+      return;
+    }
+    const n = p.path.nodes.length;
+    if (!Geo.segIsLine(p.path.nodes[sel.idx], p.path.nodes[(sel.idx + 1) % n])) {
+      alert('A fold line must be a straight edge (no curve handles).');
+      return;
+    }
+    beginChange(); p.foldSeg = sel.idx; endChange(); renderAll();
+  });
+  $('pp-bake').addEventListener('click', () => {
+    const p = selPiece();
+    if (!p || !isFolded(p)) return;
+    const u = DXF.unfoldPiece(p);
+    if (u === p) return;
+    beginChange();
+    p.path.nodes = u.path.nodes;
+    p.notches = u.notches;
+    p.holes = u.holes;
+    p.foldSeg = null;
+    endChange();
+    selectPiece(p.id);
     renderAll();
   });
   $('chk-snap').addEventListener('change', () => {});

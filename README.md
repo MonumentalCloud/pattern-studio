@@ -28,6 +28,7 @@ can be saved/opened as `.pattern.json` files.
 | **Grainline** | drag inside a piece; double-ended arrow |
 | **Edge length** | select an edge and type a target length (cm); the edge rescales about a chosen anchor (both ends / start / end) and curves keep their shape — for walking seams |
 | **Weld** | fuse two pieces into one along matching edges — the second piece is rigidly moved into place, both seam edges disappear, notches/holes/grainline carried over |
+| **Fold-line pieces** | draft half a symmetric piece, mark a straight edge as the fold — the mirrored half renders live and every edit updates it; exports unfold to the full cutting outline with the fold on the `MARK` layer |
 | **Mirror copy** | mirrored duplicate for left/right pieces — handles, notches and holes are remapped correctly |
 | **Measure** | drag to measure any distance; edge lengths and piece perimeters shown live (for walking seams) |
 | **Snap** | to grid (0.1–1 cm) and to existing points |
@@ -70,4 +71,4 @@ outward-normal orientation, curve splitting, and DXF structure/scale/notch geome
 - [ ] Basic block generators from body measurements (bodice / sleeve / skirt)
 - [ ] Tiled A4/Letter PDF export for home printers
 - [ ] Internal style lines / darts as first-class objects
-- [ ] Fold-line pieces (half-drafted, auto-mirrored on export)
+- [x] Fold-line pieces (half-drafted, auto-mirrored on export)
