@@ -281,6 +281,7 @@
         d = `M ${a.x} ${a.y} C ${c.c1.x} ${c.c1.y} ${c.c2.x} ${c.c2.y} ${b.x} ${b.y}`;
       }
       el('path', { class: 'seg-highlight', d }, gOverlay);
+      el('circle', { class: 'seg-start-dot', cx: a.x, cy: a.y, r: px(3) }, gOverlay);
       const mid = Geo.segPoint(a, b, 0.5);
       el('text', {
         class: 'seg-len-text', x: mid.x, y: mid.y - px(8),
@@ -372,6 +373,7 @@
     $('sel-props').hidden = !(showNode || showSeg);
     $('sel-node-row').hidden = !showNode;
     $('sel-seg-row').hidden = !showSeg;
+    $('sel-seg-anchor-row').hidden = !showSeg;
     if (showNode) {
       const nd = piece.path.nodes[sel.idx];
       $('sp-x').value = fmt(nd.x);
@@ -380,8 +382,10 @@
     } else if (showSeg) {
       const n = piece.path.nodes.length;
       const a = piece.path.nodes[sel.idx], b = piece.path.nodes[(sel.idx + 1) % n];
-      $('sp-seglen').textContent = fmt(Geo.segLength(a, b)) + ' cm';
-      $('sel-hint').textContent = 'Double-click the edge to insert a point.';
+      if (document.activeElement !== $('sp-seglen')) {
+        $('sp-seglen').value = fmt(Geo.segLength(a, b));
+      }
+      $('sel-hint').textContent = 'Type a length to resize the edge — ● marks its start. Double-click the edge to insert a point.';
     }
   }
 
@@ -1010,6 +1014,22 @@
       renderAll();
     });
   }
+  $('sp-seglen').addEventListener('change', (e) => {
+    const p = selPiece();
+    if (!p || sel.kind !== 'seg') return;
+    const nodes = p.path.nodes;
+    const n = nodes.length;
+    if (sel.idx >= (p.path.closed ? n : n - 1)) return;
+    const ai = sel.idx, bi = (sel.idx + 1) % n;
+    const target = parseFloat(e.target.value);
+    const res = Geo.setSegLength(nodes[ai], nodes[bi], target, $('sp-seg-anchor').value);
+    if (!res) { renderSidebar(); return; }
+    beginChange();
+    nodes[ai] = res.a;
+    nodes[bi] = res.b;
+    endChange();
+    renderAll();
+  });
   $('chk-snap').addEventListener('change', () => {});
   window.addEventListener('resize', applyView);
 

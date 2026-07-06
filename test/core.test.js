@@ -90,6 +90,49 @@ t('nearestOnPath finds the closest edge', () => {
   assert(Math.abs(hit.dist - 1) < 0.01);
 });
 
+t('setSegLength straight edge, move end', () => {
+  const res = Geo.setSegLength(N(0, 0), N(3, 4), 10, 'end');
+  assert(res.a.x === 0 && res.a.y === 0, 'start stays anchored');
+  assert(Math.abs(res.b.x - 6) < 1e-9 && Math.abs(res.b.y - 8) < 1e-9, `b=${JSON.stringify(res.b)}`);
+  assert(Math.abs(Geo.segLength(res.a, res.b) - 10) < 1e-6);
+});
+
+t('setSegLength move start keeps end fixed', () => {
+  const res = Geo.setSegLength(N(0, 0), N(3, 4), 10, 'start');
+  assert(res.b.x === 3 && res.b.y === 4, 'end stays anchored');
+  assert(Math.abs(Geo.segLength(res.a, res.b) - 10) < 1e-6);
+});
+
+t('setSegLength both splits the change evenly', () => {
+  const res = Geo.setSegLength(N(0, 0), N(10, 0), 20, 'both');
+  assert(Math.abs(res.a.x - -5) < 1e-9 && Math.abs(res.b.x - 15) < 1e-9,
+    `a=${res.a.x} b=${res.b.x}`);
+  assert(Math.abs(Geo.segLength(res.a, res.b) - 20) < 1e-6);
+});
+
+t('setSegLength curve hits target and keeps shape', () => {
+  // quarter circle radius 10 (arc ≈ 15.708)
+  const k = 5.523;
+  const a = N(10, 0, { x: -2, y: -1 }, { x: 0, y: k });
+  const b = N(0, 10, { x: k, y: 0 }, { x: 1, y: 2 });
+  const res = Geo.setSegLength(a, b, 20, 'both');
+  assert(Math.abs(Geo.segLength(res.a, res.b, 0.002) - 20) < 0.02,
+    'len=' + Geo.segLength(res.a, res.b, 0.002));
+  // shape preserved: tangent direction at both ends unchanged
+  const t0 = Geo.segTangent(a, b, 0), t0b = Geo.segTangent(res.a, res.b, 0);
+  const t1 = Geo.segTangent(a, b, 1), t1b = Geo.segTangent(res.a, res.b, 1);
+  assert(Geo.dist(t0, t0b) < 1e-9 && Geo.dist(t1, t1b) < 1e-9, 'tangents preserved');
+  // adjacent segments' handles are untouched
+  assert(res.a.hin.x === -2 && res.a.hin.y === -1, 'a.hin untouched');
+  assert(res.b.hout.x === 1 && res.b.hout.y === 2, 'b.hout untouched');
+});
+
+t('setSegLength rejects degenerate input', () => {
+  assert(Geo.setSegLength(N(0, 0), N(0, 0), 10, 'both') === null, 'zero-length segment');
+  assert(Geo.setSegLength(N(0, 0), N(3, 4), 0, 'both') === null, 'zero target');
+  assert(Geo.setSegLength(N(0, 0), N(3, 4), NaN, 'both') === null, 'NaN target');
+});
+
 console.log('dxf');
 
 const doc = {

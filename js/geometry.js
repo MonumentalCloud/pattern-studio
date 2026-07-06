@@ -270,11 +270,33 @@
     return { a2, mid, b2 };
   }
 
+  // Rescale segment (a -> b) so its arc length becomes `target` (cm).
+  // mode: which endpoint moves — 'start', 'end', or 'both' (split evenly).
+  // Uniform scaling about the fixed point, so the curve keeps its shape and
+  // arc length scales exactly linearly. Only the segment's own handles
+  // (a.hout, b.hin) are touched; a.hin / b.hout belong to adjacent segments.
+  // Returns { a, b } as new node objects, or null if the segment is degenerate.
+  function setSegLength(a, b, target, mode) {
+    const current = segLength(a, b, 0.002);
+    if (!(target > 0) || current < 1e-6) return null;
+    const k = target / current;
+    const F = mode === 'start' ? { x: b.x, y: b.y }
+      : mode === 'end' ? { x: a.x, y: a.y }
+      : lerp(a, b, 0.5);
+    const mv = (p) => ({ x: F.x + k * (p.x - F.x), y: F.y + k * (p.y - F.y) });
+    const pa = mode === 'end' ? { x: a.x, y: a.y } : mv(a);
+    const pb = mode === 'start' ? { x: b.x, y: b.y } : mv(b);
+    return {
+      a: { x: pa.x, y: pa.y, hin: a.hin ? { ...a.hin } : null, hout: a.hout ? scale(a.hout, k) : null },
+      b: { x: pb.x, y: pb.y, hin: b.hin ? scale(b.hin, k) : null, hout: b.hout ? { ...b.hout } : null },
+    };
+  }
+
   return {
     sub, add, scale, dot, len, dist, norm, lerp,
     segCtrl, segIsLine, segPoint, segTangent, segFlatten, segLength,
     cubicPoint, cubicTangent, flattenCubic,
     pathPolyline, pathLength, polyArea, bbox, centroid, dedupe,
-    outwardSign, offsetClosed, nearestOnPath, pointInPolygon, splitSeg,
+    outwardSign, offsetClosed, nearestOnPath, pointInPolygon, splitSeg, setSegLength,
   };
 });

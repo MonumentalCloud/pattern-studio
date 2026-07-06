@@ -100,6 +100,7 @@ label.chk { display: flex; align-items: center; gap: 4px; color: var(--dim); cur
 .handle-line { stroke: var(--dim); stroke-width: 1; vector-effect: non-scaling-stroke; }
 .handle-dot { fill: var(--accent2); stroke: none; cursor: move; }
 .seg-highlight { fill: none; stroke: var(--accent); stroke-width: 3; vector-effect: non-scaling-stroke; opacity: 0.85; }
+.seg-start-dot { fill: var(--accent2); stroke: var(--bg); stroke-width: 1; vector-effect: non-scaling-stroke; pointer-events: none; }
 .preview-path { fill: none; stroke: var(--accent); stroke-width: 1.4; vector-effect: non-scaling-stroke; }
 .preview-rubber { fill: none; stroke: var(--dim); stroke-width: 1; stroke-dasharray: 4 3; vector-effect: non-scaling-stroke; }
 .measure-line { stroke: var(--accent2); stroke-width: 1.4; vector-effect: non-scaling-stroke; }
