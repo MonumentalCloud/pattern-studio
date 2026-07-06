@@ -292,11 +292,85 @@
     };
   }
 
+  // Reverse a path's direction: node order flipped, hin/hout swapped.
+  function reverseNodes(nodes) {
+    return nodes.slice().reverse().map((nd) => ({
+      x: nd.x, y: nd.y,
+      hin: nd.hout ? { ...nd.hout } : null,
+      hout: nd.hin ? { ...nd.hin } : null,
+    }));
+  }
+
+  // Weld two closed paths into one along an edge of each. Both seam edges are
+  // removed and B is rigidly moved (rotate + translate, never scaled) so the
+  // edge endpoints mate; A stays put. Windings are reconciled automatically.
+  // tol: max allowed difference between the two edges' endpoint spans (cm) —
+  // beyond that the outline can't close cleanly.
+  // Returns { nodes, segMapA, segMapB, flipT, xform } or { error, dA, dB }.
+  //   segMapX[oldSeg] -> new seg index (null for the removed seam edge)
+  //   flipT           -> B notch t values must become 1 - t
+  //   xform(p)        -> maps original-B coordinates into the merged piece
+  function weldClosedPaths(nodesA, segA, nodesB, segB, tol) {
+    tol = tol == null ? 0.3 : tol;
+    const nA = nodesA.length, nB = nodesB.length;
+    if (nA < 3 || nB < 3 || segA >= nA || segB >= nB) return { error: 'degenerate' };
+    // same winding => after mating the reversed edge, B's interior lands on
+    // the opposite side of the seam from A's
+    const areaA = polyArea(pathPolyline(nodesA, true, 0.05));
+    const areaB = polyArea(pathPolyline(nodesB, true, 0.05));
+    let B = nodesB, j = segB;
+    const flipT = (areaA > 0) !== (areaB > 0);
+    if (flipT) {
+      B = reverseNodes(nodesB);
+      j = ((nB - 2 - segB) % nB + nB) % nB;
+    }
+    const i = segA;
+    const q0 = nodesA[(i + 1) % nA], q1 = nodesA[i]; // B[j] -> q0, B[j+1] -> q1
+    const p0 = B[j], p1 = B[(j + 1) % nB];
+    const dA = dist(q0, q1), dB = dist(p0, p1);
+    if (dA < EPS || dB < EPS) return { error: 'degenerate' };
+    if (Math.abs(dA - dB) > tol) return { error: 'length-mismatch', dA, dB };
+    const va = sub(q1, q0), vb = sub(p1, p0);
+    const ang = Math.atan2(va.y, va.x) - Math.atan2(vb.y, vb.x);
+    const c = Math.cos(ang), s = Math.sin(ang);
+    const rot = (v) => ({ x: c * v.x - s * v.y, y: s * v.x + c * v.y });
+    const xform = (p) => add(q0, rot(sub(p, p0)));
+    const th = (h) => (h ? rot(h) : null);
+
+    // A's chain A[i+1] .. A[i] keeps its geometry; junction nodes then adopt
+    // B's seam-side handles so B's first/last surviving edges connect
+    const nodes = [];
+    for (let k = 0; k < nA; k++) {
+      const nd = nodesA[(i + 1 + k) % nA];
+      nodes.push({ x: nd.x, y: nd.y, hin: nd.hin ? { ...nd.hin } : null, hout: nd.hout ? { ...nd.hout } : null });
+    }
+    nodes[0].hin = th(B[j].hin);                    // A[i+1] <- edge from B[j-1]
+    nodes[nA - 1].hout = th(B[(j + 1) % nB].hout);  // A[i]   -> edge to B[j+2]
+    // B's chain interior B[j+2] .. B[j-1], rigidly transformed
+    for (let k = 0; k < nB - 2; k++) {
+      const nd = B[(j + 2 + k) % nB];
+      const p = xform(nd);
+      nodes.push({ x: p.x, y: p.y, hin: th(nd.hin), hout: th(nd.hout) });
+    }
+
+    const segMapA = new Array(nA).fill(null);
+    for (let s2 = 0; s2 < nA; s2++) {
+      if (s2 !== i) segMapA[s2] = ((s2 - (i + 1)) % nA + nA) % nA;
+    }
+    const segMapB = new Array(nB).fill(null);
+    for (let s2 = 0; s2 < nB; s2++) {
+      const rec = flipT ? ((nB - 2 - s2) % nB + nB) % nB : s2; // index in reconciled B
+      if (rec !== j) segMapB[s2] = nA - 1 + (((rec - (j + 1)) % nB + nB) % nB);
+    }
+    return { nodes, segMapA, segMapB, flipT, xform };
+  }
+
   return {
     sub, add, scale, dot, len, dist, norm, lerp,
     segCtrl, segIsLine, segPoint, segTangent, segFlatten, segLength,
     cubicPoint, cubicTangent, flattenCubic,
     pathPolyline, pathLength, polyArea, bbox, centroid, dedupe,
     outwardSign, offsetClosed, nearestOnPath, pointInPolygon, splitSeg, setSegLength,
+    reverseNodes, weldClosedPaths,
   };
 });

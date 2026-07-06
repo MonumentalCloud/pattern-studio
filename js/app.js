@@ -190,6 +190,11 @@
     if (!pts.length) return '';
     return 'M ' + pts.map((p) => `${p.x} ${p.y}`).join(' L ') + (closed ? ' Z' : '');
   }
+  function segD(a, b) {
+    if (Geo.segIsLine(a, b)) return `M ${a.x} ${a.y} L ${b.x} ${b.y}`;
+    const { c1, c2 } = Geo.segCtrl(a, b);
+    return `M ${a.x} ${a.y} C ${c1.x} ${c1.y} ${c2.x} ${c2.y} ${b.x} ${b.y}`;
+  }
 
   function renderPieces() {
     clear(gPieces);
@@ -265,6 +270,17 @@
 
   function renderOverlay() {
     clear(gOverlay);
+    // first edge picked with the weld tool
+    if (tool === 'weld' && weldFirst) {
+      const wp = pieceById(weldFirst.pieceId);
+      if (wp && weldFirst.seg < wp.path.nodes.length) {
+        const wn = wp.path.nodes;
+        el('path', {
+          class: 'seg-highlight weld',
+          d: segD(wn[weldFirst.seg], wn[(weldFirst.seg + 1) % wn.length]),
+        }, gOverlay);
+      }
+    }
     const piece = selPiece();
     if (!piece || tool === 'pen') return;
     const nodes = piece.path.nodes;
@@ -274,13 +290,7 @@
     // selected segment highlight + length
     if (sel.kind === 'seg' && sel.idx < (piece.path.closed ? n : n - 1)) {
       const a = nodes[sel.idx], b = nodes[(sel.idx + 1) % n];
-      let d;
-      if (Geo.segIsLine(a, b)) d = `M ${a.x} ${a.y} L ${b.x} ${b.y}`;
-      else {
-        const c = Geo.segCtrl(a, b);
-        d = `M ${a.x} ${a.y} C ${c.c1.x} ${c.c1.y} ${c.c2.x} ${c.c2.y} ${b.x} ${b.y}`;
-      }
-      el('path', { class: 'seg-highlight', d }, gOverlay);
+      el('path', { class: 'seg-highlight', d: segD(a, b) }, gOverlay);
       el('circle', { class: 'seg-start-dot', cx: a.x, cy: a.y, r: px(3) }, gOverlay);
       const mid = Geo.segPoint(a, b, 0.5);
       el('text', {
@@ -391,17 +401,20 @@
 
   // ---------- tools ----------
   let tool = 'select';
+  let weldFirst = null; // weld tool: { pieceId, seg } of the first picked edge
   const HINTS = {
     select: 'Click a piece or point to select · drag to move · Del deletes',
     pen: 'Click = corner, drag = curve · click the first point to close · Esc finishes open',
     notch: 'Click near an edge to add a notch',
     hole: 'Click inside a piece to add a drill hole',
     grain: 'Drag inside a piece to set the grainline · click (no drag) removes it',
+    weld: 'Click an edge, then the matching edge on another piece — the second piece moves; both seam edges disappear',
     measure: 'Drag to measure a distance',
   };
   function setTool(t) {
     tool = t;
     if (t !== 'pen') finishDraft(false);
+    if (t !== 'weld') weldFirst = null;
     document.querySelectorAll('#toolbar .tool').forEach((b) =>
       b.classList.toggle('active', b.dataset.tool === t));
     svg.setAttribute('class', 'tool-' + t);
@@ -470,6 +483,7 @@
     if (tool === 'notch') return notchDown(w);
     if (tool === 'hole') return holeDown(w);
     if (tool === 'grain') return grainDown(w);
+    if (tool === 'weld') return weldDown(w);
     if (tool === 'measure') { drag = { type: 'measure', a: w, b: w }; return; }
   });
 
@@ -770,6 +784,72 @@
     renderAll();
   }
 
+  // ---- weld tool ----
+  function nearestEdgeAt(w) {
+    let best = null;
+    for (const p of doc.pieces) {
+      if (p.visible === false || !p.path.closed || p.path.nodes.length < 3) continue;
+      const hit = Geo.nearestOnPath(p.path.nodes, p.path.closed, w);
+      if (hit && hit.dist < px(10) && (!best || hit.dist < best.hit.dist)) best = { piece: p, hit };
+    }
+    return best;
+  }
+
+  function weldDown(w) {
+    const res = nearestEdgeAt(w);
+    if (!res) return;
+    if (!weldFirst || weldFirst.pieceId === res.piece.id || !pieceById(weldFirst.pieceId)) {
+      weldFirst = { pieceId: res.piece.id, seg: res.hit.seg };
+      selectPiece(res.piece.id);
+      $('status-hint').textContent = 'Now click the matching edge on the other piece · Esc cancels';
+      renderAll(true); renderSidebar();
+      return;
+    }
+    weldPieces(pieceById(weldFirst.pieceId), weldFirst.seg, res.piece, res.hit.seg);
+  }
+
+  function weldPieces(pA, segA, pB, segB) {
+    const res = Geo.weldClosedPaths(pA.path.nodes, segA, pB.path.nodes, segB, 0.3);
+    if (res.error) {
+      if (res.error === 'length-mismatch') {
+        alert(`These edges don't match: ${fmt(res.dA)} cm vs ${fmt(res.dB)} cm between their end points.\n` +
+          'Make them equal first (select an edge and type into the Length field), then weld again.');
+      }
+      return;
+    }
+    beginChange();
+    const notches = [];
+    for (const nt of pA.notches || []) {
+      const s = res.segMapA[nt.seg];
+      if (s != null) notches.push({ seg: s, t: nt.t });
+    }
+    for (const nt of pB.notches || []) {
+      const s = res.segMapB[nt.seg];
+      if (s != null) notches.push({ seg: s, t: res.flipT ? 1 - nt.t : nt.t });
+    }
+    const holes = (pA.holes || []).concat((pB.holes || []).map((h) => {
+      const p = res.xform(h);
+      return { x: p.x, y: p.y, r: h.r };
+    }));
+    let grain = pA.grain;
+    if (!grain && pB.grain) {
+      const a = res.xform({ x: pB.grain.x1, y: pB.grain.y1 });
+      const b = res.xform({ x: pB.grain.x2, y: pB.grain.y2 });
+      grain = { x1: a.x, y1: a.y, x2: b.x, y2: b.y };
+    }
+    pA.path.nodes = res.nodes;
+    pA.notches = notches;
+    pA.holes = holes;
+    pA.grain = grain;
+    pA.name = pA.name + '+' + pB.name;
+    doc.pieces = doc.pieces.filter((p) => p.id !== pB.id);
+    endChange();
+    weldFirst = null;
+    selectPiece(pA.id);
+    setTool('select');
+    renderAll();
+  }
+
   function grainDown(w) {
     const res = pickPieceAt(w, true);
     if (!res) return;
@@ -791,7 +871,11 @@
     if ((ev.ctrlKey || ev.metaKey) && k === 's') { saveJSON(); ev.preventDefault(); return; }
     if (k === 'escape') {
       if (tool === 'pen' && draft) finishDraft(false);
-      else { clearSel(); renderAll(); }
+      else if (tool === 'weld' && weldFirst) {
+        weldFirst = null;
+        $('status-hint').textContent = HINTS.weld;
+        renderAll(true);
+      } else { clearSel(); renderAll(); }
       return;
     }
     if (k === 'enter' && tool === 'pen' && draft) { finishDraft(false); return; }
@@ -801,6 +885,7 @@
     else if (k === 'n') setTool('notch');
     else if (k === 'h') setTool('hole');
     else if (k === 'g') setTool('grain');
+    else if (k === 'w') setTool('weld');
     else if (k === 'm') setTool('measure');
     else if (k === '0') zoomFit();
   });

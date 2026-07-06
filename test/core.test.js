@@ -133,6 +133,81 @@ t('setSegLength rejects degenerate input', () => {
   assert(Geo.setSegLength(N(0, 0), N(3, 4), NaN, 'both') === null, 'NaN target');
 });
 
+// weld fixtures: A = 10x10 square at origin (CW in y-down), B = 10x10 square
+// far away; welding A's right edge (seg 1) to B's left edge (seg 3) should
+// produce a 20x10 rectangle with B moved next to A.
+const weldA = () => [N(0, 0), N(10, 0), N(10, 10), N(0, 10)];
+const weldB = () => [N(30, 40), N(40, 40), N(40, 50), N(30, 50)];
+
+t('weldClosedPaths joins two squares into a rectangle', () => {
+  const res = Geo.weldClosedPaths(weldA(), 1, weldB(), 3, 0.3);
+  assert(!res.error, res.error);
+  assert(res.nodes.length === 6, 'nodes=' + res.nodes.length);
+  const poly = Geo.pathPolyline(res.nodes, true, 0.01);
+  assert(Math.abs(Math.abs(Geo.polyArea(poly)) - 200) < 0.01, 'area=' + Geo.polyArea(poly));
+  assert(Math.abs(Geo.pathLength(res.nodes, true) - 60) < 0.01, 'perim=' + Geo.pathLength(res.nodes, true));
+  const bb = Geo.bbox(poly);
+  assert(bb.minX === 0 && Math.abs(bb.maxX - 20) < 1e-9 && bb.minY === 0 && Math.abs(bb.maxY - 10) < 1e-9,
+    'A stayed put, B moved beside it: ' + JSON.stringify(bb));
+  assert(!res.flipT);
+});
+
+t('weldClosedPaths reconciles opposite windings', () => {
+  const res = Geo.weldClosedPaths(weldA(), 1, Geo.reverseNodes(weldB()), 3, 0.3);
+  assert(!res.error, res.error);
+  assert(res.flipT, 'flipT set');
+  const poly = Geo.pathPolyline(res.nodes, true, 0.01);
+  assert(Math.abs(Math.abs(Geo.polyArea(poly)) - 200) < 0.01, 'area=' + Geo.polyArea(poly));
+});
+
+t('weldClosedPaths handles a rotated B', () => {
+  const ang = 0.6, c = { x: 35, y: 45 };
+  const rot = (p) => ({
+    x: c.x + Math.cos(ang) * (p.x - c.x) - Math.sin(ang) * (p.y - c.y),
+    y: c.y + Math.sin(ang) * (p.x - c.x) + Math.cos(ang) * (p.y - c.y),
+    hin: null, hout: null,
+  });
+  const res = Geo.weldClosedPaths(weldA(), 1, weldB().map(rot), 3, 0.3);
+  assert(!res.error, res.error);
+  const poly = Geo.pathPolyline(res.nodes, true, 0.01);
+  assert(Math.abs(Math.abs(Geo.polyArea(poly)) - 200) < 0.01, 'area=' + Geo.polyArea(poly));
+  assert(Math.abs(Geo.pathLength(res.nodes, true) - 60) < 0.01);
+});
+
+t('weldClosedPaths seg maps relocate notches correctly', () => {
+  const res = Geo.weldClosedPaths(weldA(), 1, weldB(), 3, 0.3);
+  assert(res.segMapA[1] === null && res.segMapB[3] === null, 'seam edges dropped');
+  // A seg 0 = bottom edge (0,0)->(10,0); its midpoint must be preserved
+  const sA = res.segMapA[0];
+  const pA = Geo.segPoint(res.nodes[sA], res.nodes[(sA + 1) % 6], 0.5);
+  assert(Geo.dist(pA, { x: 5, y: 0 }) < 1e-9, JSON.stringify(pA));
+  // B seg 1 = right edge x=40, midpoint (40,45) -> must land at xform of it
+  const sB = res.segMapB[1];
+  const pB = Geo.segPoint(res.nodes[sB], res.nodes[(sB + 1) % 6], 0.5);
+  const expected = res.xform({ x: 40, y: 45 });
+  assert(Geo.dist(pB, expected) < 1e-9, JSON.stringify([pB, expected]));
+  assert(Geo.dist(expected, { x: 20, y: 5 }) < 1e-9, 'B moved rigidly: ' + JSON.stringify(expected));
+});
+
+t('weldClosedPaths preserves curved edges rigidly', () => {
+  const B = weldB();
+  B[1].hout = { x: 3, y: 1 };  // curve B's right edge (seg 1)
+  B[2].hin = { x: 2, y: -2 };
+  const before = Geo.segLength(B[1], B[2], 0.002);
+  const res = Geo.weldClosedPaths(weldA(), 1, B, 3, 0.3);
+  assert(!res.error, res.error);
+  const sB = res.segMapB[1];
+  const after = Geo.segLength(res.nodes[sB], res.nodes[(sB + 1) % 6], 0.002);
+  assert(Math.abs(before - after) < 1e-6, `len ${before} -> ${after}`);
+});
+
+t('weldClosedPaths rejects mismatched edge lengths', () => {
+  const shortB = [N(30, 40), N(40, 40), N(40, 45), N(30, 45)]; // 5cm left edge
+  const res = Geo.weldClosedPaths(weldA(), 1, shortB, 3, 0.3);
+  assert(res.error === 'length-mismatch', res.error);
+  assert(Math.abs(res.dA - 10) < 1e-9 && Math.abs(res.dB - 5) < 1e-9);
+});
+
 console.log('dxf');
 
 const doc = {

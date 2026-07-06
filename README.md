@@ -26,6 +26,8 @@ can be saved/opened as `.pattern.json` files.
 | **Notches** | click an edge; exported as short slits from the cutting line inward (so the laser cuts them) |
 | **Drill holes** | marked circles on the `MARK` layer |
 | **Grainline** | drag inside a piece; double-ended arrow |
+| **Edge length** | select an edge and type a target length (cm); the edge rescales about a chosen anchor (both ends / start / end) and curves keep their shape — for walking seams |
+| **Weld** | fuse two pieces into one along matching edges — the second piece is rigidly moved into place, both seam edges disappear, notches/holes/grainline carried over |
 | **Mirror copy** | mirrored duplicate for left/right pieces — handles, notches and holes are remapped correctly |
 | **Measure** | drag to measure any distance; edge lengths and piece perimeters shown live (for walking seams) |
 | **Snap** | to grid (0.1–1 cm) and to existing points |
@@ -47,7 +49,7 @@ SVG export (true-size, mm) is also available for printing or Inkscape.
 
 ## Keyboard
 
-`V` select · `P` pen · `N` notch · `H` hole · `G` grain · `M` measure ·
+`V` select · `P` pen · `N` notch · `H` hole · `G` grain · `W` weld · `M` measure ·
 `Space`+drag pan · wheel zoom · `0` fit · `Del` delete · `Ctrl+Z/Y` undo/redo ·
 `Ctrl+S` save project · `Esc`/`Enter` finish pen path
 
@@ -62,7 +64,8 @@ outward-normal orientation, curve splitting, and DXF structure/scale/notch geome
 
 ## Roadmap
 
-- [ ] Edge-length editing (type a number, the curve adjusts) for walking seams
+- [x] Edge-length editing (type a number, the curve adjusts) for walking seams
+- [x] Weld/join two pieces along matching edges
 - [ ] Grading (multi-size nests)
 - [ ] Basic block generators from body measurements (bodice / sleeve / skirt)
 - [ ] Tiled A4/Letter PDF export for home printers
