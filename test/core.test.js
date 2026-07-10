@@ -208,6 +208,64 @@ t('weldClosedPaths rejects mismatched edge lengths', () => {
   assert(Math.abs(res.dA - 10) < 1e-9 && Math.abs(res.dB - 5) < 1e-9);
 });
 
+t('segArcParams: fractions equal t on a straight edge', () => {
+  const ts = Geo.segArcParams(N(0, 0), N(10, 0), [0.1, 0.5, 0.9]);
+  assert(Math.abs(ts[0] - 0.1) < 1e-3 && Math.abs(ts[1] - 0.5) < 1e-3 && Math.abs(ts[2] - 0.9) < 1e-3,
+    JSON.stringify(ts));
+});
+
+t('segArcParams: even arc spacing on a curve', () => {
+  // quarter circle radius 10 — points at even fractions must be evenly spaced along the arc
+  const k = 5.523;
+  const a = N(10, 0, null, { x: 0, y: k });
+  const b = N(0, 10, { x: k, y: 0 }, null);
+  const fr = [0.125, 0.375, 0.625, 0.875];
+  const ts = Geo.segArcParams(a, b, fr);
+  const pts = ts.map((t) => Geo.segPoint(a, b, t));
+  const gaps = [];
+  for (let i = 1; i < pts.length; i++) gaps.push(Geo.dist(pts[i - 1], pts[i]));
+  const avg = gaps.reduce((x, y) => x + y) / gaps.length;
+  for (const g of gaps) assert(Math.abs(g - avg) < 0.05, 'uneven arc gaps: ' + JSON.stringify(gaps));
+});
+
+t('slitLine: diagonal slit centered on the path', () => {
+  const a = N(0, 0), b = N(10, 0);
+  const ln = Geo.slitLine(a, b, { seg: 0, t: 0.5, len: 0.2, ang: 45 });
+  const mid = Geo.lerp(ln.a, ln.b, 0.5);
+  assert(Geo.dist(mid, { x: 5, y: 0 }) < 1e-9, 'centered: ' + JSON.stringify(mid));
+  assert(Math.abs(Geo.dist(ln.a, ln.b) - 0.2) < 1e-9, 'length');
+  const d = Geo.norm(Geo.sub(ln.b, ln.a));
+  assert(Math.abs(Math.abs(d.x) - Math.SQRT1_2) < 1e-9 && Math.abs(Math.abs(d.y) - Math.SQRT1_2) < 1e-9,
+    '45 degrees: ' + JSON.stringify(d));
+});
+
+t('matched stitch runs: same count, same arc fractions on unequal edges', () => {
+  const count = 7;
+  const fr = [];
+  for (let i = 0; i < count; i++) fr.push((i + 0.5) / count);
+  const A = [N(0, 0), N(21, 0)];                                   // 21cm straight
+  const k = 5.523;
+  const B = [N(10, 0, null, { x: 0, y: k }), N(0, 10, { x: k, y: 0 })]; // ~15.7cm arc
+  const tsA = Geo.segArcParams(A[0], A[1], fr);
+  const tsB = Geo.segArcParams(B[0], B[1], fr);
+  assert(tsA.length === count && tsB.length === count);
+  // hole i sits at the same arc fraction on both edges: exact check on the
+  // straight edge; on the curve, verify fractions via cumulative gap sums
+  for (let i = 0; i < count; i++) {
+    const pA = Geo.segPoint(A[0], A[1], tsA[i]);
+    assert(Math.abs(pA.x / 21 - fr[i]) < 1e-3, `A hole ${i} at ${pA.x}`);
+  }
+  const ptsB = tsB.map((t) => Geo.segPoint(B[0], B[1], t));
+  const lenB = Geo.segLength(B[0], B[1], 0.002);
+  let acc = 0;
+  for (let i = 1; i < count; i++) {
+    acc += Geo.dist(ptsB[i - 1], ptsB[i]); // chord ≈ arc at this density
+    const fracGap = acc / lenB;
+    const expected = fr[i] - fr[0];
+    assert(Math.abs(fracGap - expected) < 0.02, `B cumulative fraction ${i}: ${fracGap} vs ${expected}`);
+  }
+});
+
 t('reflectPoint / reflectNodes mirror across a line', () => {
   const a = { x: 10, y: 0 }, b = { x: 10, y: 10 }; // vertical x=10
   const r = Geo.reflectPoint({ x: 3, y: 4 }, a, b);
@@ -333,6 +391,29 @@ t('folded piece exports at full size with fold on MARK layer', () => {
   const shapes = DXF.pieceShapes(foldedPiece());
   const fold = shapes.lines.find((l) => l.layer === 'MARK');
   assert(fold && Math.abs(fold.a.x - 10) < 1e-9 && Math.abs(fold.b.x - 10) < 1e-9, 'fold marked at x=10');
+});
+
+t('stitch slits export as CUT lines and mirror across folds', () => {
+  const piece = foldedPiece();
+  piece.notches = [];
+  piece.stitchSlits = [
+    { seg: 0, t: 0.25, len: 0.15, ang: 45 },
+    { seg: 0, t: 0.75, len: 0.15, ang: 45 },
+  ];
+  // direct export of the folded piece: slits double up via the mirror
+  const shapes = DXF.pieceShapes(piece);
+  const cutLines = shapes.lines.filter((l) => l.layer === 'CUT');
+  assert(cutLines.length === 4, 'expected 4 slit lines, got ' + cutLines.length);
+  const mids = cutLines.map((l) => Geo.lerp(l.a, l.b, 0.5)).sort((p, q) => p.x - q.x);
+  // seg 0 runs (0,0)->(10,0); mirror across x=10 puts twins at 20-x
+  const xs = mids.map((m) => Math.round(m.x * 100) / 100);
+  assert(JSON.stringify(xs) === JSON.stringify([2.5, 7.5, 12.5, 17.5]), 'slit midpoints: ' + JSON.stringify(xs));
+  for (const m of mids) assert(Math.abs(m.y) < 1e-9, 'slit centered on stitch line');
+  // every slit really is diagonal (45°)
+  for (const l of cutLines) {
+    const d = Geo.norm(Geo.sub(l.b, l.a));
+    assert(Math.abs(Math.abs(d.x) - Math.SQRT1_2) < 1e-6, 'diagonal: ' + JSON.stringify(d));
+  }
 });
 
 t('open path exports without allowance', () => {

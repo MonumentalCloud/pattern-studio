@@ -41,6 +41,7 @@
       path: { closed: !!closed, nodes },
       notches: [],
       holes: [],
+      stitchSlits: [],
       grain: null,
       foldSeg: null,
     };
@@ -256,6 +257,13 @@
         }
       }
 
+      // stitching slits
+      for (const sl of rp.stitchSlits || []) {
+        if (sl.seg >= nodes.length) continue;
+        const ln = Geo.slitLine(nodes[sl.seg], nodes[(sl.seg + 1) % nodes.length], sl);
+        el('line', { class: 'piece-slit', x1: ln.a.x, y1: ln.a.y, x2: ln.b.x, y2: ln.b.y }, g);
+      }
+
       // holes
       for (const h of rp.holes || []) {
         el('circle', { class: 'piece-hole', cx: h.x, cy: h.y, r: h.r || 0.15 }, g);
@@ -294,14 +302,15 @@
 
   function renderOverlay() {
     clear(gOverlay);
-    // first edge picked with the weld tool
-    if (tool === 'weld' && weldFirst) {
-      const wp = pieceById(weldFirst.pieceId);
-      if (wp && weldFirst.seg < wp.path.nodes.length) {
+    // first edge picked with the weld / stitch tool
+    const firstPick = (tool === 'weld' && weldFirst) || (tool === 'stitch' && stitchFirst);
+    if (firstPick) {
+      const wp = pieceById(firstPick.pieceId);
+      if (wp && firstPick.seg < wp.path.nodes.length) {
         const wn = wp.path.nodes;
         el('path', {
           class: 'seg-highlight weld',
-          d: segD(wn[weldFirst.seg], wn[(weldFirst.seg + 1) % wn.length]),
+          d: segD(wn[firstPick.seg], wn[(firstPick.seg + 1) % wn.length]),
         }, gOverlay);
       }
     }
@@ -441,6 +450,7 @@
   // ---------- tools ----------
   let tool = 'select';
   let weldFirst = null; // weld tool: { pieceId, seg } of the first picked edge
+  let stitchFirst = null; // stitch tool: same, for the first edge of a matched pair
   const HINTS = {
     select: 'Click a piece or point to select · drag to move · Del deletes',
     pen: 'Click = corner, drag = curve · click the first point to close · Esc finishes open',
@@ -448,12 +458,15 @@
     hole: 'Click inside a piece to add a drill hole',
     grain: 'Drag inside a piece to set the grainline · click (no drag) removes it',
     weld: 'Click an edge, then the matching edge on another piece — the second piece moves; both seam edges disappear',
+    stitch: 'Click an edge, then its matching edge — both get the same number of stitching slits · click the same edge twice for a single run',
     measure: 'Drag to measure a distance',
   };
   function setTool(t) {
     tool = t;
     if (t !== 'pen') finishDraft(false);
     if (t !== 'weld') weldFirst = null;
+    if (t !== 'stitch') stitchFirst = null;
+    $('stitch-props').hidden = t !== 'stitch';
     document.querySelectorAll('#toolbar .tool').forEach((b) =>
       b.classList.toggle('active', b.dataset.tool === t));
     svg.setAttribute('class', 'tool-' + t);
@@ -535,6 +548,7 @@
     if (tool === 'hole') return holeDown(w);
     if (tool === 'grain') return grainDown(w);
     if (tool === 'weld') return weldDown(w);
+    if (tool === 'stitch') return stitchDown(w);
     if (tool === 'measure') { drag = { type: 'measure', a: w, b: w }; return; }
   });
 
@@ -699,13 +713,15 @@
     zoomAt(ev.deltaY < 0 ? 1.18 : 1 / 1.18, w.x, w.y);
   }, { passive: false });
 
-  // when a segment is split, notches on that segment must be remapped
+  // when a segment is split, notches/slits on that segment must be remapped
   function remapAfterInsert(piece, seg, t) {
-    for (const nt of piece.notches || []) {
-      if (nt.seg > seg) nt.seg += 1;
-      else if (nt.seg === seg) {
-        if (nt.t <= t) nt.t = t > 0 ? nt.t / t : 0;
-        else { nt.seg += 1; nt.t = (nt.t - t) / (1 - t); }
+    for (const arr of [piece.notches || [], piece.stitchSlits || []]) {
+      for (const nt of arr) {
+        if (nt.seg > seg) nt.seg += 1;
+        else if (nt.seg === seg) {
+          if (nt.t <= t) nt.t = t > 0 ? nt.t / t : 0;
+          else { nt.seg += 1; nt.t = (nt.t - t) / (1 - t); }
+        }
       }
     }
   }
@@ -757,9 +773,11 @@
         renderAll(true); renderSidebar();
         return;
       }
-      // 2b. notch / hole of the selected piece
+      // 2b. notch / slit / hole of the selected piece
       const nti = hitNotch(piece, w);
       if (nti >= 0) { sel.kind = 'notch'; sel.idx = nti; renderAll(true); renderSidebar(); return; }
+      const sli = hitSlit(piece, w);
+      if (sli >= 0) { sel.kind = 'slit'; sel.idx = sli; renderAll(true); renderSidebar(); return; }
       const hi = (piece.holes || []).findIndex((h) => Geo.dist(h, w) < px(8));
       if (hi >= 0) { sel.kind = 'hole'; sel.idx = hi; renderAll(true); renderSidebar(); return; }
       // 3. segment of the selected piece
@@ -797,6 +815,18 @@
     (piece.notches || []).forEach((nt, i) => {
       if (nt.seg >= nodes.length) return;
       const p = Geo.segPoint(nodes[nt.seg], nodes[(nt.seg + 1) % nodes.length], nt.t);
+      const d = Geo.dist(p, w);
+      if (d < bd) { bd = d; best = i; }
+    });
+    return best;
+  }
+
+  function hitSlit(piece, w) {
+    const nodes = piece.path.nodes;
+    let best = -1, bd = px(6);
+    (piece.stitchSlits || []).forEach((sl, i) => {
+      if (sl.seg >= nodes.length) return;
+      const p = Geo.segPoint(nodes[sl.seg], nodes[(sl.seg + 1) % nodes.length], sl.t);
       const d = Geo.dist(p, w);
       if (d < bd) { bd = d; best = i; }
     });
@@ -857,11 +887,12 @@
     renderAll();
   }
 
-  // ---- weld tool ----
-  function nearestEdgeAt(w) {
+  // ---- weld / stitch edge picking ----
+  function nearestEdgeAt(w, allowOpen) {
     let best = null;
     for (const p of doc.pieces) {
-      if (p.visible === false || !p.path.closed || p.path.nodes.length < 3) continue;
+      if (p.visible === false || p.path.nodes.length < 2) continue;
+      if (!allowOpen && (!p.path.closed || p.path.nodes.length < 3)) continue;
       const hit = Geo.nearestOnPath(p.path.nodes, p.path.closed, w);
       if (hit && hit.dist < px(10) && (!best || hit.dist < best.hit.dist)) best = { piece: p, hit };
     }
@@ -904,6 +935,16 @@
       const s = res.segMapB[nt.seg];
       if (s != null) notches.push({ seg: s, t: res.flipT ? 1 - nt.t : nt.t });
     }
+    // stitch slits ride along the same way; those on the welded seam vanish with it
+    const stitchSlits = [];
+    for (const sl of pA.stitchSlits || []) {
+      const s = res.segMapA[sl.seg];
+      if (s != null) stitchSlits.push(Object.assign({}, sl, { seg: s }));
+    }
+    for (const sl of pB.stitchSlits || []) {
+      const s = res.segMapB[sl.seg];
+      if (s != null) stitchSlits.push(Object.assign({}, sl, { seg: s, t: res.flipT ? 1 - sl.t : sl.t }));
+    }
     const holes = (pA.holes || []).concat((pB.holes || []).map((h) => {
       const p = res.xform(h);
       return { x: p.x, y: p.y, r: h.r };
@@ -917,6 +958,7 @@
     pA.path.nodes = res.nodes;
     pA.notches = notches;
     pA.holes = holes;
+    pA.stitchSlits = stitchSlits;
     pA.grain = grain;
     pA.name = pA.name + '+' + pB.name;
     doc.pieces = doc.pieces.filter((p) => p.id !== pB.id);
@@ -924,6 +966,53 @@
     weldFirst = null;
     selectPiece(pA.id);
     setTool('select');
+    renderAll();
+  }
+
+  // ---- stitch tool ----
+  function stitchDown(w) {
+    const res = nearestEdgeAt(w, true);
+    if (!res) return;
+    if (!stitchFirst || !pieceById(stitchFirst.pieceId)) {
+      stitchFirst = { pieceId: res.piece.id, seg: res.hit.seg };
+      selectPiece(res.piece.id);
+      $('status-hint').textContent = 'Now click the matching edge (same edge again = single run) · Esc cancels';
+      renderAll(true); renderSidebar();
+      return;
+    }
+    const pA = pieceById(stitchFirst.pieceId);
+    stitchEdges(pA, stitchFirst.seg, res.piece, res.hit.seg);
+  }
+
+  // Put the SAME number of slits on both edges, at equal arc-length fractions,
+  // so hole i on edge A always pairs with hole i on edge B when sewing.
+  function stitchEdges(pA, segA, pB, segB) {
+    const spacing = Math.max(0.1, parseFloat($('st-spacing').value) || 0.3);
+    const slitLen = Math.max(0.05, parseFloat($('st-len').value) || 0.15);
+    const nA = pA.path.nodes.length, nB = pB.path.nodes.length;
+    const a1 = pA.path.nodes[segA], a2 = pA.path.nodes[(segA + 1) % nA];
+    const lenA = Geo.segLength(a1, a2);
+    const same = pA.id === pB.id && segA === segB;
+    const count = Math.max(2, Math.round(lenA / spacing));
+    const fractions = [];
+    for (let i = 0; i < count; i++) fractions.push((i + 0.5) / count);
+    beginChange();
+    const tsA = Geo.segArcParams(a1, a2, fractions);
+    pA.stitchSlits = pA.stitchSlits || [];
+    for (const t of tsA) pA.stitchSlits.push({ seg: segA, t, len: slitLen, ang: 45 });
+    let lenB = lenA;
+    if (!same) {
+      const b1 = pB.path.nodes[segB], b2 = pB.path.nodes[(segB + 1) % nB];
+      lenB = Geo.segLength(b1, b2);
+      const tsB = Geo.segArcParams(b1, b2, fractions);
+      pB.stitchSlits = pB.stitchSlits || [];
+      for (const t of tsB) pB.stitchSlits.push({ seg: segB, t, len: slitLen, ang: 45 });
+    }
+    endChange();
+    stitchFirst = null;
+    $('status-hint').textContent = same
+      ? `${count} stitching slits on the edge (${fmt(lenA)} cm)`
+      : `${count} matched slits per edge (${fmt(lenA)} vs ${fmt(lenB)} cm)`;
     renderAll();
   }
 
@@ -952,6 +1041,10 @@
         weldFirst = null;
         $('status-hint').textContent = HINTS.weld;
         renderAll(true);
+      } else if (tool === 'stitch' && stitchFirst) {
+        stitchFirst = null;
+        $('status-hint').textContent = HINTS.stitch;
+        renderAll(true);
       } else { clearSel(); renderAll(); }
       return;
     }
@@ -963,6 +1056,7 @@
     else if (k === 'h') setTool('hole');
     else if (k === 'g') setTool('grain');
     else if (k === 'w') setTool('weld');
+    else if (k === 's') setTool('stitch');
     else if (k === 'm') setTool('measure');
     else if (k === '0') zoomFit();
   });
@@ -979,11 +1073,13 @@
         doc.pieces = doc.pieces.filter((p) => p.id !== piece.id);
         clearSel();
       } else {
-        // drop notches on the two segments touching this node, remap the rest
+        // drop notches/slits on the two segments touching this node, remap the rest
         const n = piece.path.nodes.length;
         const segA = (sel.idx - 1 + n) % n, segB = sel.idx;
         piece.notches = (piece.notches || []).filter((nt) => nt.seg !== segA && nt.seg !== segB);
         for (const nt of piece.notches) if (nt.seg > sel.idx) nt.seg -= 1;
+        piece.stitchSlits = (piece.stitchSlits || []).filter((sl) => sl.seg !== segA && sl.seg !== segB);
+        for (const sl of piece.stitchSlits) if (sl.seg > sel.idx) sl.seg -= 1;
         if (piece.foldSeg != null) {
           // deleting a fold-edge endpoint destroys the fold
           if (sel.idx === piece.foldSeg || sel.idx === (piece.foldSeg + 1) % n) piece.foldSeg = null;
@@ -994,6 +1090,9 @@
       }
     } else if (sel.kind === 'notch') {
       piece.notches.splice(sel.idx, 1);
+      sel.kind = null;
+    } else if (sel.kind === 'slit') {
+      piece.stitchSlits.splice(sel.idx, 1);
       sel.kind = null;
     } else if (sel.kind === 'hole') {
       piece.holes.splice(sel.idx, 1);
@@ -1024,6 +1123,11 @@
       for (const nt of copy.notches || []) {
         nt.seg = copy.path.closed ? (2 * n - 2 - nt.seg) % n : (n - 2 - nt.seg);
         nt.t = 1 - nt.t;
+      }
+      for (const sl of copy.stitchSlits || []) {
+        sl.seg = copy.path.closed ? (2 * n - 2 - sl.seg) % n : (n - 2 - sl.seg);
+        sl.t = 1 - sl.t;
+        sl.ang = -(sl.ang == null ? 45 : sl.ang); // keep the diagonal mirrored
       }
       if (copy.foldSeg != null && copy.path.closed) copy.foldSeg = (2 * n - 2 - copy.foldSeg) % n;
       for (const h of copy.holes || []) h.x = 2 * cx - h.x;

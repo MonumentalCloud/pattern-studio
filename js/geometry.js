@@ -292,6 +292,45 @@
     };
   }
 
+  // t parameters of the points at given arc-length fractions (0..1) along a
+  // segment — so equally spaced fractions give equally spaced points even on
+  // curves, where t itself is not proportional to distance.
+  function segArcParams(a, b, fractions) {
+    const K = 256;
+    const cum = [0];
+    let prev = segPoint(a, b, 0), acc = 0;
+    for (let k = 1; k <= K; k++) {
+      const q = segPoint(a, b, k / K);
+      acc += dist(prev, q);
+      cum.push(acc);
+      prev = q;
+    }
+    const total = acc > EPS ? acc : EPS;
+    return fractions.map((f) => {
+      const target = Math.min(Math.max(f, 0), 1) * total;
+      let lo = 0, hi = K;
+      while (lo < hi) { const mid = (lo + hi) >> 1; if (cum[mid] < target) lo = mid + 1; else hi = mid; }
+      const i = Math.max(1, lo);
+      const r = (target - cum[i - 1]) / Math.max(cum[i] - cum[i - 1], 1e-12);
+      return (i - 1 + r) / K;
+    });
+  }
+
+  // Endpoints of a stitching slit: a short line centered on the path at
+  // parameter sl.t, rotated sl.ang degrees (default 45) from the local tangent.
+  function slitLine(a, b, sl) {
+    const p = segPoint(a, b, sl.t);
+    const tan = segTangent(a, b, sl.t);
+    const ang = (sl.ang == null ? 45 : sl.ang) * Math.PI / 180;
+    const c = Math.cos(ang), s = Math.sin(ang);
+    const d = { x: c * tan.x - s * tan.y, y: s * tan.x + c * tan.y };
+    const h = (sl.len || 0.15) / 2;
+    return {
+      a: { x: p.x - d.x * h, y: p.y - d.y * h },
+      b: { x: p.x + d.x * h, y: p.y + d.y * h },
+    };
+  }
+
   // Reflect point p across the line through a and b.
   function reflectPoint(p, a, b) {
     const d = norm(sub(b, a));
@@ -395,6 +434,6 @@
     cubicPoint, cubicTangent, flattenCubic,
     pathPolyline, pathLength, polyArea, bbox, centroid, dedupe,
     outwardSign, offsetClosed, nearestOnPath, pointInPolygon, splitSeg, setSegLength,
-    reverseNodes, weldClosedPaths, reflectPoint, reflectNodes,
+    reverseNodes, weldClosedPaths, reflectPoint, reflectNodes, segArcParams, slitLine,
   };
 });

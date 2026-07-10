@@ -24,6 +24,7 @@ can be saved/opened as `.pattern.json` files.
 | **Edit** | drag points and handles · double-click a point to toggle corner↔smooth · double-click an edge to insert a point · Del removes · delete a single curve handle by dragging it onto its point, double-clicking it, or the ×&nbsp;in / ×&nbsp;out buttons |
 | **Seam allowance** | per-piece width (cm); the dashed line is the cutting line, computed as a true outward offset — also what goes on the DXF `CUT` layer |
 | **Notches** | click an edge; exported as short slits from the cutting line inward (so the laser cuts them) |
+| **Stitch holes** | diagonal slits along the stitch line for hand sewing (leather/felt) — click two edges and both get the **same number of holes at matching positions**, even if the edge lengths differ; spacing and slit length configurable, exported on `CUT` |
 | **Drill holes** | marked circles on the `MARK` layer |
 | **Grainline** | drag inside a piece; double-ended arrow |
 | **Edge length** | select an edge and type a target length (cm); the edge rescales about a chosen anchor (both ends / start / end) and curves keep their shape — for walking seams |
@@ -51,7 +52,7 @@ SVG export (true-size, mm) is also available for printing or Inkscape.
 
 ## Keyboard
 
-`V` select · `P` pen · `N` notch · `H` hole · `G` grain · `W` weld · `M` measure ·
+`V` select · `P` pen · `N` notch · `H` hole · `G` grain · `W` weld · `S` stitch · `M` measure ·
 `Space`+drag pan · wheel zoom · `0` fit · `Del` delete · `Ctrl+Z/Y` undo/redo ·
 `Ctrl+S` save project · `Esc`/`Enter` finish pen path
 

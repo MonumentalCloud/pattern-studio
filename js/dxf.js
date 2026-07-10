@@ -119,9 +119,22 @@
       const m = res.xform(Geo.reflectPoint(h, a, b));
       if (Geo.dist(h, m) > 0.05) holes.push({ x: m.x, y: m.y, r: h.r });
     }
+    const stitchSlits = [];
+    for (const sl of piece.stitchSlits || []) {
+      const s1 = res.segMapA[sl.seg];
+      if (s1 != null) stitchSlits.push(Object.assign({}, sl, { seg: s1 }));
+      const s2 = res.segMapB[sl.seg];
+      if (s2 != null) {
+        stitchSlits.push(Object.assign({}, sl, {
+          seg: s2,
+          t: res.flipT ? 1 - sl.t : sl.t,
+          ang: -(sl.ang == null ? 45 : sl.ang), // reflection mirrors the diagonal
+        }));
+      }
+    }
     const out = Object.assign({}, piece, {
       path: { closed: true, nodes: res.nodes },
-      notches, holes, foldSeg: null, mirrorStart: n - 1,
+      notches, holes, stitchSlits, foldSeg: null, mirrorStart: n - 1,
     });
     return out;
   }
@@ -169,6 +182,13 @@
         const end = Geo.add(p, Geo.scale(nrm, sa - notchLen)); // inward
         out.lines.push({ layer: 'CUT', a: start, b: end });
       }
+    }
+
+    // stitching slits: diagonal cuts on the stitch line itself
+    for (const sl of piece.stitchSlits || []) {
+      if (sl.seg >= nodes.length) continue;
+      const line = Geo.slitLine(nodes[sl.seg], nodes[(sl.seg + 1) % nodes.length], sl);
+      out.lines.push({ layer: 'CUT', a: line.a, b: line.b });
     }
 
     for (const h of piece.holes || []) {
