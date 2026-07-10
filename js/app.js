@@ -478,6 +478,7 @@
   const HINTS = {
     select: 'Click a piece or point to select · drag to move · Del deletes',
     pen: 'Click = corner, drag = curve · right-click = type exact length/angle · click the first point to close · Esc finishes open',
+    shape: 'Drag corner to corner — the panel picks rectangle or ellipse · snaps to grid and existing points',
     notch: 'Click near an edge to add a notch',
     hole: 'Click inside a piece to add a drill hole',
     grain: 'Drag inside a piece to set the grainline · click (no drag) removes it',
@@ -499,6 +500,7 @@
     $('stitch-props').hidden = t !== 'stitch';
     $('inset-props').hidden = t !== 'inset';
     $('bool-props').hidden = t !== 'bool';
+    $('shape-props').hidden = t !== 'shape';
     document.querySelectorAll('#toolbar .tool').forEach((b) =>
       b.classList.toggle('active', b.dataset.tool === t));
     svg.setAttribute('class', 'tool-' + t);
@@ -598,6 +600,7 @@
     svg.setPointerCapture(ev.pointerId);
 
     if (tool === 'pen') return penDown(w);
+    if (tool === 'shape') { drag = { type: 'shape', a: snap(w), b: snap(w) }; return; }
     if (tool === 'select') return selectDown(ev, w);
     if (tool === 'notch') return notchDown(w);
     if (tool === 'hole') return holeDown(w);
@@ -676,12 +679,33 @@
       const piece = pieceById(drag.pieceId);
       const dx = w.x - drag.start.x, dy = w.y - drag.start.y;
       const s = snapOn() ? snapStep() : 0.0001;
-      const sdx = Math.round(dx / s) * s, sdy = Math.round(dy / s) * s;
+      let sdx = Math.round(dx / s) * s, sdy = Math.round(dy / s) * s;
+      // placement magnet: pull the nearest node of the dragged piece exactly
+      // onto a nearby node of another piece (grid on or off)
+      let magnet = null;
+      {
+        let best = px(9);
+        for (const nd of piece.path.nodes) {
+          const tx2 = nd.x - drag.applied.x + sdx, ty2 = nd.y - drag.applied.y + sdy;
+          for (const q of doc.pieces) {
+            if (q.id === piece.id || q.visible === false) continue;
+            for (const qn of q.path.nodes) {
+              const d = Math.hypot(qn.x - tx2, qn.y - ty2);
+              if (d < best) { best = d; magnet = { dx: qn.x - tx2, dy: qn.y - ty2, x: qn.x, y: qn.y }; }
+            }
+          }
+        }
+        if (magnet) { sdx += magnet.dx; sdy += magnet.dy; }
+      }
       const ddx = sdx - drag.applied.x, ddy = sdy - drag.applied.y;
       if (ddx || ddy) {
         movePiece(piece, ddx, ddy);
         drag.applied = { x: sdx, y: sdy };
         renderAll(true);
+      }
+      clear(gPreview);
+      if (magnet) {
+        el('circle', { class: 'snap-dot', cx: magnet.x, cy: magnet.y, r: px(6) }, gPreview);
       }
       return;
     }
@@ -690,6 +714,25 @@
       const piece = pieceById(drag.pieceId);
       piece.grain = { x1: drag.a.x, y1: drag.a.y, x2: drag.b.x, y2: drag.b.y };
       renderAll(true);
+      return;
+    }
+    if (drag.type === 'shape') {
+      drag.b = snap(w);
+      clear(gPreview);
+      const x0 = Math.min(drag.a.x, drag.b.x), x1 = Math.max(drag.a.x, drag.b.x);
+      const y0 = Math.min(drag.a.y, drag.b.y), y1 = Math.max(drag.a.y, drag.b.y);
+      if ($('sh-kind').value === 'ellipse') {
+        el('ellipse', {
+          class: 'preview-path',
+          cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, rx: (x1 - x0) / 2, ry: (y1 - y0) / 2,
+        }, gPreview);
+      } else {
+        el('rect', { class: 'preview-path', x: x0, y: y0, width: x1 - x0, height: y1 - y0 }, gPreview);
+      }
+      el('text', {
+        class: 'measure-text', x: (x0 + x1) / 2, y: y0 - px(8),
+        'font-size': px(12), 'text-anchor': 'middle',
+      }, gPreview).textContent = `${fmt(x1 - x0)} × ${fmt(y1 - y0)} cm`;
       return;
     }
     if (drag.type === 'measure') {
@@ -709,12 +752,45 @@
     if (drag) {
       if (drag.type === 'pan') svg.classList.remove('panning');
       else if (drag.type === 'measure') clear(gPreview);
+      else if (drag.type === 'shape') {
+        clear(gPreview);
+        const x0 = Math.min(drag.a.x, drag.b.x), x1 = Math.max(drag.a.x, drag.b.x);
+        const y0 = Math.min(drag.a.y, drag.b.y), y1 = Math.max(drag.a.y, drag.b.y);
+        if (x1 - x0 >= 0.3 && y1 - y0 >= 0.3) {
+          let nodes;
+          if ($('sh-kind').value === 'ellipse') {
+            const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+            const rx = (x1 - x0) / 2, ry = (y1 - y0) / 2;
+            const k = 0.5522847498;
+            nodes = [
+              { x: cx + rx, y: cy, hin: { x: 0, y: -k * ry }, hout: { x: 0, y: k * ry } },
+              { x: cx, y: cy + ry, hin: { x: k * rx, y: 0 }, hout: { x: -k * rx, y: 0 } },
+              { x: cx - rx, y: cy, hin: { x: 0, y: k * ry }, hout: { x: 0, y: -k * ry } },
+              { x: cx, y: cy - ry, hin: { x: -k * rx, y: 0 }, hout: { x: k * rx, y: 0 } },
+            ];
+          } else {
+            nodes = [
+              { x: x0, y: y0, hin: null, hout: null },
+              { x: x1, y: y0, hin: null, hout: null },
+              { x: x1, y: y1, hin: null, hout: null },
+              { x: x0, y: y1, hin: null, hout: null },
+            ];
+          }
+          beginChange();
+          const piece = newPiece(nodes, true);
+          doc.pieces.push(piece);
+          endChange();
+          selectPiece(piece.id);
+          renderAll();
+        }
+      }
       else if (drag.type === 'grain') {
         const piece = pieceById(drag.pieceId);
         if (Geo.dist(drag.a, drag.b) < 0.5) piece.grain = drag.hadGrain ? null : piece.grain && null;
         endChange();
         renderAll();
       }
+      if (drag.type === 'piece') clear(gPreview);
       if (['node', 'handle', 'piece'].includes(drag.type)) { endChange(); renderSidebar(); }
       if (drag.type === 'pen-handle') renderPenPreview();
       drag = null;
@@ -1876,6 +1952,7 @@
     if (k === 'delete' || k === 'backspace') { deleteSelection(); ev.preventDefault(); return; }
     if (k === 'v') setTool('select');
     else if (k === 'p') setTool('pen');
+    else if (k === 'r') setTool('shape');
     else if (k === 'n') setTool('notch');
     else if (k === 'h') setTool('hole');
     else if (k === 'g') setTool('grain');

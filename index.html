@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pattern Studio</title>
-<link rel="stylesheet" href="style.css?v=20">
+<link rel="stylesheet" href="style.css?v=21">
 </head>
 <body>
 <div id="app">
   <header id="topbar">
-    <span id="logo" title="build 20">✂ Pattern Studio</span>
+    <span id="logo" title="build 21">✂ Pattern Studio</span>
     <input id="doc-name" type="text" value="Untitled pattern" spellcheck="false" title="Pattern name">
     <span class="sep"></span>
     <button id="btn-new" title="New document">New</button>
@@ -36,6 +36,7 @@
     <nav id="toolbar">
       <button class="tool active" data-tool="select" title="Select / edit (V)">⬚<span>Select</span></button>
       <button class="tool" data-tool="pen" title="Pen — click for corners, drag for curves (P)">✒<span>Pen</span></button>
+      <button class="tool" data-tool="shape" title="Drag a rectangle or ellipse (R)">▭<span>Shape</span></button>
       <button class="tool" data-tool="notch" title="Add notch on an edge (N)">⌖<span>Notch</span></button>
       <button class="tool" data-tool="hole" title="Add drill hole (H)">◉<span>Hole</span></button>
       <button class="tool" data-tool="grain" title="Drag to set grainline (G)">⇕<span>Grain</span></button>
@@ -156,6 +157,16 @@
           full-outline ring. Guides export to the MARK layer (engrave/skip, never cut) —
           use the Stitch tool on a guide to run holes along its whole length.</div>
       </section>
+      <section id="shape-props" hidden>
+        <h3>Shape</h3>
+        <div class="row"><label>Kind</label>
+          <select id="sh-kind">
+            <option value="rect">Rectangle</option>
+            <option value="ellipse">Ellipse</option>
+          </select></div>
+        <div class="row hint">Drag corner to corner — dimensions show live and snap to the grid and
+          existing points.</div>
+      </section>
       <section id="bool-props" hidden>
         <h3>Boolean</h3>
         <div class="row"><label>Operation</label>
@@ -211,6 +222,7 @@
           <li><b>Stitch</b>: click two edges or guides → matched stitching slits on both</li>
           <li><b>Knife</b>: click two points (or an open path) to cut a piece in two</li>
           <li><b>Boolean</b>: overlap two pieces → union / subtract / intersect</li>
+          <li><b>Shape</b>: drag rectangles/ellipses · dragging pieces magnets onto other points</li>
           <li><b>Del</b> removes point · scroll/two-finger pans · pinch or <b>Ctrl</b>+scroll zooms · <b>Space</b>+drag pans</li>
           <li>Dashed line = cutting line (seam allowance)</li>
         </ul>
@@ -219,9 +231,9 @@
   </div>
 </div>
 <input id="file-input" type="file" accept=".json,.dxf,application/json" hidden>
-<script src="js/geometry.js?v=20"></script>
-<script src="js/dxf.js?v=20"></script>
-<script src="js/dxfimport.js?v=20"></script>
-<script src="js/app.js?v=20"></script>
+<script src="js/geometry.js?v=21"></script>
+<script src="js/dxf.js?v=21"></script>
+<script src="js/dxfimport.js?v=21"></script>
+<script src="js/app.js?v=21"></script>
 </body>
 </html>

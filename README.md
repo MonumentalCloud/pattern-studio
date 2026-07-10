@@ -20,6 +20,7 @@ can be saved/opened as `.pattern.json` files.
 
 | | |
 |---|---|
+| **Shape tool** | drag rectangles and ellipses (circle = equal drag) with live dimensions, snapped to grid and points |
 | **Pen tool** | click = corner point, click-drag = curve (bezier handles), click the first point to close the piece · live length readout while drawing · **right-click to type an exact length + angle** for the next segment |
 | **Edit** | drag points and handles · double-click a point to toggle corner↔smooth · double-click an edge to insert a point · **right-click an edge to divide it** at a distance (cm), a percentage, or into N equal parts (arc-length accurate on curves) · Del removes · delete a single curve handle by dragging it onto its point, double-clicking it, or the ×&nbsp;in / ×&nbsp;out buttons |
 | **Seam allowance** | per-piece width (cm); the dashed line is the cutting line, computed as a true outward offset — also what goes on the DXF `CUT` layer |
@@ -35,7 +36,7 @@ can be saved/opened as `.pattern.json` files.
 | **Fold-line pieces** | draft half a symmetric piece, mark a straight edge as the fold — the mirrored half renders live and every edit updates it; exports unfold to the full cutting outline with the fold on the `MARK` layer |
 | **Mirror copy** | mirrored duplicate for left/right pieces — handles, notches and holes are remapped correctly |
 | **Measure** | drag to measure any distance; edge lengths and piece perimeters shown live (for walking seams) |
-| **Snap** | to grid (0.1–1 cm) and to existing points |
+| **Snap** | to grid (0.1–1 cm) and to existing points · dragging a whole piece magnets its points onto other pieces' points for exact placement |
 | **Undo/redo** | Ctrl+Z / Ctrl+Y, 100 steps |
 | **Cloud save (GitHub)** | connect with your own fine-grained token (Contents read/write on one repo you own) — patterns save as versioned files in that repo, load from any device; the token stays in your browser |
 
@@ -74,7 +75,7 @@ The **Open** button also accepts `.dxf` — patterns from Seamly2D/Valentina, CL
 
 ## Keyboard
 
-`V` select · `P` pen · `N` notch · `H` hole · `G` grain · `W` weld · `I` inset · `S` stitch · `K` knife · `B` boolean · `M` measure ·
+`V` select · `P` pen · `R` shape · `N` notch · `H` hole · `G` grain · `W` weld · `I` inset · `S` stitch · `K` knife · `B` boolean · `M` measure ·
 `Space`+drag or two-finger scroll pan · pinch/`Ctrl`+scroll zoom · `0` fit · `Del` delete · `Ctrl+Z/Y` undo/redo ·
 `Ctrl+S` save project · `Esc`/`Enter` finish pen path
 
