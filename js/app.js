@@ -631,12 +631,18 @@
       renderPenPreview();
       return;
     }
-    if (tool === 'knife' && knifeFirst && !drag) {
+    if (tool === 'knife' && !drag) {
       const b = knifeSnap(w);
       clear(gPreview);
-      el('line', { class: 'knife-line', x1: knifeFirst.x, y1: knifeFirst.y, x2: b.x, y2: b.y }, gPreview);
-      for (const e2 of [knifeFirst, b]) {
-        if (e2.snapped) el('circle', { class: 'snap-dot', cx: e2.x, cy: e2.y, r: px(5) }, gPreview);
+      if (knifeFirst) {
+        el('line', { class: 'knife-line', x1: knifeFirst.x, y1: knifeFirst.y, x2: b.x, y2: b.y }, gPreview);
+      }
+      // ghost the point the click would land on, before any click happens
+      for (const e2 of knifeFirst ? [knifeFirst, b] : [b]) {
+        if (e2.snapped) {
+          el('circle', { class: 'snap-dot', cx: e2.x, cy: e2.y, r: px(5) }, gPreview);
+          el('circle', { class: 'ghost-dot', cx: e2.x, cy: e2.y, r: px(2.5) }, gPreview);
+        }
       }
       return;
     }
