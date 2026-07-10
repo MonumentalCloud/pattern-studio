@@ -21,7 +21,7 @@ can be saved/opened as `.pattern.json` files.
 | | |
 |---|---|
 | **Pen tool** | click = corner point, click-drag = curve (bezier handles), click the first point to close the piece · live length readout while drawing · **right-click to type an exact length + angle** for the next segment |
-| **Edit** | drag points and handles · double-click a point to toggle corner↔smooth · double-click an edge to insert a point · Del removes · delete a single curve handle by dragging it onto its point, double-clicking it, or the ×&nbsp;in / ×&nbsp;out buttons |
+| **Edit** | drag points and handles · double-click a point to toggle corner↔smooth · double-click an edge to insert a point · **right-click an edge to divide it** at a distance (cm), a percentage, or into N equal parts (arc-length accurate on curves) · Del removes · delete a single curve handle by dragging it onto its point, double-clicking it, or the ×&nbsp;in / ×&nbsp;out buttons |
 | **Seam allowance** | per-piece width (cm); the dashed line is the cutting line, computed as a true outward offset — also what goes on the DXF `CUT` layer |
 | **Notches** | click an edge; exported as short slits from the cutting line inward (so the laser cuts them) |
 | **Inset guides** | click an edge (or inside a piece for the full outline) → a dashed guide line inset by a set distance — the scribed stitch line; click edges in any order to add/remove them from the run (mitered around corners; non-adjacent picks make separate runs until bridged); exports to `MARK` (engrave/skip), never cut |

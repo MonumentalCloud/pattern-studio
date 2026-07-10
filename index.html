@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pattern Studio</title>
-<link rel="stylesheet" href="style.css?v=16">
+<link rel="stylesheet" href="style.css?v=17">
 </head>
 <body>
 <div id="app">
   <header id="topbar">
-    <span id="logo" title="build 16">✂ Pattern Studio</span>
+    <span id="logo" title="build 17">✂ Pattern Studio</span>
     <input id="doc-name" type="text" value="Untitled pattern" spellcheck="false" title="Pattern name">
     <span class="sep"></span>
     <button id="btn-new" title="New document">New</button>
@@ -64,6 +64,18 @@
         <g id="layer-preview"></g>
         <g id="layer-overlay"></g>
       </svg>
+      <div id="divide-dialog" hidden>
+        <div class="row"><label>At</label>
+          <input id="dv-dist" type="number" min="0.05" step="0.1"> <em>cm</em>
+          <button id="dv-dist-btn">Add point</button></div>
+        <div class="row"><label>At</label>
+          <input id="dv-pct" type="number" min="1" max="99" step="1" value="50"> <em>%</em>
+          <button id="dv-pct-btn">Add point</button></div>
+        <div class="row"><label>Into</label>
+          <input id="dv-n" type="number" min="2" max="50" step="1" value="2"> <em>parts</em>
+          <button id="dv-n-btn">Divide</button></div>
+        <div class="row hint" id="dv-hint"></div>
+      </div>
       <div id="pen-dialog" hidden>
         <div class="row"><label>Length</label><input id="pd-len" type="number" min="0.1" step="0.1"> <em>cm</em></div>
         <div class="row"><label>Angle</label><input id="pd-ang" type="number" step="1" title="0° = right, 90° = up, counter-clockwise"> <em>°</em></div>
@@ -175,6 +187,7 @@
           <li><b>Pen</b>: click = corner, drag = curve, click first point to close · right-click = type exact length &amp; angle</li>
           <li><b>Select</b>: drag points/handles · double-click point = corner↔smooth · double-click edge = add point</li>
           <li>Click an edge, then type a length in the sidebar to resize it</li>
+          <li>Right-click an edge → divide it at a distance, percentage, or into equal parts</li>
           <li><b>Weld</b>: click an edge on each of two pieces to fuse them into one (the seam disappears)</li>
           <li><b>Fold</b>: select a straight edge → "Make fold line" — draft half, the mirror updates live</li>
           <li><b>Inset</b>: click an edge (or inside a piece) → guide line for stitching</li>
@@ -188,9 +201,9 @@
   </div>
 </div>
 <input id="file-input" type="file" accept=".json,.dxf,application/json" hidden>
-<script src="js/geometry.js?v=16"></script>
-<script src="js/dxf.js?v=16"></script>
-<script src="js/dxfimport.js?v=16"></script>
-<script src="js/app.js?v=16"></script>
+<script src="js/geometry.js?v=17"></script>
+<script src="js/dxf.js?v=17"></script>
+<script src="js/dxfimport.js?v=17"></script>
+<script src="js/app.js?v=17"></script>
 </body>
 </html>

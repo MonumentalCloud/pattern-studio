@@ -467,7 +467,7 @@
       if (slitCount) $('sp-clear-slits').textContent = `Remove ${slitCount} stitch hole${slitCount > 1 ? 's' : ''}`;
       $('sel-hint').textContent = piece.foldSeg === sel.idx
         ? 'This edge is the fold — the piece unfolds across it on export.'
-        : 'Type a length to resize the edge — ● marks its start. Double-click the edge to insert a point.';
+        : 'Type a length to resize the edge — ● marks its start. Double-click inserts a point · right-click divides by measurement.';
     }
   }
 
@@ -580,6 +580,7 @@
     }
     if (ev.button !== 0) return;
     if (!$('pen-dialog').hidden) closePenDialog();
+    if (!$('divide-dialog').hidden) closeDivideDialog();
     svg.focus();
     const w = screenToWorld(ev);
     const isDbl = ev.timeStamp - lastDown.t < 400 &&
@@ -1006,8 +1007,98 @@
   }
   svg.addEventListener('contextmenu', (ev) => {
     ev.preventDefault();
-    if (tool === 'pen' && draft && draft.nodes.length) openPenDialog(ev);
+    if (tool === 'pen' && draft && draft.nodes.length) { openPenDialog(ev); return; }
+    if (tool === 'select') {
+      const w = screenToWorld(ev);
+      // prefer an edge of the selected piece, else any piece's edge
+      let pick = null;
+      const sp = selPiece();
+      if (sp && sp.path.nodes.length >= 2) {
+        const hit = Geo.nearestOnPath(sp.path.nodes, sp.path.closed, w);
+        if (hit && hit.dist < px(8)) pick = { piece: sp, hit };
+      }
+      if (!pick) pick = nearestEdgeAt(w, true);
+      if (pick) {
+        selectPiece(pick.piece.id);
+        sel.kind = 'seg';
+        sel.idx = pick.hit.seg;
+        renderAll(true);
+        renderSidebar();
+        openDivideDialog(ev, pick.piece, pick.hit.seg);
+      }
+    }
   });
+
+  // ---- divide-edge dialog (right-click an edge with the Select tool) ----
+  function openDivideDialog(ev, piece, seg) {
+    const n = piece.path.nodes.length;
+    const len = Geo.segLength(piece.path.nodes[seg], piece.path.nodes[(seg + 1) % n]);
+    $('dv-dist').value = fmt(len / 2);
+    $('dv-pct').value = 50;
+    $('dv-hint').textContent = `Edge is ${fmt(len)} cm · measured from its start (●) · Esc closes`;
+    const dlg = $('divide-dialog');
+    const wrap = $('canvas-wrap').getBoundingClientRect();
+    dlg.hidden = false;
+    dlg.style.left = Math.min(ev.clientX - wrap.left + 12, wrap.width - 250) + 'px';
+    dlg.style.top = Math.min(ev.clientY - wrap.top + 12, wrap.height - 140) + 'px';
+    $('dv-dist').focus();
+    $('dv-dist').select();
+  }
+  function closeDivideDialog() { $('divide-dialog').hidden = true; svg.focus(); }
+
+  // insert points at the given arc-length fractions (ascending, exclusive 0/1)
+  function divideSelectedEdge(fractions) {
+    const p = selPiece();
+    if (!p || sel.kind !== 'seg') { closeDivideDialog(); return; }
+    if (p.foldSeg === sel.idx) {
+      alert('The fold line must stay a single straight edge — remove the fold first.');
+      return;
+    }
+    const n = p.path.nodes.length;
+    const a = p.path.nodes[sel.idx], b = p.path.nodes[(sel.idx + 1) % n];
+    const ts = Geo.segArcParams(a, b, fractions);
+    beginChange();
+    // insert from the far end inward: each split keeps the lower part as
+    // sel.idx, and bezier parameters rescale linearly
+    let prev = 1;
+    for (let i = ts.length - 1; i >= 0; i--) {
+      insertNodeAt(p, sel.idx, Math.min(0.999, Math.max(0.001, ts[i] / prev)));
+      prev = ts[i];
+    }
+    endChange();
+    closeDivideDialog();
+    renderAll();
+    $('status-hint').textContent = `Added ${ts.length} point${ts.length > 1 ? 's' : ''} on the edge`;
+  }
+
+  $('dv-dist-btn').addEventListener('click', () => {
+    const p = selPiece();
+    if (!p || sel.kind !== 'seg') return;
+    const n = p.path.nodes.length;
+    const len = Geo.segLength(p.path.nodes[sel.idx], p.path.nodes[(sel.idx + 1) % n]);
+    const d = parseFloat($('dv-dist').value);
+    if (!(d > 0) || d >= len) { alert(`Distance must be between 0 and ${fmt(len)} cm.`); return; }
+    divideSelectedEdge([d / len]);
+  });
+  $('dv-pct-btn').addEventListener('click', () => {
+    const pct = parseFloat($('dv-pct').value);
+    if (!(pct > 0) || pct >= 100) { alert('Percentage must be between 0 and 100.'); return; }
+    divideSelectedEdge([pct / 100]);
+  });
+  $('dv-n-btn').addEventListener('click', () => {
+    const k = Math.round(parseFloat($('dv-n').value));
+    if (!(k >= 2) || k > 50) { alert('Parts must be between 2 and 50.'); return; }
+    const fr = [];
+    for (let i = 1; i < k; i++) fr.push(i / k);
+    divideSelectedEdge(fr);
+  });
+  for (const id of ['dv-dist', 'dv-pct', 'dv-n']) {
+    $(id).addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') { $(id + '-btn').click(); ev.preventDefault(); }
+      else if (ev.key === 'Escape') { closeDivideDialog(); ev.preventDefault(); }
+      ev.stopPropagation();
+    });
+  }
   for (const id of ['pd-len', 'pd-ang']) {
     $(id).addEventListener('keydown', (ev) => {
       if (ev.key === 'Enter') { commitPenDialog(); ev.preventDefault(); }
