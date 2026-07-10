@@ -423,6 +423,7 @@
     $('sel-seg-row').hidden = !showSeg;
     $('sel-seg-anchor-row').hidden = !showSeg;
     $('sel-fold-row').hidden = !showSeg;
+    $('sel-clear-slits-row').hidden = true;
     if (showNode) {
       const nd = piece.path.nodes[sel.idx];
       $('sp-x').value = fmt(nd.x);
@@ -441,6 +442,9 @@
       }
       $('sel-fold-row').hidden = !piece.path.closed;
       $('sp-fold').textContent = piece.foldSeg === sel.idx ? 'Remove fold line' : 'Make fold line';
+      const slitCount = (piece.stitchSlits || []).filter((sl) => sl.seg === sel.idx).length;
+      $('sel-clear-slits-row').hidden = !slitCount;
+      if (slitCount) $('sp-clear-slits').textContent = `Remove ${slitCount} stitch hole${slitCount > 1 ? 's' : ''}`;
       $('sel-hint').textContent = piece.foldSeg === sel.idx
         ? 'This edge is the fold — the piece unfolds across it on export.'
         : 'Type a length to resize the edge — ● marks its start. Double-click the edge to insert a point.';
@@ -894,12 +898,25 @@
   function hitSlit(piece, w) {
     const nodes = piece.path.nodes;
     let best = -1, bd = px(6);
+    const centers = [];
     (piece.stitchSlits || []).forEach((sl, i) => {
-      if (sl.seg >= nodes.length) return;
+      if (sl.seg >= nodes.length) { centers.push(null); return; }
       const p = Geo.segPoint(nodes[sl.seg], nodes[(sl.seg + 1) % nodes.length], sl.t);
+      centers.push(p);
       const d = Geo.dist(p, w);
       if (d < bd) { bd = d; best = i; }
     });
+    if (best < 0) return -1;
+    // slits sit ON the edge, so an edge with a stitch run would soak up every
+    // click — individual slits are only pickable once zoomed in far enough to
+    // tell them apart; otherwise the click belongs to the edge
+    let gap = Infinity;
+    centers.forEach((c, i) => {
+      if (i === best || !c) return;
+      const d = Geo.dist(c, centers[best]);
+      if (d < gap) gap = d;
+    });
+    if (gap * view.scale < 16) return -1;
     return best;
   }
 
@@ -1626,6 +1643,14 @@
       renderAll();
     });
   }
+  $('sp-clear-slits').addEventListener('click', () => {
+    const p = selPiece();
+    if (!p || sel.kind !== 'seg') return;
+    beginChange();
+    p.stitchSlits = (p.stitchSlits || []).filter((sl) => sl.seg !== sel.idx);
+    endChange();
+    renderAll();
+  });
   $('sp-fold').addEventListener('click', () => {
     const p = selPiece();
     if (!p || sel.kind !== 'seg' || !p.path.closed) return;

@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pattern Studio</title>
-<link rel="stylesheet" href="style.css?v=9">
+<link rel="stylesheet" href="style.css?v=10">
 </head>
 <body>
 <div id="app">
   <header id="topbar">
-    <span id="logo" title="build 9">✂ Pattern Studio</span>
+    <span id="logo" title="build 10">✂ Pattern Studio</span>
     <input id="doc-name" type="text" value="Untitled pattern" spellcheck="false" title="Pattern name">
     <span class="sep"></span>
     <button id="btn-new" title="New document">New</button>
@@ -123,6 +123,9 @@
         <div class="row" id="sel-fold-row" hidden>
           <button id="sp-fold" title="Draft half the piece and mirror it across this edge — the piece unfolds to the full shape on export">Make fold line</button>
         </div>
+        <div class="row" id="sel-clear-slits-row" hidden>
+          <button id="sp-clear-slits" title="Delete every stitching slit on this edge (zoom in to pick single ones)">Remove stitch holes</button>
+        </div>
         <div class="row hint" id="sel-hint"></div>
       </section>
       <section id="stitch-props" hidden>
@@ -170,9 +173,9 @@
   </div>
 </div>
 <input id="file-input" type="file" accept=".json,.dxf,application/json" hidden>
-<script src="js/geometry.js?v=9"></script>
-<script src="js/dxf.js?v=9"></script>
-<script src="js/dxfimport.js?v=9"></script>
-<script src="js/app.js?v=9"></script>
+<script src="js/geometry.js?v=10"></script>
+<script src="js/dxf.js?v=10"></script>
+<script src="js/dxfimport.js?v=10"></script>
+<script src="js/app.js?v=10"></script>
 </body>
 </html>
