@@ -482,7 +482,7 @@
     hole: 'Click inside a piece to add a drill hole',
     grain: 'Drag inside a piece to set the grainline · click (no drag) removes it',
     weld: 'Click an edge, then the matching edge on another piece — the second piece moves; both seam edges disappear',
-    inset: 'Click an edge for an inset guide line, or inside a piece for a full-outline ring — the Stitch tool then converts guides to holes',
+    inset: 'Click an edge for an inset guide line — keep clicking adjacent edges to extend it around corners · click inside a piece for a full-outline ring',
     stitch: 'Click an edge or guide line, then its match — both get the same number of stitching slits · same target twice = single run',
     measure: 'Drag to measure a distance',
   };
@@ -491,6 +491,7 @@
     if (t !== 'pen') finishDraft(false);
     if (t !== 'weld') weldFirst = null;
     if (t !== 'stitch') stitchFirst = null;
+    if (t !== 'inset') insetChain = null;
     $('stitch-props').hidden = t !== 'stitch';
     $('inset-props').hidden = t !== 'inset';
     document.querySelectorAll('#toolbar .tool').forEach((b) =>
@@ -1127,6 +1128,10 @@
   }
 
   // ---- inset tool: guide lines for stitching ----
+  // Clicking adjacent edges of the same piece EXTENDS the current guide around
+  // the corners (mitered), so a run can cover part of the outline.
+  let insetChain = null; // { pieceId, segs: [contiguous seg indices], d, guideId }
+
   function insetDown(w) {
     const d = Math.max(0.05, parseFloat($('in-dist').value) || 0.3);
     // an edge of a real (non-guide) closed piece → inset line for that edge
@@ -1136,21 +1141,70 @@
       const hit = Geo.nearestOnPath(p.path.nodes, p.path.closed, w);
       if (hit && hit.dist < px(10) && (!bestEdge || hit.dist < bestEdge.hit.dist)) bestEdge = { piece: p, hit };
     }
-    if (bestEdge) return insetEdge(bestEdge.piece, bestEdge.hit.seg, d);
+    if (bestEdge) {
+      const piece = bestEdge.piece, seg = bestEdge.hit.seg;
+      const n = piece.path.nodes.length;
+      // extend the active chain if this edge continues it
+      if (insetChain && insetChain.pieceId === piece.id && insetChain.d === d &&
+          pieceById(insetChain.guideId) && insetChain.segs.length < n) {
+        const segs = insetChain.segs;
+        const before = (segs[0] - 1 + n) % n;
+        const after = (segs[segs.length - 1] + 1) % n;
+        if (seg === after || seg === before) {
+          if (seg === after) segs.push(seg); else segs.unshift(seg);
+          const guide = pieceById(insetChain.guideId);
+          beginChange();
+          guide.path.nodes = edgeGuideNodes(piece, segs, d);
+          guide.stitchSlits = []; // geometry changed — re-run the stitch tool
+          endChange();
+          renderAll();
+          $('status-hint').textContent =
+            `Guide extended to ${segs.length} edges — click the next adjacent edge to continue, or switch to Stitch`;
+          return;
+        }
+      }
+      // otherwise start a fresh single-edge guide
+      const id = newGuidePiece(edgeGuideNodes(piece, [seg], d), false, piece.name + ' stitch line');
+      insetChain = { pieceId: piece.id, segs: [seg], d, guideId: id };
+      return;
+    }
     // otherwise: inside a piece → full-outline ring
     for (let i = doc.pieces.length - 1; i >= 0; i--) {
       const p = doc.pieces[i];
       if (p.visible === false || p.guide || !p.path.closed || p.path.nodes.length < 3) continue;
       const poly = Geo.pathPolyline(p.path.nodes, true, 0.1);
-      if (Geo.pointInPolygon(poly, w)) return insetOutline(p, d);
+      if (Geo.pointInPolygon(poly, w)) {
+        insetChain = null;
+        const pts = Geo.offsetClosed(Geo.dedupe(Geo.pathPolyline(p.path.nodes, true, 0.02)), -d);
+        if (pts.length < 3) return;
+        newGuidePiece(Geo.simplifyPoly(pts, 0.01, true), true, p.name + ' stitch line');
+        return;
+      }
     }
   }
 
-  function newGuidePiece(pts, closed, name) {
+  // guide node list for a contiguous run of edges, offset inward with miters
+  function edgeGuideNodes(piece, segs, d) {
+    const nodes = piece.path.nodes, n = nodes.length;
+    const s = Geo.outwardSign(Geo.pathPolyline(nodes, true, 0.05));
+    let pts = [];
+    segs.forEach((si, k) => {
+      const fp = Geo.segFlatten(nodes[si], nodes[(si + 1) % n], 0.01);
+      if (k) fp.shift(); // shared corner point
+      pts = pts.concat(fp);
+    });
+    const off = Geo.offsetOpen(Geo.dedupe(pts), -d, s);
+    return Geo.simplifyPoly(off, 0.01, false).map((p) => ({ x: p.x, y: p.y, hin: null, hout: null }));
+  }
+
+  function newGuidePiece(ptsOrNodes, closed, name) {
     const piece = {
       id: uid(), name, visible: true, guide: true,
       seamAllowance: 0, notchLength: 0.4,
-      path: { closed, nodes: pts.map((p) => ({ x: p.x, y: p.y, hin: null, hout: null })) },
+      path: {
+        closed,
+        nodes: ptsOrNodes.map((p) => ({ x: p.x, y: p.y, hin: p.hin || null, hout: p.hout || null })),
+      },
       notches: [], holes: [], stitchSlits: [], grain: null, foldSeg: null,
     };
     beginChange();
@@ -1158,29 +1212,10 @@
     endChange();
     selectPiece(piece.id);
     renderAll();
-    $('status-hint').textContent = 'Guide line created — use the Stitch tool to convert it to holes';
-  }
-
-  function insetEdge(piece, seg, d) {
-    const nodes = piece.path.nodes, n = nodes.length;
-    const a = nodes[seg], b = nodes[(seg + 1) % n];
-    const s = Geo.outwardSign(Geo.pathPolyline(nodes, true, 0.05));
-    const len = Geo.segLength(a, b);
-    const K = Math.max(8, Math.ceil(len / 0.25));
-    const pts = [];
-    for (let k = 0; k <= K; k++) {
-      const t = k / K;
-      const p = Geo.segPoint(a, b, t);
-      const tn = Geo.segTangent(a, b, t);
-      pts.push({ x: p.x - s * tn.y * d, y: p.y + s * tn.x * d }); // inward offset
-    }
-    newGuidePiece(Geo.simplifyPoly(pts, 0.01, false), false, piece.name + ' stitch line');
-  }
-
-  function insetOutline(piece, d) {
-    const pts = Geo.offsetClosed(Geo.dedupe(Geo.pathPolyline(piece.path.nodes, true, 0.02)), -d);
-    if (pts.length < 3) return;
-    newGuidePiece(Geo.simplifyPoly(pts, 0.01, true), true, piece.name + ' stitch line');
+    $('status-hint').textContent = closed
+      ? 'Guide ring created — use the Stitch tool to convert it to holes'
+      : 'Guide line created — click an adjacent edge to extend it, or use the Stitch tool';
+    return piece.id;
   }
 
   // ---- stitch tool ----
@@ -1282,6 +1317,9 @@
         stitchFirst = null;
         $('status-hint').textContent = HINTS.stitch;
         renderAll(true);
+      } else if (tool === 'inset' && insetChain) {
+        insetChain = null;
+        $('status-hint').textContent = HINTS.inset;
       } else { clearSel(); renderAll(); }
       return;
     }

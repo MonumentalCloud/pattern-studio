@@ -320,6 +320,16 @@ t('simplifyPoly removes collinear points, keeps corners', () => {
   assert(Geo.dist(out[1], { x: 10, y: 0 }) < 1e-9, 'corner kept');
 });
 
+t('offsetOpen: inward offset with a mitered corner', () => {
+  // right + bottom edges of a CW 10x10 square at (10,10)-(20,20)
+  const pts = [{ x: 20, y: 10 }, { x: 20, y: 20 }, { x: 10, y: 20 }];
+  const off = Geo.offsetOpen(pts, -0.5, 1); // inward
+  assert(off.length === 3, 'miter keeps 3 points: ' + off.length);
+  assert(Geo.dist(off[0], { x: 19.5, y: 10 }) < 1e-9, JSON.stringify(off[0]));
+  assert(Geo.dist(off[1], { x: 19.5, y: 19.5 }) < 1e-9, 'mitered corner: ' + JSON.stringify(off[1]));
+  assert(Geo.dist(off[2], { x: 10, y: 19.5 }) < 1e-9, JSON.stringify(off[2]));
+});
+
 t('guide pieces export as MARK line + CUT slits', () => {
   const guide = {
     id: 'g', name: 'stitch line', visible: true, guide: true,

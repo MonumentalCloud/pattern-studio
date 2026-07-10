@@ -204,6 +204,43 @@
     return dedupe(out);
   }
 
+  // Offset an OPEN polyline by d to the s-outward side (negative d = inward).
+  // Interior corners get miter joins with bevel fallback; the ends are offset
+  // perpendicular to their edge.
+  function offsetOpen(ptsIn, d, s) {
+    const pts = dedupe(ptsIn);
+    const m = pts.length;
+    if (m < 2 || Math.abs(d) < EPS) return pts.slice();
+    s = s || 1;
+    const out = [];
+    for (let i = 0; i < m; i++) {
+      if (i === 0) {
+        const v = norm(sub(pts[1], pts[0]));
+        out.push(add(pts[0], scale({ x: s * v.y, y: -s * v.x }, d)));
+        continue;
+      }
+      if (i === m - 1) {
+        const u = norm(sub(pts[m - 1], pts[m - 2]));
+        out.push(add(pts[m - 1], scale({ x: s * u.y, y: -s * u.x }, d)));
+        continue;
+      }
+      const u = norm(sub(pts[i], pts[i - 1])), v = norm(sub(pts[i + 1], pts[i]));
+      const nu = { x: s * u.y, y: -s * u.x }, nv = { x: s * v.y, y: -s * v.x };
+      const denom = 1 + dot(nu, nv);
+      if (denom < 1e-4) { // ~180° spike: bevel
+        out.push(add(pts[i], scale(nu, d)), add(pts[i], scale(nv, d)));
+        continue;
+      }
+      const mlen = d * Math.sqrt(2 / denom);
+      if (Math.abs(mlen) > 4 * Math.abs(d)) {
+        out.push(add(pts[i], scale(nu, d)), add(pts[i], scale(nv, d)));
+      } else {
+        out.push(add(pts[i], scale(norm(add(nu, nv)), mlen)));
+      }
+    }
+    return dedupe(out);
+  }
+
   // ---- hit testing ----
   // Nearest point on path to p. Returns { seg, t, dist, point } or null.
   function nearestOnPath(nodes, closed, p) {
@@ -494,6 +531,6 @@
     pathPolyline, pathLength, polyArea, bbox, centroid, dedupe,
     outwardSign, offsetClosed, nearestOnPath, pointInPolygon, splitSeg, setSegLength,
     reverseNodes, weldClosedPaths, reflectPoint, reflectNodes, segArcParams, slitLine,
-    pathArcParams, simplifyPoly,
+    pathArcParams, simplifyPoly, offsetOpen,
   };
 });
