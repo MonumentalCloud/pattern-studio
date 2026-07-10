@@ -320,6 +320,24 @@ t('simplifyPoly removes collinear points, keeps corners', () => {
   assert(Geo.dist(out[1], { x: 10, y: 0 }) < 1e-9, 'corner kept');
 });
 
+t('pathIntersections: line through a square and through a curve', () => {
+  const square = [N(0, 0), N(10, 0), N(10, 10), N(0, 10)];
+  const knife = [N(-2, 4), N(12, 4)];
+  const hits = Geo.pathIntersections(square, true, knife, false);
+  assert(hits.length === 2, 'square hits: ' + hits.length);
+  hits.sort((a, b) => a.point.x - b.point.x);
+  assert(Geo.dist(hits[0].point, { x: 0, y: 4 }) < 0.01 && hits[0].segA === 3, JSON.stringify(hits[0]));
+  assert(Geo.dist(hits[1].point, { x: 10, y: 4 }) < 0.01 && hits[1].segA === 1, JSON.stringify(hits[1]));
+  assert(Math.abs(hits[1].tA - 0.4) < 0.01, 'param on right edge: ' + hits[1].tA);
+  // quarter-circle arc crossed by a radial line
+  const k = 5.523;
+  const arc = [N(10, 0, null, { x: 0, y: k }), N(0, 10, { x: k, y: 0 }, null)];
+  const hits2 = Geo.pathIntersections(arc, false, [N(0, 0), N(10, 10)], false);
+  assert(hits2.length === 1, 'arc hits: ' + hits2.length);
+  const d = Math.hypot(hits2[0].point.x, hits2[0].point.y);
+  assert(Math.abs(d - 10) < 0.02, 'hit on the circle: r=' + d);
+});
+
 t('offsetOpen: inward offset with a mitered corner', () => {
   // right + bottom edges of a CW 10x10 square at (10,10)-(20,20)
   const pts = [{ x: 20, y: 10 }, { x: 20, y: 20 }, { x: 10, y: 20 }];

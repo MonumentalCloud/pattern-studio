@@ -241,6 +241,57 @@
     return dedupe(out);
   }
 
+  // Intersections between two paths (curves included), with the parameter on
+  // each: [{ segA, tA, segB, tB, point }]. Coincident hits (e.g. crossing at a
+  // shared sample point) are deduped by position.
+  function pathIntersections(nodesA, closedA, nodesB, closedB) {
+    const flat = (nodes, closed) => {
+      const n = nodes.length;
+      const segs = closed ? n : n - 1;
+      const list = [];
+      for (let i = 0; i < segs; i++) {
+        const a = nodes[i], b = nodes[(i + 1) % n];
+        const K = Math.min(512, Math.max(4, Math.ceil(segLength(a, b, 0.05) / 0.05)));
+        const pts = [];
+        for (let k = 0; k <= K; k++) pts.push({ t: k / K, p: segPoint(a, b, k / K) });
+        list.push({ seg: i, pts });
+      }
+      return list;
+    };
+    const segX = (p1, p2, p3, p4) => {
+      const d1x = p2.x - p1.x, d1y = p2.y - p1.y;
+      const d2x = p4.x - p3.x, d2y = p4.y - p3.y;
+      const den = d1x * d2y - d1y * d2x;
+      if (Math.abs(den) < 1e-12) return null;
+      const u = ((p3.x - p1.x) * d2y - (p3.y - p1.y) * d2x) / den;
+      const v = ((p3.x - p1.x) * d1y - (p3.y - p1.y) * d1x) / den;
+      if (u < 0 || u > 1 || v < 0 || v > 1) return null;
+      return { u, v };
+    };
+    const A = flat(nodesA, closedA), B = flat(nodesB, closedB);
+    const out = [];
+    for (const sa of A) {
+      for (let i = 1; i < sa.pts.length; i++) {
+        for (const sb of B) {
+          for (let j = 1; j < sb.pts.length; j++) {
+            const hit = segX(sa.pts[i - 1].p, sa.pts[i].p, sb.pts[j - 1].p, sb.pts[j].p);
+            if (!hit) continue;
+            const point = lerp(sa.pts[i - 1].p, sa.pts[i].p, hit.u);
+            if (out.some((o) => dist(o.point, point) < 1e-3)) continue;
+            out.push({
+              segA: sa.seg,
+              tA: sa.pts[i - 1].t + (sa.pts[i].t - sa.pts[i - 1].t) * hit.u,
+              segB: sb.seg,
+              tB: sb.pts[j - 1].t + (sb.pts[j].t - sb.pts[j - 1].t) * hit.v,
+              point,
+            });
+          }
+        }
+      }
+    }
+    return out;
+  }
+
   // ---- hit testing ----
   // Nearest point on path to p. Returns { seg, t, dist, point } or null.
   function nearestOnPath(nodes, closed, p) {
@@ -531,6 +582,6 @@
     pathPolyline, pathLength, polyArea, bbox, centroid, dedupe,
     outwardSign, offsetClosed, nearestOnPath, pointInPolygon, splitSeg, setSegLength,
     reverseNodes, weldClosedPaths, reflectPoint, reflectNodes, segArcParams, slitLine,
-    pathArcParams, simplifyPoly, offsetOpen,
+    pathArcParams, simplifyPoly, offsetOpen, pathIntersections,
   };
 });

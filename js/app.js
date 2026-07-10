@@ -483,6 +483,7 @@
     grain: 'Drag inside a piece to set the grainline · click (no drag) removes it',
     weld: 'Click an edge, then the matching edge on another piece — the second piece moves; both seam edges disappear',
     inset: 'Click edges to select them for a guide line (any order, click again to remove) · click inside a piece for a full-outline ring',
+    knife: 'Drag a line across a piece to cut it in two · or click an open path to cut along it (curves supported)',
     stitch: 'Click an edge or guide line, then its match — both get the same number of stitching slits · same target twice = single run',
     measure: 'Drag to measure a distance',
   };
@@ -598,6 +599,7 @@
     if (tool === 'grain') return grainDown(w);
     if (tool === 'weld') return weldDown(w);
     if (tool === 'inset') return insetDown(w);
+    if (tool === 'knife') return knifeDown(w);
     if (tool === 'stitch') return stitchDown(w);
     if (tool === 'measure') { drag = { type: 'measure', a: w, b: w }; return; }
   });
@@ -669,6 +671,12 @@
       renderAll(true);
       return;
     }
+    if (drag.type === 'knife') {
+      drag.b = w;
+      clear(gPreview);
+      el('line', { class: 'knife-line', x1: drag.a.x, y1: drag.a.y, x2: drag.b.x, y2: drag.b.y }, gPreview);
+      return;
+    }
     if (drag.type === 'measure') {
       drag.b = w;
       clear(gPreview);
@@ -686,6 +694,15 @@
     if (drag) {
       if (drag.type === 'pan') svg.classList.remove('panning');
       else if (drag.type === 'measure') clear(gPreview);
+      else if (drag.type === 'knife') {
+        clear(gPreview);
+        if (Geo.dist(drag.a, drag.b) > 0.3) {
+          cutWithNodes([
+            { x: drag.a.x, y: drag.a.y, hin: null, hout: null },
+            { x: drag.b.x, y: drag.b.y, hin: null, hout: null },
+          ], null);
+        }
+      }
       else if (drag.type === 'grain') {
         const piece = pieceById(drag.pieceId);
         if (Geo.dist(drag.a, drag.b) < 0.5) piece.grain = drag.hadGrain ? null : piece.grain && null;
@@ -1259,6 +1276,152 @@
     return piece.id;
   }
 
+  // ---- knife tool: cut a piece in two along a line or open path ----
+  function insertNodeAt(piece, seg, t) {
+    const nodes = piece.path.nodes;
+    const n = nodes.length;
+    const a = nodes[seg], b = nodes[(seg + 1) % n];
+    const { a2, mid, b2 } = Geo.splitSeg(a, b, t);
+    nodes[seg] = a2;
+    nodes[(seg + 1) % n] = b2;
+    nodes.splice(seg + 1, 0, mid);
+    remapAfterInsert(piece, seg, t);
+    if (piece.foldSeg != null && piece.foldSeg > seg) piece.foldSeg += 1;
+    return seg + 1;
+  }
+
+  function knifeDown(w) {
+    // clicking an open (non-guide) path uses it as the cut path
+    let bestPath = null;
+    for (const p of doc.pieces) {
+      if (p.visible === false || p.guide || p.path.closed || p.path.nodes.length < 2) continue;
+      const hit = Geo.nearestOnPath(p.path.nodes, false, w);
+      if (hit && hit.dist < px(8) && (!bestPath || hit.dist < bestPath.hit.dist)) bestPath = { piece: p, hit };
+    }
+    if (bestPath) {
+      cutWithNodes(JSON.parse(JSON.stringify(bestPath.piece.path.nodes)), bestPath.piece);
+      return;
+    }
+    drag = { type: 'knife', a: w, b: w };
+  }
+
+  function cutWithNodes(cutNodes, sourcePiece) {
+    for (let i = doc.pieces.length - 1; i >= 0; i--) {
+      const p = doc.pieces[i];
+      if (p.visible === false || p.guide || !p.path.closed || p.path.nodes.length < 3) continue;
+      if (sourcePiece && p.id === sourcePiece.id) continue;
+      const hits = Geo.pathIntersections(p.path.nodes, true, cutNodes, false);
+      if (hits.length === 2) {
+        if (isFolded(p)) { alert('Unfold this piece ("Unfold now") before cutting it.'); return; }
+        performCut(p, cutNodes, hits, sourcePiece);
+        return;
+      }
+      if (hits.length > 2) {
+        alert(`The cut crosses "${p.name}" ${hits.length} times — cut in steps, two crossings at a time.`);
+        return;
+      }
+    }
+    alert('The cut must cross a piece exactly twice (enter and exit).');
+  }
+
+  function performCut(target, cutNodesIn, hits, sourcePiece) {
+    const clampT = (t) => Math.min(0.995, Math.max(0.005, t));
+    beginChange();
+    // 1. insert the two intersection nodes into the outline (higher position
+    //    first so the second insertion's indices stay valid)
+    const clone = JSON.parse(JSON.stringify(target));
+    const H = hits.slice().sort((x, y) => (x.segA !== y.segA ? y.segA - x.segA : y.tA - x.tA));
+    const hiIdx = insertNodeAt(clone, H[0].segA, clampT(H[0].tA));
+    const t2 = H[1].segA === H[0].segA ? H[1].tA / H[0].tA : H[1].tA;
+    const ia = insertNodeAt(clone, H[1].segA, clampT(t2));
+    const ib = hiIdx + 1;
+    const n2 = clone.path.nodes.length;
+
+    // 2. extract the cut path's middle chain between the intersections,
+    //    keeping its curve handles
+    const cutP = {
+      path: { closed: false, nodes: JSON.parse(JSON.stringify(cutNodesIn)) },
+      notches: [], stitchSlits: [], foldSeg: null,
+    };
+    const HB = hits.slice().sort((x, y) => (x.segB !== y.segB ? y.segB - x.segB : y.tB - x.tB));
+    const cHi = insertNodeAt(cutP, HB[0].segB, clampT(HB[0].tB));
+    const ct2 = HB[1].segB === HB[0].segB ? HB[1].tB / HB[0].tB : HB[1].tB;
+    const cLo = insertNodeAt(cutP, HB[1].segB, clampT(ct2));
+    const M = cutP.path.nodes.slice(cLo, cHi + 2);
+
+    // 3. assemble the two halves: outline chain + cut chain (junction nodes
+    //    merge, adopting the cut side's handles)
+    const N = clone.path.nodes;
+    const walk = (from, to) => {
+      const arr = [];
+      for (let k = from; ; k = (k + 1) % n2) {
+        arr.push(JSON.parse(JSON.stringify(N[k])));
+        if (k === to) break;
+      }
+      return arr;
+    };
+    const mStartsAtIa = Geo.dist(M[0], N[ia]) < Geo.dist(M[0], N[ib]);
+    const build = (from, to, mChain) => {
+      const nodes = walk(from, to);
+      const last = nodes[nodes.length - 1];
+      last.hout = mChain[0].hout ? { x: mChain[0].hout.x, y: mChain[0].hout.y } : null;
+      for (let q = 1; q < mChain.length - 1; q++) nodes.push(JSON.parse(JSON.stringify(mChain[q])));
+      nodes[0].hin = mChain[mChain.length - 1].hin
+        ? { x: mChain[mChain.length - 1].hin.x, y: mChain[mChain.length - 1].hin.y } : null;
+      return nodes;
+    };
+    const Mrev = Geo.reverseNodes(M);
+    const nodesA = build(ia, ib, mStartsAtIa ? Mrev : M);  // A closes ib -> ia along the cut
+    const nodesB = build(ib, ia, mStartsAtIa ? M : Mrev);  // B closes ia -> ib along the cut
+
+    // 4. redistribute notches/slits by outline segment, holes/grain by side
+    const lenA = (ib - ia + n2) % n2; // outline edge count in A
+    const sideOf = (seg) => {
+      const rel = (seg - ia + n2) % n2;
+      return rel < lenA ? { side: 'A', seg: rel } : { side: 'B', seg: (seg - ib + n2) % n2 };
+    };
+    const nA = [], nB = [], sA = [], sB = [];
+    for (const nt of clone.notches || []) {
+      const m = sideOf(nt.seg);
+      (m.side === 'A' ? nA : nB).push(Object.assign({}, nt, { seg: m.seg }));
+    }
+    for (const sl of clone.stitchSlits || []) {
+      const m = sideOf(sl.seg);
+      (m.side === 'A' ? sA : sB).push(Object.assign({}, sl, { seg: m.seg }));
+    }
+    const polyA = Geo.pathPolyline(nodesA, true, 0.05);
+    const hA = [], hB = [];
+    for (const h of clone.holes || []) (Geo.pointInPolygon(polyA, h) ? hA : hB).push(h);
+    let gA = null, gB = null;
+    if (clone.grain) {
+      const gm = { x: (clone.grain.x1 + clone.grain.x2) / 2, y: (clone.grain.y1 + clone.grain.y2) / 2 };
+      if (Geo.pointInPolygon(polyA, gm)) gA = clone.grain; else gB = clone.grain;
+    }
+
+    // 5. write back: A replaces the original (same id), B is new
+    const base = target.name;
+    target.name = base + ' 1';
+    target.path = { closed: true, nodes: nodesA };
+    target.notches = nA;
+    target.stitchSlits = sA;
+    target.holes = hA;
+    target.grain = gA;
+    target.foldSeg = null;
+    const pieceB = {
+      id: uid(), name: base + ' 2', visible: true,
+      seamAllowance: target.seamAllowance, notchLength: target.notchLength,
+      path: { closed: true, nodes: nodesB },
+      notches: nB, stitchSlits: sB, holes: hB, grain: gB, foldSeg: null,
+    };
+    doc.pieces.splice(doc.pieces.indexOf(target) + 1, 0, pieceB);
+    if (sourcePiece) doc.pieces = doc.pieces.filter((p) => p.id !== sourcePiece.id);
+    endChange();
+    selectPiece(target.id);
+    renderAll();
+    $('status-hint').textContent = `Cut "${base}" into "${base} 1" and "${base} 2"` +
+      (sourcePiece ? ' (cut path consumed)' : '');
+  }
+
   // ---- stitch tool ----
   function stitchDown(w) {
     const res = nearestEdgeAt(w, true);
@@ -1373,6 +1536,7 @@
     else if (k === 'g') setTool('grain');
     else if (k === 'w') setTool('weld');
     else if (k === 'i') setTool('inset');
+    else if (k === 'k') setTool('knife');
     else if (k === 's') setTool('stitch');
     else if (k === 'm') setTool('measure');
     else if (k === '0') zoomFit();

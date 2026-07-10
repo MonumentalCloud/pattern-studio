@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pattern Studio</title>
-<link rel="stylesheet" href="style.css?v=14">
+<link rel="stylesheet" href="style.css?v=15">
 </head>
 <body>
 <div id="app">
   <header id="topbar">
-    <span id="logo" title="build 14">✂ Pattern Studio</span>
+    <span id="logo" title="build 15">✂ Pattern Studio</span>
     <input id="doc-name" type="text" value="Untitled pattern" spellcheck="false" title="Pattern name">
     <span class="sep"></span>
     <button id="btn-new" title="New document">New</button>
@@ -42,6 +42,7 @@
       <button class="tool" data-tool="weld" title="Weld two pieces into one along matching edges (W)">⋈<span>Weld</span></button>
       <button class="tool" data-tool="inset" title="Inset guide line: click an edge, or inside a piece for the full outline (I)">⫏<span>Inset</span></button>
       <button class="tool" data-tool="stitch" title="Matched stitching slits along edges or guide lines (S)">⋰<span>Stitch</span></button>
+      <button class="tool" data-tool="knife" title="Cut a piece in two: drag a line across it, or click an open path to cut along it (K)">✄<span>Knife</span></button>
       <button class="tool" data-tool="measure" title="Measure distance (M)">📏<span>Measure</span></button>
     </nav>
 
@@ -178,6 +179,7 @@
           <li><b>Fold</b>: select a straight edge → "Make fold line" — draft half, the mirror updates live</li>
           <li><b>Inset</b>: click an edge (or inside a piece) → guide line for stitching</li>
           <li><b>Stitch</b>: click two edges or guides → matched stitching slits on both</li>
+          <li><b>Knife</b>: drag across a piece (or click an open path) to cut it in two</li>
           <li><b>Del</b> removes point · scroll/two-finger pans · pinch or <b>Ctrl</b>+scroll zooms · <b>Space</b>+drag pans</li>
           <li>Dashed line = cutting line (seam allowance)</li>
         </ul>
@@ -186,9 +188,9 @@
   </div>
 </div>
 <input id="file-input" type="file" accept=".json,.dxf,application/json" hidden>
-<script src="js/geometry.js?v=14"></script>
-<script src="js/dxf.js?v=14"></script>
-<script src="js/dxfimport.js?v=14"></script>
-<script src="js/app.js?v=14"></script>
+<script src="js/geometry.js?v=15"></script>
+<script src="js/dxf.js?v=15"></script>
+<script src="js/dxfimport.js?v=15"></script>
+<script src="js/app.js?v=15"></script>
 </body>
 </html>
