@@ -24,7 +24,8 @@ can be saved/opened as `.pattern.json` files.
 | **Edit** | drag points and handles · double-click a point to toggle corner↔smooth · double-click an edge to insert a point · Del removes · delete a single curve handle by dragging it onto its point, double-clicking it, or the ×&nbsp;in / ×&nbsp;out buttons |
 | **Seam allowance** | per-piece width (cm); the dashed line is the cutting line, computed as a true outward offset — also what goes on the DXF `CUT` layer |
 | **Notches** | click an edge; exported as short slits from the cutting line inward (so the laser cuts them) |
-| **Stitch holes** | diagonal slits along the stitch line for hand sewing (leather/felt) — click two edges and both get the **same number of holes at matching positions**, even if the edge lengths differ; spacing and slit length configurable, exported on `CUT` |
+| **Inset guides** | click an edge (or inside a piece for the full outline) → a dashed guide line inset by a set distance — the scribed stitch line; exports to `MARK` (engrave/skip), never cut |
+| **Stitch holes** | diagonal slits for hand sewing (leather/felt) — click two edges or guide lines and both get the **same number of holes at matching positions**; guides get holes along their whole length (including closed rings); spacing/slit length configurable, exported on `CUT` |
 | **Drill holes** | marked circles on the `MARK` layer |
 | **Grainline** | drag inside a piece; double-ended arrow |
 | **Edge length** | select an edge and type a target length (cm); the edge rescales about a chosen anchor (both ends / start / end) and curves keep their shape — for walking seams |
@@ -71,7 +72,7 @@ The **Open** button also accepts `.dxf` — patterns from Seamly2D/Valentina, CL
 
 ## Keyboard
 
-`V` select · `P` pen · `N` notch · `H` hole · `G` grain · `W` weld · `S` stitch · `M` measure ·
+`V` select · `P` pen · `N` notch · `H` hole · `G` grain · `W` weld · `I` inset · `S` stitch · `M` measure ·
 `Space`+drag or two-finger scroll pan · pinch/`Ctrl`+scroll zoom · `0` fit · `Del` delete · `Ctrl+Z/Y` undo/redo ·
 `Ctrl+S` save project · `Esc`/`Enter` finish pen path
 

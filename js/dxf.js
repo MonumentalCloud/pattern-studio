@@ -158,6 +158,23 @@
     if (nodes.length < 2) return out;
 
     const seamPts = Geo.dedupe(Geo.pathPolyline(nodes, closed, FLATTEN_TOL_CM));
+
+    // guide pieces (inset stitch lines): the line itself is a marking, never a
+    // cut — but its stitching slits are real cuts
+    if (piece.guide) {
+      out.polylines.push({ layer: 'MARK', pts: seamPts, closed });
+      const gS = closed ? Geo.outwardSign(seamPts) : 1;
+      for (const sl of piece.stitchSlits || []) {
+        if (sl.seg >= nodes.length) continue;
+        const line = Geo.slitLine(nodes[sl.seg], nodes[(sl.seg + 1) % nodes.length], sl, gS);
+        out.lines.push({ layer: 'CUT', a: line.a, b: line.b });
+      }
+      for (const h of piece.holes || []) {
+        out.circles.push({ layer: 'MARK', c: { x: h.x, y: h.y }, r: h.r || 0.15 });
+      }
+      return out;
+    }
+
     const sa = closed ? (piece.seamAllowance || 0) : 0;
 
     if (sa > 0) {

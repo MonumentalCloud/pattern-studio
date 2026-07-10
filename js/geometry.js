@@ -316,6 +316,58 @@
     });
   }
 
+  // {seg, t} positions at arc-length fractions (0..1) along a whole path.
+  function pathArcParams(nodes, closed, fractions) {
+    const n = nodes.length;
+    const segs = closed ? n : n - 1;
+    const lens = [];
+    let total = 0;
+    for (let i = 0; i < segs; i++) {
+      lens.push(segLength(nodes[i], nodes[(i + 1) % n]));
+      total += lens[i];
+    }
+    if (total < EPS) return fractions.map(() => ({ seg: 0, t: 0 }));
+    return fractions.map((f) => {
+      let L = Math.min(Math.max(f, 0), 1) * total;
+      let i = 0;
+      while (i < segs - 1 && L > lens[i]) { L -= lens[i]; i++; }
+      const fr = lens[i] > EPS ? Math.min(1, L / lens[i]) : 0;
+      const t = segArcParams(nodes[i], nodes[(i + 1) % n], [fr])[0];
+      return { seg: i, t };
+    });
+  }
+
+  // Douglas-Peucker polyline simplification (keeps endpoints; closed rings
+  // anchor at point 0).
+  function simplifyPoly(ptsIn, tol, closed) {
+    const pts = closed ? ptsIn.concat([ptsIn[0]]) : ptsIn;
+    if (pts.length < 3) return ptsIn.slice();
+    const keep = new Array(pts.length).fill(false);
+    keep[0] = keep[pts.length - 1] = true;
+    const perp = (p, a, b) => {
+      const ab = sub(b, a);
+      const l2 = ab.x * ab.x + ab.y * ab.y;
+      if (l2 < EPS) return dist(p, a);
+      let t = ((p.x - a.x) * ab.x + (p.y - a.y) * ab.y) / l2;
+      t = Math.max(0, Math.min(1, t));
+      return dist(p, { x: a.x + ab.x * t, y: a.y + ab.y * t });
+    };
+    const stack = [[0, pts.length - 1]];
+    while (stack.length) {
+      const seg = stack.pop();
+      let maxD = 0, idx = -1;
+      for (let i = seg[0] + 1; i < seg[1]; i++) {
+        const d = perp(pts[i], pts[seg[0]], pts[seg[1]]);
+        if (d > maxD) { maxD = d; idx = i; }
+      }
+      if (maxD > tol && idx > 0) { keep[idx] = true; stack.push([seg[0], idx], [idx, seg[1]]); }
+    }
+    const out = [];
+    const last = closed ? pts.length - 1 : pts.length;
+    for (let i = 0; i < last; i++) if (keep[i]) out.push(pts[i]);
+    return out;
+  }
+
   // Endpoints of a stitching slit: a short line at parameter sl.t, rotated
   // sl.ang degrees (default 45) from the local tangent. sl.off (cm) shifts the
   // slit off the path along the normal — positive = inward, negative = outward;
@@ -442,5 +494,6 @@
     pathPolyline, pathLength, polyArea, bbox, centroid, dedupe,
     outwardSign, offsetClosed, nearestOnPath, pointInPolygon, splitSeg, setSegLength,
     reverseNodes, weldClosedPaths, reflectPoint, reflectNodes, segArcParams, slitLine,
+    pathArcParams, simplifyPoly,
   };
 });

@@ -296,6 +296,47 @@ t('matched stitch runs: same count, same arc fractions on unequal edges', () => 
   }
 });
 
+t('pathArcParams places even holes across a whole multi-segment path', () => {
+  // L-shaped open path: 10cm + 20cm = 30cm total
+  const nodes = [N(0, 0), N(10, 0), N(10, 20)];
+  const fr = [];
+  const count = 6;
+  for (let i = 0; i < count; i++) fr.push((i + 0.5) / count);
+  const pos = Geo.pathArcParams(nodes, false, fr);
+  const pts = pos.map((p) => Geo.segPoint(nodes[p.seg], nodes[(p.seg + 1) % 3], p.t));
+  // holes every 5cm starting at 2.5: (2.5,0), (7.5,0), then down the second leg
+  assert(Geo.dist(pts[0], { x: 2.5, y: 0 }) < 1e-6, JSON.stringify(pts[0]));
+  assert(Geo.dist(pts[1], { x: 7.5, y: 0 }) < 1e-6, JSON.stringify(pts[1]));
+  assert(Geo.dist(pts[2], { x: 10, y: 2.5 }) < 1e-6, 'crosses into seg 1: ' + JSON.stringify(pts[2]));
+  assert(Geo.dist(pts[5], { x: 10, y: 17.5 }) < 1e-6, JSON.stringify(pts[5]));
+});
+
+t('simplifyPoly removes collinear points, keeps corners', () => {
+  const pts = [];
+  for (let x = 0; x <= 10; x++) pts.push({ x, y: 0 });
+  for (let y = 1; y <= 10; y++) pts.push({ x: 10, y });
+  const out = Geo.simplifyPoly(pts, 0.01, false);
+  assert(out.length === 3, 'kept ' + out.length);
+  assert(Geo.dist(out[1], { x: 10, y: 0 }) < 1e-9, 'corner kept');
+});
+
+t('guide pieces export as MARK line + CUT slits', () => {
+  const guide = {
+    id: 'g', name: 'stitch line', visible: true, guide: true,
+    seamAllowance: 0, notchLength: 0.4,
+    path: { closed: false, nodes: [N(0, 0), N(10, 0)] },
+    notches: [], holes: [], grain: null, foldSeg: null,
+    stitchSlits: [{ seg: 0, t: 0.5, len: 0.15, ang: 45 }],
+  };
+  const shapes = DXF.pieceShapes(guide);
+  assert(shapes.polylines.length === 1 && shapes.polylines[0].layer === 'MARK',
+    'guide line on MARK: ' + JSON.stringify(shapes.polylines.map((p) => p.layer)));
+  const cut = shapes.lines.filter((l) => l.layer === 'CUT');
+  assert(cut.length === 1, 'slit still cuts');
+  const mid = Geo.lerp(cut[0].a, cut[0].b, 0.5);
+  assert(Geo.dist(mid, { x: 5, y: 0 }) < 1e-9, 'slit on the guide line');
+});
+
 t('reflectPoint / reflectNodes mirror across a line', () => {
   const a = { x: 10, y: 0 }, b = { x: 10, y: 10 }; // vertical x=10
   const r = Geo.reflectPoint({ x: 3, y: 4 }, a, b);

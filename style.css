@@ -73,7 +73,7 @@ label.chk { display: flex; align-items: center; gap: 4px; color: var(--dim); cur
 
 #canvas-wrap { flex: 1; position: relative; min-width: 0; }
 #canvas { width: 100%; height: 100%; display: block; background: var(--bg); outline: none; touch-action: none; }
-#canvas.tool-pen, #canvas.tool-notch, #canvas.tool-hole, #canvas.tool-weld, #canvas.tool-stitch { cursor: crosshair; }
+#canvas.tool-pen, #canvas.tool-notch, #canvas.tool-hole, #canvas.tool-weld, #canvas.tool-stitch, #canvas.tool-inset { cursor: crosshair; }
 #canvas.tool-grain, #canvas.tool-measure { cursor: crosshair; }
 #canvas.panning { cursor: grab; }
 
@@ -94,6 +94,8 @@ label.chk { display: flex; align-items: center; gap: 4px; color: var(--dim); cur
 }
 .piece-notch { stroke: var(--cut); stroke-width: 1.6; vector-effect: non-scaling-stroke; }
 .piece-slit { stroke: var(--cut); stroke-width: 1.4; vector-effect: non-scaling-stroke; }
+.piece-guide { fill: none; stroke: var(--mark); stroke-width: 1.2; stroke-dasharray: 4 3; vector-effect: non-scaling-stroke; }
+.piece.selected .piece-guide { stroke: var(--accent); }
 .piece-hole { fill: none; stroke: var(--mark); stroke-width: 1.4; vector-effect: non-scaling-stroke; }
 .piece-grain { stroke: var(--mark); stroke-width: 1.4; vector-effect: non-scaling-stroke; fill: none; }
 .piece-label { fill: var(--dim); font-family: system-ui, sans-serif; pointer-events: none; }

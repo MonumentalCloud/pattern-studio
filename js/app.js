@@ -207,6 +207,19 @@
     for (const piece of doc.pieces) {
       if (piece.visible === false) continue;
       const g = el('g', { class: 'piece' + (piece.id === sel.pieceId ? ' selected' : ''), 'data-id': piece.id }, gPieces);
+      // guide pieces (inset stitch lines): dashed marking + slits, nothing else
+      if (piece.guide) {
+        const gn = piece.path.nodes;
+        if (gn.length < 2) continue;
+        el('path', { class: 'piece-guide', d: pathD(gn, piece.path.closed) }, g);
+        const gS = piece.path.closed ? Geo.outwardSign(Geo.pathPolyline(gn, true, 0.1)) : 1;
+        for (const sl of piece.stitchSlits || []) {
+          if (sl.seg >= gn.length) continue;
+          const ln = Geo.slitLine(gn[sl.seg], gn[(sl.seg + 1) % gn.length], sl, gS);
+          el('line', { class: 'piece-slit', x1: ln.a.x, y1: ln.a.y, x2: ln.b.x, y2: ln.b.y }, g);
+        }
+        continue;
+      }
       // rp = full geometry (folded pieces resolve to their unfolded outline)
       const rp = effPiece(piece);
       const folded = rp !== piece;
@@ -313,7 +326,8 @@
         const wn = wp.path.nodes;
         el('path', {
           class: 'seg-highlight weld',
-          d: segD(wn[firstPick.seg], wn[(firstPick.seg + 1) % wn.length]),
+          // a guide gets stitched along its whole length — highlight all of it
+          d: wp.guide ? pathD(wn, wp.path.closed) : segD(wn[firstPick.seg], wn[(firstPick.seg + 1) % wn.length]),
         }, gOverlay);
       }
     }
@@ -443,9 +457,12 @@
       if (document.activeElement !== $('sp-seglen')) {
         $('sp-seglen').value = fmt(Geo.segLength(a, b));
       }
-      $('sel-fold-row').hidden = !piece.path.closed;
+      $('sel-fold-row').hidden = !piece.path.closed || !!piece.guide;
       $('sp-fold').textContent = piece.foldSeg === sel.idx ? 'Remove fold line' : 'Make fold line';
-      const slitCount = (piece.stitchSlits || []).filter((sl) => sl.seg === sel.idx).length;
+      // guides carry one run over the whole path — the button clears all of it
+      const slitCount = piece.guide
+        ? (piece.stitchSlits || []).length
+        : (piece.stitchSlits || []).filter((sl) => sl.seg === sel.idx).length;
       $('sel-clear-slits-row').hidden = !slitCount;
       if (slitCount) $('sp-clear-slits').textContent = `Remove ${slitCount} stitch hole${slitCount > 1 ? 's' : ''}`;
       $('sel-hint').textContent = piece.foldSeg === sel.idx
@@ -465,7 +482,8 @@
     hole: 'Click inside a piece to add a drill hole',
     grain: 'Drag inside a piece to set the grainline · click (no drag) removes it',
     weld: 'Click an edge, then the matching edge on another piece — the second piece moves; both seam edges disappear',
-    stitch: 'Click an edge, then its matching edge — both get the same number of stitching slits · click the same edge twice for a single run',
+    inset: 'Click an edge for an inset guide line, or inside a piece for a full-outline ring — the Stitch tool then converts guides to holes',
+    stitch: 'Click an edge or guide line, then its match — both get the same number of stitching slits · same target twice = single run',
     measure: 'Drag to measure a distance',
   };
   function setTool(t) {
@@ -474,6 +492,7 @@
     if (t !== 'weld') weldFirst = null;
     if (t !== 'stitch') stitchFirst = null;
     $('stitch-props').hidden = t !== 'stitch';
+    $('inset-props').hidden = t !== 'inset';
     document.querySelectorAll('#toolbar .tool').forEach((b) =>
       b.classList.toggle('active', b.dataset.tool === t));
     svg.setAttribute('class', 'tool-' + t);
@@ -577,6 +596,7 @@
     if (tool === 'hole') return holeDown(w);
     if (tool === 'grain') return grainDown(w);
     if (tool === 'weld') return weldDown(w);
+    if (tool === 'inset') return insetDown(w);
     if (tool === 'stitch') return stitchDown(w);
     if (tool === 'measure') { drag = { type: 'measure', a: w, b: w }; return; }
   });
@@ -1038,7 +1058,7 @@
 
   function weldDown(w) {
     const res = nearestEdgeAt(w);
-    if (!res) return;
+    if (!res || res.piece.guide) return; // guides are markings, not weldable geometry
     if (!weldFirst || weldFirst.pieceId === res.piece.id || !pieceById(weldFirst.pieceId)) {
       weldFirst = { pieceId: res.piece.id, seg: res.hit.seg };
       selectPiece(res.piece.id);
@@ -1106,6 +1126,63 @@
     renderAll();
   }
 
+  // ---- inset tool: guide lines for stitching ----
+  function insetDown(w) {
+    const d = Math.max(0.05, parseFloat($('in-dist').value) || 0.3);
+    // an edge of a real (non-guide) closed piece → inset line for that edge
+    let bestEdge = null;
+    for (const p of doc.pieces) {
+      if (p.visible === false || p.guide || !p.path.closed || p.path.nodes.length < 3) continue;
+      const hit = Geo.nearestOnPath(p.path.nodes, p.path.closed, w);
+      if (hit && hit.dist < px(10) && (!bestEdge || hit.dist < bestEdge.hit.dist)) bestEdge = { piece: p, hit };
+    }
+    if (bestEdge) return insetEdge(bestEdge.piece, bestEdge.hit.seg, d);
+    // otherwise: inside a piece → full-outline ring
+    for (let i = doc.pieces.length - 1; i >= 0; i--) {
+      const p = doc.pieces[i];
+      if (p.visible === false || p.guide || !p.path.closed || p.path.nodes.length < 3) continue;
+      const poly = Geo.pathPolyline(p.path.nodes, true, 0.1);
+      if (Geo.pointInPolygon(poly, w)) return insetOutline(p, d);
+    }
+  }
+
+  function newGuidePiece(pts, closed, name) {
+    const piece = {
+      id: uid(), name, visible: true, guide: true,
+      seamAllowance: 0, notchLength: 0.4,
+      path: { closed, nodes: pts.map((p) => ({ x: p.x, y: p.y, hin: null, hout: null })) },
+      notches: [], holes: [], stitchSlits: [], grain: null, foldSeg: null,
+    };
+    beginChange();
+    doc.pieces.push(piece);
+    endChange();
+    selectPiece(piece.id);
+    renderAll();
+    $('status-hint').textContent = 'Guide line created — use the Stitch tool to convert it to holes';
+  }
+
+  function insetEdge(piece, seg, d) {
+    const nodes = piece.path.nodes, n = nodes.length;
+    const a = nodes[seg], b = nodes[(seg + 1) % n];
+    const s = Geo.outwardSign(Geo.pathPolyline(nodes, true, 0.05));
+    const len = Geo.segLength(a, b);
+    const K = Math.max(8, Math.ceil(len / 0.25));
+    const pts = [];
+    for (let k = 0; k <= K; k++) {
+      const t = k / K;
+      const p = Geo.segPoint(a, b, t);
+      const tn = Geo.segTangent(a, b, t);
+      pts.push({ x: p.x - s * tn.y * d, y: p.y + s * tn.x * d }); // inward offset
+    }
+    newGuidePiece(Geo.simplifyPoly(pts, 0.01, false), false, piece.name + ' stitch line');
+  }
+
+  function insetOutline(piece, d) {
+    const pts = Geo.offsetClosed(Geo.dedupe(Geo.pathPolyline(piece.path.nodes, true, 0.02)), -d);
+    if (pts.length < 3) return;
+    newGuidePiece(Geo.simplifyPoly(pts, 0.01, true), true, piece.name + ' stitch line');
+  }
+
   // ---- stitch tool ----
   function stitchDown(w) {
     const res = nearestEdgeAt(w, true);
@@ -1121,36 +1198,58 @@
     stitchEdges(pA, stitchFirst.seg, res.piece, res.hit.seg);
   }
 
-  // Put the SAME number of slits on both edges, at equal arc-length fractions,
-  // so hole i on edge A always pairs with hole i on edge B when sewing.
+  // Put the SAME number of slits on both targets, at equal arc-length
+  // fractions, so hole i on side A always pairs with hole i on side B when
+  // sewing. A target is one edge of a normal piece, or the WHOLE path of a
+  // guide line (inset stitch lines get holes along their full length).
+  function stitchTarget(piece, seg) {
+    if (piece.guide) {
+      return {
+        whole: true,
+        loop: piece.path.closed,
+        len: Geo.pathLength(piece.path.nodes, piece.path.closed),
+        place: (fractions) => Geo.pathArcParams(piece.path.nodes, piece.path.closed, fractions),
+      };
+    }
+    const n = piece.path.nodes.length;
+    const a = piece.path.nodes[seg], b = piece.path.nodes[(seg + 1) % n];
+    return {
+      whole: false,
+      loop: false,
+      len: Geo.segLength(a, b),
+      place: (fractions) => Geo.segArcParams(a, b, fractions).map((t) => ({ seg, t })),
+    };
+  }
+
   function stitchEdges(pA, segA, pB, segB) {
     const spacing = Math.max(0.1, parseFloat($('st-spacing').value) || 0.3);
     const slitLen = Math.max(0.05, parseFloat($('st-len').value) || 0.15);
     const off = parseFloat($('st-off').value) || 0;
-    const nA = pA.path.nodes.length, nB = pB.path.nodes.length;
-    const a1 = pA.path.nodes[segA], a2 = pA.path.nodes[(segA + 1) % nA];
-    const lenA = Geo.segLength(a1, a2);
-    const same = pA.id === pB.id && segA === segB;
-    const count = Math.max(2, Math.round(lenA / spacing));
-    const fractions = [];
-    for (let i = 0; i < count; i++) fractions.push((i + 0.5) / count);
+    const tA = stitchTarget(pA, segA);
+    const same = pA.id === pB.id && (tA.whole || segA === segB);
+    const tB = same ? tA : stitchTarget(pB, segB);
+    const count = Math.max(2, Math.round(tA.len / spacing));
+    // closed guide rings loop evenly; open runs inset half a step from the ends
+    const frFor = (t) => {
+      const fr = [];
+      for (let i = 0; i < count; i++) fr.push(t.loop ? i / count : (i + 0.5) / count);
+      return fr;
+    };
     beginChange();
-    const tsA = Geo.segArcParams(a1, a2, fractions);
-    pA.stitchSlits = pA.stitchSlits || [];
-    for (const t of tsA) pA.stitchSlits.push({ seg: segA, t, len: slitLen, ang: 45, off });
-    let lenB = lenA;
-    if (!same) {
-      const b1 = pB.path.nodes[segB], b2 = pB.path.nodes[(segB + 1) % nB];
-      lenB = Geo.segLength(b1, b2);
-      const tsB = Geo.segArcParams(b1, b2, fractions);
-      pB.stitchSlits = pB.stitchSlits || [];
-      for (const t of tsB) pB.stitchSlits.push({ seg: segB, t, len: slitLen, ang: 45, off });
-    }
+    const put = (piece, target) => {
+      piece.stitchSlits = piece.stitchSlits || [];
+      for (const pos of target.place(frFor(target))) {
+        // holes sit ON a guide line; the Inset field only applies to raw edges
+        piece.stitchSlits.push({ seg: pos.seg, t: pos.t, len: slitLen, ang: 45, off: target.whole ? 0 : off });
+      }
+    };
+    put(pA, tA);
+    if (!same) put(pB, tB);
     endChange();
     stitchFirst = null;
     $('status-hint').textContent = same
-      ? `${count} stitching slits on the edge (${fmt(lenA)} cm)`
-      : `${count} matched slits per edge (${fmt(lenA)} vs ${fmt(lenB)} cm)`;
+      ? `${count} stitching slits (${fmt(tA.len)} cm)`
+      : `${count} matched slits per side (${fmt(tA.len)} vs ${fmt(tB.len)} cm)`;
     renderAll();
   }
 
@@ -1194,6 +1293,7 @@
     else if (k === 'h') setTool('hole');
     else if (k === 'g') setTool('grain');
     else if (k === 'w') setTool('weld');
+    else if (k === 'i') setTool('inset');
     else if (k === 's') setTool('stitch');
     else if (k === 'm') setTool('measure');
     else if (k === '0') zoomFit();
@@ -1655,7 +1755,7 @@
     const p = selPiece();
     if (!p || sel.kind !== 'seg') return;
     beginChange();
-    p.stitchSlits = (p.stitchSlits || []).filter((sl) => sl.seg !== sel.idx);
+    p.stitchSlits = p.guide ? [] : (p.stitchSlits || []).filter((sl) => sl.seg !== sel.idx);
     endChange();
     renderAll();
   });
