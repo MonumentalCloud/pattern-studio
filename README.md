@@ -72,7 +72,7 @@ The **Open** button also accepts `.dxf` — patterns from Seamly2D/Valentina, CL
 ## Keyboard
 
 `V` select · `P` pen · `N` notch · `H` hole · `G` grain · `W` weld · `S` stitch · `M` measure ·
-`Space`+drag pan · wheel zoom · `0` fit · `Del` delete · `Ctrl+Z/Y` undo/redo ·
+`Space`+drag or two-finger scroll pan · pinch/`Ctrl`+scroll zoom · `0` fit · `Del` delete · `Ctrl+Z/Y` undo/redo ·
 `Ctrl+S` save project · `Esc`/`Enter` finish pen path
 
 ## Tests

@@ -532,6 +532,17 @@
   let lastDown = { t: -1e9, x: 0, y: 0 };
 
   svg.addEventListener('pointerdown', (ev) => {
+    if (ev.pointerType === 'touch') {
+      touchPts.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+      if (touchPts.size >= 2) {
+        // second finger: abort any single-finger tool drag, start the gesture
+        if (drag) { endChange(); drag = null; }
+        pinch = null;
+        pinchUpdate(); // set the reference from the touchdown positions
+        ev.preventDefault();
+        return;
+      }
+    }
     if (ev.button === 1 || spaceDown) { // pan
       drag = { type: 'pan', sx: ev.clientX, sy: ev.clientY, vx: view.x, vy: view.y };
       svg.setPointerCapture(ev.pointerId);
@@ -564,6 +575,10 @@
   });
 
   svg.addEventListener('pointermove', (ev) => {
+    if (ev.pointerType === 'touch' && touchPts.has(ev.pointerId)) {
+      touchPts.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+      if (touchPts.size >= 2) { pinchUpdate(); return; }
+    }
     const w = screenToWorld(ev);
     $('status-pos').textContent = `${fmt(w.x)}, ${fmt(w.y)} cm`;
 
@@ -720,9 +735,53 @@
 
   svg.addEventListener('wheel', (ev) => {
     ev.preventDefault();
-    const w = screenToWorld(ev);
-    zoomAt(ev.deltaY < 0 ? 1.18 : 1 / 1.18, w.x, w.y);
+    if (ev.ctrlKey || ev.metaKey) {
+      // trackpad pinch arrives as ctrl+wheel; also plain Ctrl/Cmd+scroll
+      const w = screenToWorld(ev);
+      const dy = ev.deltaMode === 1 ? ev.deltaY * 33 : ev.deltaY;
+      const factor = Math.min(1.25, Math.max(0.8, Math.exp(-dy * 0.01)));
+      zoomAt(factor, w.x, w.y);
+    } else {
+      // two-finger scroll (or mouse wheel) pans
+      const dm = ev.deltaMode === 1 ? 16 : 1;
+      view.x += (ev.deltaX * dm) / view.scale;
+      view.y += (ev.deltaY * dm) / view.scale;
+      applyView();
+    }
   }, { passive: false });
+
+  // ---- touch: one finger = tools, two fingers = pan/pinch-zoom ----
+  const touchPts = new Map(); // pointerId -> {x, y}
+  let pinch = null; // { wx, wy, d0, s0 } gesture reference
+
+  function pinchUpdate() {
+    const pts = [...touchPts.values()];
+    if (pts.length < 2) return;
+    const cx = (pts[0].x + pts[1].x) / 2, cy = (pts[0].y + pts[1].y) / 2;
+    const d = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+    const r = svg.getBoundingClientRect();
+    if (!pinch) {
+      pinch = {
+        wx: view.x + (cx - r.left) / view.scale,
+        wy: view.y + (cy - r.top) / view.scale,
+        d0: Math.max(d, 1),
+        s0: view.scale,
+      };
+      return;
+    }
+    const ns = Math.min(400, Math.max(1.5, pinch.s0 * d / pinch.d0));
+    view.scale = ns;
+    view.x = pinch.wx - (cx - r.left) / ns;
+    view.y = pinch.wy - (cy - r.top) / ns;
+    applyView();
+  }
+
+  svg.addEventListener('pointerup', (ev) => {
+    if (ev.pointerType === 'touch') { touchPts.delete(ev.pointerId); if (touchPts.size < 2) pinch = null; }
+  });
+  svg.addEventListener('pointercancel', (ev) => {
+    if (ev.pointerType === 'touch') { touchPts.delete(ev.pointerId); if (touchPts.size < 2) pinch = null; }
+  });
 
   // when a segment is split, notches/slits on that segment must be remapped
   function remapAfterInsert(piece, seg, t) {
