@@ -240,6 +240,35 @@ t('slitLine: diagonal slit centered on the path', () => {
     '45 degrees: ' + JSON.stringify(d));
 });
 
+t('slitLine inset: positive moves inward, negative outward', () => {
+  // top edge of a CW (y-down) square: outward normal points up (-y)
+  const a = N(0, 0), b = N(10, 0);
+  const inward = Geo.slitLine(a, b, { t: 0.5, len: 0.2, ang: 45, off: 0.3 }, 1);
+  const mIn = Geo.lerp(inward.a, inward.b, 0.5);
+  assert(Geo.dist(mIn, { x: 5, y: 0.3 }) < 1e-9, 'inward center: ' + JSON.stringify(mIn));
+  const outward = Geo.slitLine(a, b, { t: 0.5, len: 0.2, ang: 45, off: -0.3 }, 1);
+  const mOut = Geo.lerp(outward.a, outward.b, 0.5);
+  assert(Geo.dist(mOut, { x: 5, y: -0.3 }) < 1e-9, 'outward center: ' + JSON.stringify(mOut));
+  // winding flips the outward side; "inward" must follow
+  const flipped = Geo.slitLine(a, b, { t: 0.5, len: 0.2, ang: 45, off: 0.3 }, -1);
+  const mFl = Geo.lerp(flipped.a, flipped.b, 0.5);
+  assert(Geo.dist(mFl, { x: 5, y: -0.3 }) < 1e-9, 'sign-aware: ' + JSON.stringify(mFl));
+});
+
+t('inset slits stay inside the piece through DXF export', () => {
+  const piece = {
+    id: 'p', name: 'x', visible: true, seamAllowance: 1, notchLength: 0.4,
+    path: { closed: true, nodes: [N(0, 0), N(10, 0), N(10, 10), N(0, 10)] },
+    notches: [], holes: [], grain: null, foldSeg: null,
+    stitchSlits: [{ seg: 0, t: 0.5, len: 0.15, ang: 45, off: 0.4 }],
+  };
+  const shapes = DXF.pieceShapes(piece);
+  const slit = shapes.lines.find((l) => l.layer === 'CUT');
+  const mid = Geo.lerp(slit.a, slit.b, 0.5);
+  // seg 0 is the top edge (y=0) of a piece extending down to y=10 — inset 0.4 puts it at y=0.4
+  assert(Geo.dist(mid, { x: 5, y: 0.4 }) < 1e-9, 'slit inset into the piece: ' + JSON.stringify(mid));
+});
+
 t('matched stitch runs: same count, same arc fractions on unequal edges', () => {
   const count = 7;
   const fr = [];

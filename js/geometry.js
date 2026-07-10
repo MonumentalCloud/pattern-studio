@@ -316,11 +316,18 @@
     });
   }
 
-  // Endpoints of a stitching slit: a short line centered on the path at
-  // parameter sl.t, rotated sl.ang degrees (default 45) from the local tangent.
-  function slitLine(a, b, sl) {
-    const p = segPoint(a, b, sl.t);
+  // Endpoints of a stitching slit: a short line at parameter sl.t, rotated
+  // sl.ang degrees (default 45) from the local tangent. sl.off (cm) shifts the
+  // slit off the path along the normal — positive = inward, negative = outward;
+  // outSign is the piece's outwardSign (+1 assumed when unknown/open).
+  function slitLine(a, b, sl, outSign) {
+    let p = segPoint(a, b, sl.t);
     const tan = segTangent(a, b, sl.t);
+    if (sl.off) {
+      const os = outSign == null ? 1 : outSign;
+      const n = { x: os * tan.y, y: -os * tan.x }; // outward normal
+      p = { x: p.x - n.x * sl.off, y: p.y - n.y * sl.off };
+    }
     const ang = (sl.ang == null ? 45 : sl.ang) * Math.PI / 180;
     const c = Math.cos(ang), s = Math.sin(ang);
     const d = { x: c * tan.x - s * tan.y, y: s * tan.x + c * tan.y };

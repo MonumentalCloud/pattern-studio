@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pattern Studio</title>
-<link rel="stylesheet" href="style.css?v=10">
+<link rel="stylesheet" href="style.css?v=11">
 </head>
 <body>
 <div id="app">
   <header id="topbar">
-    <span id="logo" title="build 10">✂ Pattern Studio</span>
+    <span id="logo" title="build 11">✂ Pattern Studio</span>
     <input id="doc-name" type="text" value="Untitled pattern" spellcheck="false" title="Pattern name">
     <span class="sep"></span>
     <button id="btn-new" title="New document">New</button>
@@ -134,8 +134,11 @@
           <input id="st-spacing" type="number" min="0.1" max="2" step="0.05" value="0.3"> <em>cm</em></div>
         <div class="row"><label>Slit length</label>
           <input id="st-len" type="number" min="0.05" max="1" step="0.05" value="0.15"> <em>cm</em></div>
-        <div class="row hint">Diagonal slits on the stitch line. Click two edges to give both the same
-          number of holes at matching positions; the count comes from the first edge ÷ spacing.</div>
+        <div class="row"><label>Inset</label>
+          <input id="st-off" type="number" min="-2" max="2" step="0.05" value="0" title="Distance from the edge: + moves the slits inside the piece, − outside, 0 centers them on the line"> <em>cm</em></div>
+        <div class="row hint">Diagonal slits along the edge. Click two edges to give both the same
+          number of holes at matching positions; the count comes from the first edge ÷ spacing.
+          For leather with no seam allowance, set Inset ≈ 0.3 so holes sit inside the cut edge.</div>
       </section>
       <section id="cloud">
         <h3>Cloud (GitHub)</h3>
@@ -173,9 +176,9 @@
   </div>
 </div>
 <input id="file-input" type="file" accept=".json,.dxf,application/json" hidden>
-<script src="js/geometry.js?v=10"></script>
-<script src="js/dxf.js?v=10"></script>
-<script src="js/dxfimport.js?v=10"></script>
-<script src="js/app.js?v=10"></script>
+<script src="js/geometry.js?v=11"></script>
+<script src="js/dxf.js?v=11"></script>
+<script src="js/dxfimport.js?v=11"></script>
+<script src="js/app.js?v=11"></script>
 </body>
 </html>

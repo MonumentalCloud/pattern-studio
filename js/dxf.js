@@ -184,10 +184,11 @@
       }
     }
 
-    // stitching slits: diagonal cuts on the stitch line itself
+    // stitching slits: diagonal cuts on (or inset from) the stitch line
+    const outS = closed ? Geo.outwardSign(seamPts) : 1;
     for (const sl of piece.stitchSlits || []) {
       if (sl.seg >= nodes.length) continue;
-      const line = Geo.slitLine(nodes[sl.seg], nodes[(sl.seg + 1) % nodes.length], sl);
+      const line = Geo.slitLine(nodes[sl.seg], nodes[(sl.seg + 1) % nodes.length], sl, outS);
       out.lines.push({ layer: 'CUT', a: line.a, b: line.b });
     }
 

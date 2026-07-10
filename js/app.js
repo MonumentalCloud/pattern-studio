@@ -258,10 +258,13 @@
       }
 
       // stitching slits
-      for (const sl of rp.stitchSlits || []) {
-        if (sl.seg >= nodes.length) continue;
-        const ln = Geo.slitLine(nodes[sl.seg], nodes[(sl.seg + 1) % nodes.length], sl);
-        el('line', { class: 'piece-slit', x1: ln.a.x, y1: ln.a.y, x2: ln.b.x, y2: ln.b.y }, g);
+      if ((rp.stitchSlits || []).length) {
+        const outS = closed && seamPts && seamPts.length > 2 ? Geo.outwardSign(seamPts) : 1;
+        for (const sl of rp.stitchSlits) {
+          if (sl.seg >= nodes.length) continue;
+          const ln = Geo.slitLine(nodes[sl.seg], nodes[(sl.seg + 1) % nodes.length], sl, outS);
+          el('line', { class: 'piece-slit', x1: ln.a.x, y1: ln.a.y, x2: ln.b.x, y2: ln.b.y }, g);
+        }
       }
 
       // holes
@@ -897,11 +900,15 @@
 
   function hitSlit(piece, w) {
     const nodes = piece.path.nodes;
+    const slits = piece.stitchSlits || [];
+    if (!slits.length) return -1;
+    const outS = piece.path.closed ? Geo.outwardSign(Geo.pathPolyline(nodes, true, 0.1)) : 1;
     let best = -1, bd = px(6);
     const centers = [];
-    (piece.stitchSlits || []).forEach((sl, i) => {
+    slits.forEach((sl, i) => {
       if (sl.seg >= nodes.length) { centers.push(null); return; }
-      const p = Geo.segPoint(nodes[sl.seg], nodes[(sl.seg + 1) % nodes.length], sl.t);
+      const ln = Geo.slitLine(nodes[sl.seg], nodes[(sl.seg + 1) % nodes.length], sl, outS);
+      const p = Geo.lerp(ln.a, ln.b, 0.5);
       centers.push(p);
       const d = Geo.dist(p, w);
       if (d < bd) { bd = d; best = i; }
@@ -1119,6 +1126,7 @@
   function stitchEdges(pA, segA, pB, segB) {
     const spacing = Math.max(0.1, parseFloat($('st-spacing').value) || 0.3);
     const slitLen = Math.max(0.05, parseFloat($('st-len').value) || 0.15);
+    const off = parseFloat($('st-off').value) || 0;
     const nA = pA.path.nodes.length, nB = pB.path.nodes.length;
     const a1 = pA.path.nodes[segA], a2 = pA.path.nodes[(segA + 1) % nA];
     const lenA = Geo.segLength(a1, a2);
@@ -1129,14 +1137,14 @@
     beginChange();
     const tsA = Geo.segArcParams(a1, a2, fractions);
     pA.stitchSlits = pA.stitchSlits || [];
-    for (const t of tsA) pA.stitchSlits.push({ seg: segA, t, len: slitLen, ang: 45 });
+    for (const t of tsA) pA.stitchSlits.push({ seg: segA, t, len: slitLen, ang: 45, off });
     let lenB = lenA;
     if (!same) {
       const b1 = pB.path.nodes[segB], b2 = pB.path.nodes[(segB + 1) % nB];
       lenB = Geo.segLength(b1, b2);
       const tsB = Geo.segArcParams(b1, b2, fractions);
       pB.stitchSlits = pB.stitchSlits || [];
-      for (const t of tsB) pB.stitchSlits.push({ seg: segB, t, len: slitLen, ang: 45 });
+      for (const t of tsB) pB.stitchSlits.push({ seg: segB, t, len: slitLen, ang: 45, off });
     }
     endChange();
     stitchFirst = null;
