@@ -112,6 +112,16 @@ label.chk { display: flex; align-items: center; gap: 4px; color: var(--dim); cur
 .measure-line { stroke: var(--accent2); stroke-width: 1.4; vector-effect: non-scaling-stroke; }
 .measure-text, .seg-len-text { fill: var(--accent2); font-family: system-ui, sans-serif; paint-order: stroke; stroke: var(--bg); stroke-width: 0.12em; }
 
+#pen-dialog {
+  position: absolute; z-index: 10;
+  background: var(--panel); border: 1px solid var(--accent); border-radius: 6px;
+  padding: 8px 10px; box-shadow: 0 4px 16px #0008;
+}
+#pen-dialog .row { margin-bottom: 4px; }
+#pen-dialog label { width: 46px; color: var(--dim); }
+#pen-dialog input { width: 70px; }
+#pen-dialog .hint { color: var(--dim); font-size: 11px; margin-bottom: 0; }
+
 #statusbar {
   position: absolute; left: 0; right: 0; bottom: 0;
   display: flex; gap: 16px; padding: 4px 12px;

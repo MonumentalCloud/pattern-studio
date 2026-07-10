@@ -20,7 +20,7 @@ can be saved/opened as `.pattern.json` files.
 
 | | |
 |---|---|
-| **Pen tool** | click = corner point, click-drag = curve (bezier handles), click the first point to close the piece |
+| **Pen tool** | click = corner point, click-drag = curve (bezier handles), click the first point to close the piece · live length readout while drawing · **right-click to type an exact length + angle** for the next segment |
 | **Edit** | drag points and handles · double-click a point to toggle corner↔smooth · double-click an edge to insert a point · Del removes · delete a single curve handle by dragging it onto its point, double-clicking it, or the ×&nbsp;in / ×&nbsp;out buttons |
 | **Seam allowance** | per-piece width (cm); the dashed line is the cutting line, computed as a true outward offset — also what goes on the DXF `CUT` layer |
 | **Notches** | click an edge; exported as short slits from the cutting line inward (so the laser cuts them) |
@@ -69,6 +69,8 @@ outward-normal orientation, curve splitting, and DXF structure/scale/notch geome
 
 - [x] Edge-length editing (type a number, the curve adjusts) for walking seams
 - [x] Weld/join two pieces along matching edges
+- [ ] DXF import (LINE/POLYLINE/ARC/CIRCLE → pieces; AAMA/ASTM aware, so CLO3D's
+      DXF export imports too — `.zprj` itself is proprietary, export DXF from CLO instead)
 - [ ] GarmentCode importer — open [GarmentCode](https://github.com/maria-korosteleva/GarmentCode) /
       Design2GarmentCode specification JSONs as editable pieces (verified compatible:
       cm units, panels map to pieces, quadratic/cubic curves map to handles exactly)

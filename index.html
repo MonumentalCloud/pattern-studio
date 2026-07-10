@@ -62,6 +62,11 @@
         <g id="layer-preview"></g>
         <g id="layer-overlay"></g>
       </svg>
+      <div id="pen-dialog" hidden>
+        <div class="row"><label>Length</label><input id="pd-len" type="number" min="0.1" step="0.1"> <em>cm</em></div>
+        <div class="row"><label>Angle</label><input id="pd-ang" type="number" step="1" title="0° = right, 90° = up, counter-clockwise"> <em>°</em></div>
+        <div class="row hint">Enter places the point · Esc cancels</div>
+      </div>
       <div id="statusbar">
         <span id="status-pos">0.0, 0.0 cm</span>
         <span id="status-hint"></span>
@@ -151,7 +156,7 @@
       <section id="help">
         <h3>Quick help</h3>
         <ul class="help">
-          <li><b>Pen</b>: click = corner, drag = curve, click first point to close</li>
+          <li><b>Pen</b>: click = corner, drag = curve, click first point to close · right-click = type exact length &amp; angle</li>
           <li><b>Select</b>: drag points/handles · double-click point = corner↔smooth · double-click edge = add point</li>
           <li>Click an edge, then type a length in the sidebar to resize it</li>
           <li><b>Weld</b>: click an edge on each of two pieces to fuse them into one (the seam disappears)</li>

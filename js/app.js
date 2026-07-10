@@ -453,7 +453,7 @@
   let stitchFirst = null; // stitch tool: same, for the first edge of a matched pair
   const HINTS = {
     select: 'Click a piece or point to select · drag to move · Del deletes',
-    pen: 'Click = corner, drag = curve · click the first point to close · Esc finishes open',
+    pen: 'Click = corner, drag = curve · right-click = type exact length/angle · click the first point to close · Esc finishes open',
     notch: 'Click near an edge to add a notch',
     hole: 'Click inside a piece to add a drill hole',
     grain: 'Drag inside a piece to set the grainline · click (no drag) removes it',
@@ -487,6 +487,15 @@
         class: 'preview-rubber',
         x1: last.x, y1: last.y, x2: draft.mouse.x, y2: draft.mouse.y,
       }, gPreview);
+      // live length of the segment being drawn (right-click to type it)
+      const len = Geo.dist(last, draft.mouse);
+      if (len > 0.05) {
+        const mid = Geo.lerp(last, draft.mouse, 0.5);
+        el('text', {
+          class: 'measure-text', x: mid.x, y: mid.y - px(8),
+          'font-size': px(12), 'text-anchor': 'middle',
+        }, gPreview).textContent = fmt(len) + ' cm';
+      }
     }
     const r = px(4);
     draft.nodes.forEach((nd, i) => {
@@ -501,6 +510,7 @@
 
   function finishDraft(closed) {
     if (!draft) return;
+    closePenDialog();
     if (draft.nodes.length >= 2) {
       beginChange();
       const piece = newPiece(draft.nodes, closed);
@@ -530,6 +540,7 @@
       return;
     }
     if (ev.button !== 0) return;
+    if (!$('pen-dialog').hidden) closePenDialog();
     svg.focus();
     const w = screenToWorld(ev);
     const isDbl = ev.timeStamp - lastDown.t < 400 &&
@@ -831,6 +842,49 @@
       if (d < bd) { bd = d; best = i; }
     });
     return best;
+  }
+
+  // ---- pen tool: typed segment length (right-click while drafting) ----
+  // Angle convention shown to the user: 0° = right, 90° = up, counter-clockwise
+  // (document space is y-down, so dy = -sin).
+  function openPenDialog(ev) {
+    const last = draft.nodes[draft.nodes.length - 1];
+    const ref = draft.mouse || screenToWorld(ev);
+    const dx = ref.x - last.x, dy = ref.y - last.y;
+    const len = Math.hypot(dx, dy);
+    $('pd-len').value = len > 0.05 ? fmt(len) : '';
+    $('pd-ang').value = len > 0.05 ? Math.round(Math.atan2(-dy, dx) * 180 / Math.PI) : 0;
+    const dlg = $('pen-dialog');
+    const wrap = $('canvas-wrap').getBoundingClientRect();
+    dlg.hidden = false;
+    dlg.style.left = Math.min(ev.clientX - wrap.left + 12, wrap.width - 190) + 'px';
+    dlg.style.top = Math.min(ev.clientY - wrap.top + 12, wrap.height - 110) + 'px';
+    $('pd-len').focus();
+    $('pd-len').select();
+  }
+  function closePenDialog() { $('pen-dialog').hidden = true; svg.focus(); }
+  function commitPenDialog() {
+    if (!draft || !draft.nodes.length) { closePenDialog(); return; }
+    const len = parseFloat($('pd-len').value);
+    const ang = (parseFloat($('pd-ang').value) || 0) * Math.PI / 180;
+    if (!(len > 0)) { closePenDialog(); return; }
+    const last = draft.nodes[draft.nodes.length - 1];
+    const p = { x: last.x + len * Math.cos(ang), y: last.y - len * Math.sin(ang) };
+    draft.nodes.push({ x: p.x, y: p.y, hin: null, hout: null });
+    draft.mouse = { x: p.x, y: p.y };
+    closePenDialog();
+    renderPenPreview();
+  }
+  svg.addEventListener('contextmenu', (ev) => {
+    ev.preventDefault();
+    if (tool === 'pen' && draft && draft.nodes.length) openPenDialog(ev);
+  });
+  for (const id of ['pd-len', 'pd-ang']) {
+    $(id).addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') { commitPenDialog(); ev.preventDefault(); }
+      else if (ev.key === 'Escape') { closePenDialog(); ev.preventDefault(); }
+      ev.stopPropagation();
+    });
   }
 
   // ---- pen tool ----
