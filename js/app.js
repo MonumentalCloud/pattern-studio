@@ -482,7 +482,7 @@
     hole: 'Click inside a piece to add a drill hole',
     grain: 'Drag inside a piece to set the grainline · click (no drag) removes it',
     weld: 'Click an edge, then the matching edge on another piece — the second piece moves; both seam edges disappear',
-    inset: 'Click an edge for an inset guide line — keep clicking adjacent edges to extend it around corners · click inside a piece for a full-outline ring',
+    inset: 'Click edges to select them for a guide line (any order, click again to remove) · click inside a piece for a full-outline ring',
     stitch: 'Click an edge or guide line, then its match — both get the same number of stitching slits · same target twice = single run',
     measure: 'Drag to measure a distance',
   };
@@ -1128,13 +1128,13 @@
   }
 
   // ---- inset tool: guide lines for stitching ----
-  // Clicking adjacent edges of the same piece EXTENDS the current guide around
-  // the corners (mitered), so a run can cover part of the outline.
-  let insetChain = null; // { pieceId, segs: [contiguous seg indices], d, guideId }
+  // Each click on an edge TOGGLES it in the current selection (any order);
+  // guides regenerate from the contiguous runs, mitered around corners.
+  let insetChain = null; // { pieceId, d, segs: Set, guideIds: [] }
 
   function insetDown(w) {
     const d = Math.max(0.05, parseFloat($('in-dist').value) || 0.3);
-    // an edge of a real (non-guide) closed piece → inset line for that edge
+    // an edge of a real (non-guide) closed piece → toggle it in the selection
     let bestEdge = null;
     for (const p of doc.pieces) {
       if (p.visible === false || p.guide || !p.path.closed || p.path.nodes.length < 3) continue;
@@ -1143,29 +1143,12 @@
     }
     if (bestEdge) {
       const piece = bestEdge.piece, seg = bestEdge.hit.seg;
-      const n = piece.path.nodes.length;
-      // extend the active chain if this edge continues it
-      if (insetChain && insetChain.pieceId === piece.id && insetChain.d === d &&
-          pieceById(insetChain.guideId) && insetChain.segs.length < n) {
-        const segs = insetChain.segs;
-        const before = (segs[0] - 1 + n) % n;
-        const after = (segs[segs.length - 1] + 1) % n;
-        if (seg === after || seg === before) {
-          if (seg === after) segs.push(seg); else segs.unshift(seg);
-          const guide = pieceById(insetChain.guideId);
-          beginChange();
-          guide.path.nodes = edgeGuideNodes(piece, segs, d);
-          guide.stitchSlits = []; // geometry changed — re-run the stitch tool
-          endChange();
-          renderAll();
-          $('status-hint').textContent =
-            `Guide extended to ${segs.length} edges — click the next adjacent edge to continue, or switch to Stitch`;
-          return;
-        }
+      if (!insetChain || insetChain.pieceId !== piece.id || insetChain.d !== d) {
+        insetChain = { pieceId: piece.id, d, segs: new Set(), guideIds: [] };
       }
-      // otherwise start a fresh single-edge guide
-      const id = newGuidePiece(edgeGuideNodes(piece, [seg], d), false, piece.name + ' stitch line');
-      insetChain = { pieceId: piece.id, segs: [seg], d, guideId: id };
+      if (insetChain.segs.has(seg)) insetChain.segs.delete(seg);
+      else insetChain.segs.add(seg);
+      regenChainGuides(piece);
       return;
     }
     // otherwise: inside a piece → full-outline ring
@@ -1181,6 +1164,64 @@
         return;
       }
     }
+  }
+
+  // rebuild the chain's guide pieces from its selected edges
+  function regenChainGuides(piece) {
+    const chain = insetChain;
+    const n = piece.path.nodes.length;
+    beginChange();
+    doc.pieces = doc.pieces.filter((p) => !chain.guideIds.includes(p.id));
+    chain.guideIds = [];
+    if (!chain.segs.size) {
+      endChange();
+      insetChain = null;
+      clearSel();
+      renderAll();
+      $('status-hint').textContent = HINTS.inset;
+      return;
+    }
+    const mk = (nodes, closed, name) => {
+      const gp = {
+        id: uid(), name, visible: true, guide: true,
+        seamAllowance: 0, notchLength: 0.4,
+        path: { closed, nodes },
+        notches: [], holes: [], stitchSlits: [], grain: null, foldSeg: null,
+      };
+      doc.pieces.push(gp);
+      chain.guideIds.push(gp.id);
+    };
+    let runCount;
+    if (chain.segs.size === n) {
+      // every edge selected → full-outline ring
+      const pts = Geo.offsetClosed(Geo.dedupe(Geo.pathPolyline(piece.path.nodes, true, 0.02)), -chain.d);
+      if (pts.length >= 3) {
+        mk(Geo.simplifyPoly(pts, 0.01, true).map((p) => ({ x: p.x, y: p.y, hin: null, hout: null })),
+          true, piece.name + ' stitch line');
+      }
+      runCount = 1;
+    } else {
+      // contiguous runs (any click order, wrap-aware)
+      const arcs = [];
+      for (let s0 = 0; s0 < n; s0++) {
+        if (!chain.segs.has(s0) || chain.segs.has((s0 - 1 + n) % n)) continue;
+        const arc = [s0];
+        let nx = (s0 + 1) % n;
+        while (chain.segs.has(nx)) { arc.push(nx); nx = (nx + 1) % n; }
+        arcs.push(arc);
+      }
+      arcs.forEach((arc, i) => {
+        mk(edgeGuideNodes(piece, arc, chain.d), false,
+          piece.name + ' stitch line' + (arcs.length > 1 ? ' ' + (i + 1) : ''));
+      });
+      runCount = arcs.length;
+    }
+    endChange();
+    if (chain.guideIds.length) selectPiece(chain.guideIds[0]);
+    renderAll();
+    const e = chain.segs.size;
+    $('status-hint').textContent =
+      `${e} edge${e > 1 ? 's' : ''} → ${runCount} guide run${runCount > 1 ? 's' : ''} · click edges to add/remove · Esc finishes`;
   }
 
   // guide node list for a contiguous run of edges, offset inward with miters
