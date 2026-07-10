@@ -265,8 +265,9 @@
       if (Math.abs(den) < 1e-12) return null;
       const u = ((p3.x - p1.x) * d2y - (p3.y - p1.y) * d2x) / den;
       const v = ((p3.x - p1.x) * d1y - (p3.y - p1.y) * d1x) / den;
-      if (u < 0 || u > 1 || v < 0 || v > 1) return null;
-      return { u, v };
+      const eps = 1e-9; // hits exactly on endpoints must not round away
+      if (u < -eps || u > 1 + eps || v < -eps || v > 1 + eps) return null;
+      return { u: Math.min(1, Math.max(0, u)), v: Math.min(1, Math.max(0, v)) };
     };
     const A = flat(nodesA, closedA), B = flat(nodesB, closedB);
     const out = [];

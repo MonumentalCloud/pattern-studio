@@ -483,7 +483,7 @@
     grain: 'Drag inside a piece to set the grainline · click (no drag) removes it',
     weld: 'Click an edge, then the matching edge on another piece — the second piece moves; both seam edges disappear',
     inset: 'Click edges to select them for a guide line (any order, click again to remove) · click inside a piece for a full-outline ring',
-    knife: 'Drag a line across a piece to cut it in two · or click an open path to cut along it (curves supported)',
+    knife: 'Drag a line across a piece to cut it in two (endpoints snap to existing points) · or click an open path to cut along it',
     stitch: 'Click an edge or guide line, then its match — both get the same number of stitching slits · same target twice = single run',
     measure: 'Drag to measure a distance',
   };
@@ -672,9 +672,12 @@
       return;
     }
     if (drag.type === 'knife') {
-      drag.b = w;
+      drag.b = knifeSnap(w);
       clear(gPreview);
       el('line', { class: 'knife-line', x1: drag.a.x, y1: drag.a.y, x2: drag.b.x, y2: drag.b.y }, gPreview);
+      for (const e2 of [drag.a, drag.b]) {
+        if (e2.snapped) el('circle', { class: 'snap-dot', cx: e2.x, cy: e2.y, r: px(5) }, gPreview);
+      }
       return;
     }
     if (drag.type === 'measure') {
@@ -697,9 +700,14 @@
       else if (drag.type === 'knife') {
         clear(gPreview);
         if (Geo.dist(drag.a, drag.b) > 0.3) {
+          // extend slightly past the endpoints so a cut ending exactly on a
+          // node still crosses the outline transversally
+          const dir = Geo.norm(Geo.sub(drag.b, drag.a));
+          const a = Geo.add(drag.a, Geo.scale(dir, -0.2));
+          const b = Geo.add(drag.b, Geo.scale(dir, 0.2));
           cutWithNodes([
-            { x: drag.a.x, y: drag.a.y, hin: null, hout: null },
-            { x: drag.b.x, y: drag.b.y, hin: null, hout: null },
+            { x: a.x, y: a.y, hin: null, hout: null },
+            { x: b.x, y: b.y, hin: null, hout: null },
           ], null);
         }
       }
@@ -1290,6 +1298,19 @@
     return seg + 1;
   }
 
+  // knife precision: endpoints snap to existing nodes only (never the grid)
+  function knifeSnap(w) {
+    let best = null, bd = px(9);
+    for (const p of doc.pieces) {
+      if (p.visible === false || p.guide) continue;
+      for (const nd of p.path.nodes) {
+        const d = Geo.dist(nd, w);
+        if (d < bd) { bd = d; best = { x: nd.x, y: nd.y, snapped: true }; }
+      }
+    }
+    return best || { x: w.x, y: w.y, snapped: false };
+  }
+
   function knifeDown(w) {
     // clicking an open (non-guide) path uses it as the cut path
     let bestPath = null;
@@ -1302,7 +1323,8 @@
       cutWithNodes(JSON.parse(JSON.stringify(bestPath.piece.path.nodes)), bestPath.piece);
       return;
     }
-    drag = { type: 'knife', a: w, b: w };
+    const a = knifeSnap(w);
+    drag = { type: 'knife', a, b: a };
   }
 
   function cutWithNodes(cutNodes, sourcePiece) {
@@ -1324,17 +1346,53 @@
     alert('The cut must cross a piece exactly twice (enter and exit).');
   }
 
-  function performCut(target, cutNodesIn, hits, sourcePiece) {
+  // Resolve two intersection hits on a path to node indices: hits landing on
+  // an existing node (within 0.05cm) REUSE that node — no sliver segments —
+  // otherwise a node is inserted at the hit. Returns [idx0, idx1] matching the
+  // order of `hits`, or null if both land on the same node.
+  function resolveCutNodes(piece, hits, segKey, tKey) {
     const clampT = (t) => Math.min(0.995, Math.max(0.005, t));
+    const nodes = piece.path.nodes;
+    const n = nodes.length;
+    const cls = hits.map((h) => {
+      const seg = h[segKey], t = h[tKey];
+      const a = nodes[seg], b = nodes[(seg + 1) % n];
+      if (Geo.dist(h.point, a) < 0.05) return { node: seg };
+      if (Geo.dist(h.point, b) < 0.05) return { node: (seg + 1) % n };
+      return { seg, t };
+    });
+    const out = [null, null];
+    const mids = [0, 1].filter((i) => cls[i].node === undefined);
+    if (mids.length === 2) {
+      // insert the higher position first so the second insertion stays valid
+      const order = (cls[0].seg !== cls[1].seg ? cls[0].seg > cls[1].seg : cls[0].t > cls[1].t) ? [0, 1] : [1, 0];
+      const hiIdx = insertNodeAt(piece, cls[order[0]].seg, clampT(cls[order[0]].t));
+      const tLow = cls[order[1]].seg === cls[order[0]].seg ? cls[order[1]].t / cls[order[0]].t : cls[order[1]].t;
+      out[order[1]] = insertNodeAt(piece, cls[order[1]].seg, clampT(tLow));
+      out[order[0]] = hiIdx + 1; // shifted by the second (earlier) insertion
+    } else if (mids.length === 1) {
+      const mi = mids[0], ni = 1 - mi;
+      const idx = insertNodeAt(piece, cls[mi].seg, clampT(cls[mi].t));
+      out[mi] = idx;
+      out[ni] = cls[ni].node >= idx ? cls[ni].node + 1 : cls[ni].node;
+    } else {
+      out[0] = cls[0].node;
+      out[1] = cls[1].node;
+    }
+    return out[0] === out[1] ? null : out;
+  }
+
+  function performCut(target, cutNodesIn, hits, sourcePiece) {
     beginChange();
-    // 1. insert the two intersection nodes into the outline (higher position
-    //    first so the second insertion's indices stay valid)
+    // 1. resolve the two crossings on the outline (reusing nodes when hit)
     const clone = JSON.parse(JSON.stringify(target));
-    const H = hits.slice().sort((x, y) => (x.segA !== y.segA ? y.segA - x.segA : y.tA - x.tA));
-    const hiIdx = insertNodeAt(clone, H[0].segA, clampT(H[0].tA));
-    const t2 = H[1].segA === H[0].segA ? H[1].tA / H[0].tA : H[1].tA;
-    const ia = insertNodeAt(clone, H[1].segA, clampT(t2));
-    const ib = hiIdx + 1;
+    const rA = resolveCutNodes(clone, hits, 'segA', 'tA');
+    if (!rA) {
+      endChange();
+      alert('The cut enters and exits at the same point — nothing to split.');
+      return;
+    }
+    const ia = rA[0], ib = rA[1];
     const n2 = clone.path.nodes.length;
 
     // 2. extract the cut path's middle chain between the intersections,
@@ -1343,11 +1401,13 @@
       path: { closed: false, nodes: JSON.parse(JSON.stringify(cutNodesIn)) },
       notches: [], stitchSlits: [], foldSeg: null,
     };
-    const HB = hits.slice().sort((x, y) => (x.segB !== y.segB ? y.segB - x.segB : y.tB - x.tB));
-    const cHi = insertNodeAt(cutP, HB[0].segB, clampT(HB[0].tB));
-    const ct2 = HB[1].segB === HB[0].segB ? HB[1].tB / HB[0].tB : HB[1].tB;
-    const cLo = insertNodeAt(cutP, HB[1].segB, clampT(ct2));
-    const M = cutP.path.nodes.slice(cLo, cHi + 2);
+    const rB = resolveCutNodes(cutP, hits, 'segB', 'tB');
+    if (!rB) {
+      endChange();
+      alert('The cut enters and exits at the same point — nothing to split.');
+      return;
+    }
+    const M = cutP.path.nodes.slice(Math.min(rB[0], rB[1]), Math.max(rB[0], rB[1]) + 1);
 
     // 3. assemble the two halves: outline chain + cut chain (junction nodes
     //    merge, adopting the cut side's handles)
