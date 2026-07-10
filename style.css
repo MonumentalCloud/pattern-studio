@@ -73,7 +73,7 @@ label.chk { display: flex; align-items: center; gap: 4px; color: var(--dim); cur
 
 #canvas-wrap { flex: 1; position: relative; min-width: 0; }
 #canvas { width: 100%; height: 100%; display: block; background: var(--bg); outline: none; touch-action: none; }
-#canvas.tool-pen, #canvas.tool-notch, #canvas.tool-hole, #canvas.tool-weld, #canvas.tool-stitch, #canvas.tool-inset, #canvas.tool-knife { cursor: crosshair; }
+#canvas.tool-pen, #canvas.tool-notch, #canvas.tool-hole, #canvas.tool-weld, #canvas.tool-stitch, #canvas.tool-inset, #canvas.tool-knife, #canvas.tool-bool { cursor: crosshair; }
 #canvas.tool-grain, #canvas.tool-measure { cursor: crosshair; }
 #canvas.panning { cursor: grab; }
 

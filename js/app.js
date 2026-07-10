@@ -484,6 +484,7 @@
     weld: 'Click an edge, then the matching edge on another piece — the second piece moves; both seam edges disappear',
     inset: 'Click edges to select them for a guide line (any order, click again to remove) · click inside a piece for a full-outline ring',
     knife: 'Click two points to cut a piece in two (they snap to existing points) · or click an open path to cut along it · Esc cancels',
+    bool: 'Click the base piece (A), then the other (B) — combined with the op from the panel · outlines must cross exactly twice',
     stitch: 'Click an edge or guide line, then its match — both get the same number of stitching slits · same target twice = single run',
     measure: 'Drag to measure a distance',
   };
@@ -494,8 +495,10 @@
     if (t !== 'stitch') stitchFirst = null;
     if (t !== 'inset') insetChain = null;
     if (t !== 'knife') knifeFirst = null;
+    if (t !== 'bool') boolFirst = null;
     $('stitch-props').hidden = t !== 'stitch';
     $('inset-props').hidden = t !== 'inset';
+    $('bool-props').hidden = t !== 'bool';
     document.querySelectorAll('#toolbar .tool').forEach((b) =>
       b.classList.toggle('active', b.dataset.tool === t));
     svg.setAttribute('class', 'tool-' + t);
@@ -602,6 +605,7 @@
     if (tool === 'weld') return weldDown(w);
     if (tool === 'inset') return insetDown(w);
     if (tool === 'knife') return knifeDown(w);
+    if (tool === 'bool') return boolDown(w);
     if (tool === 'stitch') return stitchDown(w);
     if (tool === 'measure') { drag = { type: 'measure', a: w, b: w }; return; }
   });
@@ -1039,20 +1043,23 @@
   }
 
   // ghost preview of the would-be point(s) for the given mode, live as you type
+  let dvLastMode = 'dist';
   function renderDivideGhosts(mode) {
+    dvLastMode = mode;
     clear(gPreview);
     const p = selPiece();
     if (!p || sel.kind !== 'seg' || $('divide-dialog').hidden) return;
     const n = p.path.nodes.length;
     const a = p.path.nodes[sel.idx], b = p.path.nodes[(sel.idx + 1) % n];
     const len = Geo.segLength(a, b);
+    const fromEnd = $('dv-from').value === 'end';
     let fr = [];
     if (mode === 'dist') {
       const d = parseFloat($('dv-dist').value);
-      if (d > 0 && d < len) fr = [d / len];
+      if (d > 0 && d < len) fr = [fromEnd ? 1 - d / len : d / len];
     } else if (mode === 'pct') {
       const q = parseFloat($('dv-pct').value);
-      if (q > 0 && q < 100) fr = [q / 100];
+      if (q > 0 && q < 100) fr = [fromEnd ? 1 - q / 100 : q / 100];
     } else {
       const k = Math.round(parseFloat($('dv-n').value));
       if (k >= 2 && k <= 50) for (let i = 1; i < k; i++) fr.push(i / k);
@@ -1095,12 +1102,14 @@
     const len = Geo.segLength(p.path.nodes[sel.idx], p.path.nodes[(sel.idx + 1) % n]);
     const d = parseFloat($('dv-dist').value);
     if (!(d > 0) || d >= len) { alert(`Distance must be between 0 and ${fmt(len)} cm.`); return; }
-    divideSelectedEdge([d / len]);
+    const f = d / len;
+    divideSelectedEdge([$('dv-from').value === 'end' ? 1 - f : f]);
   });
   $('dv-pct-btn').addEventListener('click', () => {
     const pct = parseFloat($('dv-pct').value);
     if (!(pct > 0) || pct >= 100) { alert('Percentage must be between 0 and 100.'); return; }
-    divideSelectedEdge([pct / 100]);
+    const f = pct / 100;
+    divideSelectedEdge([$('dv-from').value === 'end' ? 1 - f : f]);
   });
   $('dv-n-btn').addEventListener('click', () => {
     const k = Math.round(parseFloat($('dv-n').value));
@@ -1120,6 +1129,7 @@
       $(id).addEventListener('input', () => renderDivideGhosts(dvModes[id]));
       $(id).addEventListener('focus', () => renderDivideGhosts(dvModes[id]));
     }
+    $('dv-from').addEventListener('change', () => renderDivideGhosts(dvLastMode));
   }
   for (const id of ['pd-len', 'pd-ang']) {
     $(id).addEventListener('keydown', (ev) => {
@@ -1617,6 +1627,133 @@
       (sourcePiece ? ' (cut path consumed)' : '');
   }
 
+  // ---- boolean tool: union / subtract / intersect two closed pieces ----
+  let boolFirst = null; // piece id of the base (A)
+
+  function boolPieceAt(w) {
+    for (let i = doc.pieces.length - 1; i >= 0; i--) {
+      const p = doc.pieces[i];
+      if (p.visible === false || p.guide || !p.path.closed || p.path.nodes.length < 3) continue;
+      const poly = Geo.pathPolyline(p.path.nodes, true, 0.1);
+      const hit = Geo.nearestOnPath(p.path.nodes, true, w);
+      if (Geo.pointInPolygon(poly, w) || (hit && hit.dist < px(6))) return p;
+    }
+    return null;
+  }
+
+  function boolDown(w) {
+    const p = boolPieceAt(w);
+    if (!p) return;
+    if (isFolded(p)) { alert('Unfold this piece ("Unfold now") before boolean operations.'); return; }
+    if (!boolFirst || !pieceById(boolFirst)) {
+      boolFirst = p.id;
+      selectPiece(p.id);
+      renderAll(true); renderSidebar();
+      $('status-hint').textContent = 'Now click the second piece (B) · Esc cancels';
+      return;
+    }
+    if (p.id === boolFirst) {
+      $('status-hint').textContent = 'Click a DIFFERENT piece — the base (A) is already picked.';
+      return;
+    }
+    booleanPieces(pieceById(boolFirst), p, $('bl-op').value);
+    boolFirst = null;
+  }
+
+  function booleanPieces(pA, pB, op) {
+    const hits = Geo.pathIntersections(pA.path.nodes, true, pB.path.nodes, true);
+    if (hits.length !== 2) {
+      alert(hits.length === 0
+        ? 'The two outlines don\'t cross — overlap the pieces first.'
+        : `The outlines cross ${hits.length} times — boolean ops currently need exactly 2 crossings.`);
+      return;
+    }
+    beginChange();
+    const cA = JSON.parse(JSON.stringify(pA));
+    const cB = JSON.parse(JSON.stringify(pB));
+    const rA = resolveCutNodes(cA, hits, 'segA', 'tA');
+    const rB = resolveCutNodes(cB, hits, 'segB', 'tB');
+    if (!rA || !rB) { endChange(); alert('Degenerate crossing — nothing to combine.'); return; }
+
+    // both outlines split into two arcs at the shared crossing points;
+    // classify each arc by whether its midpoint is inside the other piece
+    const mkArc = (piece, from, to) => {
+      const N = piece.path.nodes, n2 = N.length;
+      const nodes = [];
+      for (let k = from; ; k = (k + 1) % n2) {
+        nodes.push(JSON.parse(JSON.stringify(N[k])));
+        if (k === to) break;
+      }
+      return { nodes, from, edges: nodes.length - 1, total: n2 };
+    };
+    const arcsA = [mkArc(cA, rA[0], rA[1]), mkArc(cA, rA[1], rA[0])];
+    const arcsB = [mkArc(cB, rB[0], rB[1]), mkArc(cB, rB[1], rB[0])];
+    const polyA = Geo.pathPolyline(pA.path.nodes, true, 0.05);
+    const polyB = Geo.pathPolyline(pB.path.nodes, true, 0.05);
+    const arcInside = (arc, poly) => {
+      const pos = Geo.pathArcParams(arc.nodes, false, [0.5])[0];
+      return Geo.pointInPolygon(poly, Geo.segPoint(arc.nodes[pos.seg], arc.nodes[pos.seg + 1], pos.t));
+    };
+    const aOut = arcsA.find((a) => !arcInside(a, polyB)), aIn = arcsA.find((a) => arcInside(a, polyB));
+    const bOut = arcsB.find((a) => !arcInside(a, polyA)), bIn = arcsB.find((a) => arcInside(a, polyA));
+    const parts = op === 'union' ? [aOut, bOut] : op === 'intersect' ? [aIn, bIn] : [aOut, bIn];
+    if (!parts[0] || !parts[1]) {
+      endChange();
+      alert('Could not classify the overlap — adjust the pieces and try again.');
+      return;
+    }
+
+    // compose: A's arc, then B's arc oriented to close the loop (junction
+    // nodes merge, adopting B's handles at the joins)
+    const arcA = parts[0], arcB = parts[1];
+    let bNodes = arcB.nodes;
+    const aEnd = arcA.nodes[arcA.nodes.length - 1];
+    if (Geo.dist(bNodes[0], aEnd) > Geo.dist(bNodes[bNodes.length - 1], aEnd)) {
+      bNodes = Geo.reverseNodes(bNodes);
+    }
+    const nodes = arcA.nodes.map((nd) => JSON.parse(JSON.stringify(nd)));
+    nodes[nodes.length - 1].hout = bNodes[0].hout ? { x: bNodes[0].hout.x, y: bNodes[0].hout.y } : null;
+    for (let q = 1; q < bNodes.length - 1; q++) nodes.push(JSON.parse(JSON.stringify(bNodes[q])));
+    nodes[0].hin = bNodes[bNodes.length - 1].hin
+      ? { x: bNodes[bNodes.length - 1].hin.x, y: bNodes[bNodes.length - 1].hin.y } : null;
+
+    // A's notches/slits survive on its kept arc; B's boundary marks are
+    // dropped; holes from both stay if inside the result; A's grain if inside
+    const keepSeg = (seg) => {
+      const rel = (seg - arcA.from + arcA.total) % arcA.total;
+      return rel < arcA.edges ? rel : null;
+    };
+    const notches = [], slits = [];
+    for (const nt of cA.notches || []) {
+      const s = keepSeg(nt.seg);
+      if (s != null) notches.push(Object.assign({}, nt, { seg: s }));
+    }
+    for (const sl of cA.stitchSlits || []) {
+      const s = keepSeg(sl.seg);
+      if (s != null) slits.push(Object.assign({}, sl, { seg: s }));
+    }
+    const resultPoly = Geo.pathPolyline(nodes, true, 0.05);
+    const holes = (cA.holes || []).concat(cB.holes || []).filter((h) => Geo.pointInPolygon(resultPoly, h));
+    let grain = null;
+    if (cA.grain) {
+      const gm = { x: (cA.grain.x1 + cA.grain.x2) / 2, y: (cA.grain.y1 + cA.grain.y2) / 2 };
+      if (Geo.pointInPolygon(resultPoly, gm)) grain = cA.grain;
+    }
+
+    pA.path = { closed: true, nodes };
+    pA.notches = notches;
+    pA.stitchSlits = slits;
+    pA.holes = holes;
+    pA.grain = grain;
+    pA.foldSeg = null;
+    doc.pieces = doc.pieces.filter((q) => q.id !== pB.id);
+    endChange();
+    selectPiece(pA.id);
+    renderAll();
+    const opName = { union: 'Union', subtract: 'Subtract', intersect: 'Intersect' }[op];
+    $('status-hint').textContent = `${opName}: "${pA.name}" ${op === 'subtract' ? '−' : op === 'union' ? '+' : '∩'} "${pB.name}"`;
+  }
+
   // ---- stitch tool ----
   function stitchDown(w) {
     const res = nearestEdgeAt(w, true);
@@ -1723,6 +1860,9 @@
         knifeFirst = null;
         clear(gPreview);
         $('status-hint').textContent = HINTS.knife;
+      } else if (tool === 'bool' && boolFirst) {
+        boolFirst = null;
+        $('status-hint').textContent = HINTS.bool;
       } else { clearSel(); renderAll(); }
       return;
     }
@@ -1736,6 +1876,7 @@
     else if (k === 'w') setTool('weld');
     else if (k === 'i') setTool('inset');
     else if (k === 'k') setTool('knife');
+    else if (k === 'b') setTool('bool');
     else if (k === 's') setTool('stitch');
     else if (k === 'm') setTool('measure');
     else if (k === '0') zoomFit();

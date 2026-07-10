@@ -30,6 +30,7 @@ can be saved/opened as `.pattern.json` files.
 | **Grainline** | drag inside a piece; double-ended arrow |
 | **Edge length** | select an edge and type a target length (cm); the edge rescales about a chosen anchor (both ends / start / end) and curves keep their shape — for walking seams |
 | **Knife** | cut a piece in two: click two points (they **snap to existing points**, and cuts through a point reuse it exactly — no sliver edges), or click a drawn open path to cut along it (curves embed exactly); notches, stitch slits, holes and grainline land on the correct halves — the inverse of Weld |
+| **Boolean** | overlap two pieces → union, subtract (A − B) or intersect; curves survive, holes keep their sides; works when the outlines cross exactly twice |
 | **Weld** | fuse two pieces into one along matching edges — the second piece is rigidly moved into place, both seam edges disappear, notches/holes/grainline carried over |
 | **Fold-line pieces** | draft half a symmetric piece, mark a straight edge as the fold — the mirrored half renders live and every edit updates it; exports unfold to the full cutting outline with the fold on the `MARK` layer |
 | **Mirror copy** | mirrored duplicate for left/right pieces — handles, notches and holes are remapped correctly |
@@ -73,7 +74,7 @@ The **Open** button also accepts `.dxf` — patterns from Seamly2D/Valentina, CL
 
 ## Keyboard
 
-`V` select · `P` pen · `N` notch · `H` hole · `G` grain · `W` weld · `I` inset · `S` stitch · `K` knife · `M` measure ·
+`V` select · `P` pen · `N` notch · `H` hole · `G` grain · `W` weld · `I` inset · `S` stitch · `K` knife · `B` boolean · `M` measure ·
 `Space`+drag or two-finger scroll pan · pinch/`Ctrl`+scroll zoom · `0` fit · `Del` delete · `Ctrl+Z/Y` undo/redo ·
 `Ctrl+S` save project · `Esc`/`Enter` finish pen path
 
