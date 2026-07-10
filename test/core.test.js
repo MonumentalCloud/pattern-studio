@@ -2,6 +2,7 @@
 const assert = require('assert');
 const Geo = require('../js/geometry.js');
 const DXF = require('../js/dxf.js');
+const DXFImport = require('../js/dxfimport.js');
 
 let passed = 0;
 function t(name, fn) {
@@ -427,6 +428,126 @@ t('open path exports without allowance', () => {
   const out = DXF.exportDXF(d3);
   assert((out.match(/(^|\r\n)POLYLINE(\r\n|$)/g) || []).length === 1);
   assert(!/(^|\r\n)8\r\nSEAM/.test(out));
+});
+
+console.log('dxf import');
+
+const mkDXF = (...vals) =>
+  ['0', 'SECTION', '2', 'ENTITIES', ...vals.map(String), '0', 'ENDSEC', '0', 'EOF'].join('\r\n');
+
+t('import: our own export round-trips (shape, hole, slit debris filtered)', () => {
+  const d = {
+    pieces: [{
+      id: 'p1', name: 'Tri', visible: true, seamAllowance: 0, notchLength: 0.4,
+      path: { closed: true, nodes: [N(0, 0), N(20, 0), N(0, 30)] },
+      notches: [{ seg: 0, t: 0.5 }],
+      holes: [{ x: 5, y: 10, r: 0.15 }],
+      grain: null,
+    }],
+  };
+  const raw = DXFImport.parse(DXF.exportDXF(d));
+  assert(DXFImport.unitScale(raw.insunits) === 0.1, 'mm declared in header');
+  const res = DXFImport.build(raw, 0.1);
+  assert(res.pieces.length === 1, 'pieces: ' + res.pieces.length);
+  const p = res.pieces[0];
+  assert(p.closed && p.nodes.length === 3, `nodes=${p.nodes.length}`);
+  // triangle orientation survives the y-flips: right angle at top-left in y-down
+  const pts = p.nodes.map((n) => [Math.round(n.x * 100) / 100, Math.round(n.y * 100) / 100]);
+  const has = (x, y) => pts.some(([px2, py]) => Math.abs(px2 - x) < 0.01 && Math.abs(py - y) < 0.01);
+  assert(has(2, 2) && has(22, 2) && has(2, 32), 'triangle points: ' + JSON.stringify(pts));
+  assert(p.holes.length === 1 && Math.abs(p.holes[0].x - 7) < 0.01 && Math.abs(p.holes[0].y - 12) < 0.01,
+    'hole carried over: ' + JSON.stringify(p.holes));
+  assert(res.warnings.some((w) => w.includes('tiny line')), 'notch slit filtered: ' + JSON.stringify(res.warnings));
+});
+
+t('import: four LINE entities join into one closed piece', () => {
+  const raw = DXFImport.parse(mkDXF(
+    0, 'LINE', 8, 0, 10, 0, 20, 0, 11, 10, 21, 0,
+    0, 'LINE', 8, 0, 10, 10, 20, 0, 11, 10, 21, 10,
+    0, 'LINE', 8, 0, 10, 10, 20, 10, 11, 0, 21, 10,
+    0, 'LINE', 8, 0, 10, 0, 20, 10, 11, 0, 21, 0,
+  ));
+  const res = DXFImport.build(raw, 1);
+  assert(res.pieces.length === 1 && res.pieces[0].closed, JSON.stringify(res.pieces.map((p) => p.closed)));
+  assert(res.pieces[0].nodes.length === 4, 'nodes=' + res.pieces[0].nodes.length);
+  assert(Math.abs(Geo.pathLength(res.pieces[0].nodes, true) - 40) < 0.01);
+});
+
+t('import: LWPOLYLINE bulge becomes a real curve, bulging outward', () => {
+  // 10x10 square (CCW in y-up) whose right side is a semicircle bulging out
+  const raw = DXFImport.parse(mkDXF(
+    0, 'LWPOLYLINE', 8, 0, 90, 4, 70, 1,
+    10, 0, 20, 0,
+    10, 10, 20, 0, 42, 1,
+    10, 10, 20, 10,
+    10, 0, 20, 10,
+  ));
+  const res = DXFImport.build(raw, 1);
+  assert(res.pieces.length === 1 && res.pieces[0].closed);
+  const nodes = res.pieces[0].nodes;
+  const len = Geo.pathLength(nodes, true);
+  assert(Math.abs(len - (30 + Math.PI * 5)) < 0.05, 'perimeter=' + len); // 3 sides + semicircle
+  const bb = Geo.bbox(Geo.pathPolyline(nodes, true, 0.01));
+  assert(Math.abs((bb.maxX - bb.minX) - 15) < 0.02, 'bulges outward: width=' + (bb.maxX - bb.minX));
+});
+
+t('import: ARC entity closes with lines into a quarter pie', () => {
+  const raw = DXFImport.parse(mkDXF(
+    0, 'LINE', 8, 0, 10, 0, 20, 0, 11, 10, 21, 0,
+    0, 'ARC', 8, 0, 10, 0, 20, 0, 40, 10, 50, 0, 51, 90,
+    0, 'LINE', 8, 0, 10, 0, 20, 10, 11, 0, 21, 0,
+  ));
+  const res = DXFImport.build(raw, 1);
+  assert(res.pieces.length === 1 && res.pieces[0].closed, 'joined+closed');
+  const len = Geo.pathLength(res.pieces[0].nodes, true);
+  assert(Math.abs(len - (20 + Math.PI * 5)) < 0.05, 'perimeter=' + len);
+});
+
+t('import: dense flattened polylines get simplified', () => {
+  // square drawn with collinear midpoints -> back to 4 corners
+  const vals = [0, 'LWPOLYLINE', 8, 0, 90, 8, 70, 1];
+  const sq = [[0, 0], [5, 0], [10, 0], [10, 5], [10, 10], [5, 10], [0, 10], [0, 5]];
+  for (const [x, y] of sq) vals.push(10, x, 20, y);
+  const res1 = DXFImport.build(DXFImport.parse(mkDXF(...vals)), 1);
+  assert(res1.pieces[0].nodes.length === 4, 'collinear removed: ' + res1.pieces[0].nodes.length);
+  // 72-gon "circle": node count drops, perimeter preserved
+  const vals2 = [0, 'LWPOLYLINE', 8, 0, 90, 72, 70, 1];
+  for (let i = 0; i < 72; i++) {
+    const a = (i / 72) * 2 * Math.PI;
+    vals2.push(10, (10 * Math.cos(a)).toFixed(6), 20, (10 * Math.sin(a)).toFixed(6));
+  }
+  const res2 = DXFImport.build(DXFImport.parse(mkDXF(...vals2)), 1);
+  const n = res2.pieces[0].nodes.length;
+  const len = Geo.pathLength(res2.pieces[0].nodes, true);
+  assert(n <= 45, '72 -> ' + n + ' nodes'); // ~40 is the honest count for 0.5mm fidelity at r=10
+  assert(Math.abs(len - 62.5) < 0.5, 'perimeter kept: ' + len);
+});
+
+t('import: unit guessing (mm for big raw extents, cm otherwise)', () => {
+  const big = DXFImport.parse(mkDXF(0, 'LINE', 8, 0, 10, 0, 20, 0, 11, 800, 21, 0));
+  assert(DXFImport.guessUnits(big) === 'mm');
+  const small = DXFImport.parse(mkDXF(0, 'LINE', 8, 0, 10, 0, 20, 0, 11, 60, 21, 0));
+  assert(DXFImport.guessUnits(small) === 'cm');
+  assert(DXFImport.unitScale(4) === 0.1 && DXFImport.unitScale(5) === 1 &&
+    Math.abs(DXFImport.unitScale(1) - 2.54) < 1e-9 && DXFImport.unitScale(0) === null);
+});
+
+t('import: SPLINE and TEXT are skipped with a warning, circles become pieces/holes', () => {
+  const raw = DXFImport.parse(mkDXF(
+    0, 'LWPOLYLINE', 8, 0, 90, 4, 70, 1, 10, 0, 20, 0, 10, 20, 20, 0, 10, 20, 20, 20, 10, 0, 20, 20,
+    0, 'CIRCLE', 8, 0, 10, 10, 20, 10, 40, 0.2,   // small -> hole in the square
+    0, 'CIRCLE', 8, 0, 10, 60, 20, 60, 40, 5,     // big -> its own round piece
+    0, 'SPLINE', 8, 0, 10, 1, 20, 1,
+    0, 'TEXT', 8, 0, 10, 1, 20, 1, 1, 'label',
+  ));
+  const res = DXFImport.build(raw, 1);
+  assert(res.pieces.length === 2, 'square + circle piece: ' + res.pieces.length);
+  const sq = res.pieces.find((p) => p.nodes.length === 4);
+  assert(sq && sq.holes.length === 1, 'small circle became a hole');
+  const round = res.pieces.find((p) => p !== sq);
+  assert(Math.abs(Geo.pathLength(round.nodes, true) - Math.PI * 10) < 0.05, 'round piece perimeter');
+  assert(res.warnings.some((w) => w.includes('SPLINE')) && res.warnings.some((w) => w.includes('TEXT')),
+    JSON.stringify(res.warnings));
 });
 
 console.log(`\n${passed} tests passed${process.exitCode ? ' (with failures)' : ''}`);

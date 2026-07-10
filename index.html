@@ -13,7 +13,7 @@
     <input id="doc-name" type="text" value="Untitled pattern" spellcheck="false" title="Pattern name">
     <span class="sep"></span>
     <button id="btn-new" title="New document">New</button>
-    <button id="btn-open" title="Open .json project">Open</button>
+    <button id="btn-open" title="Open .json project or import a .dxf">Open</button>
     <button id="btn-save" title="Download .json project">Save</button>
     <span class="sep"></span>
     <button id="btn-undo" title="Undo (Ctrl+Z)">↩</button>
@@ -169,9 +169,10 @@
     </aside>
   </div>
 </div>
-<input id="file-input" type="file" accept=".json,application/json" hidden>
+<input id="file-input" type="file" accept=".json,.dxf,application/json" hidden>
 <script src="js/geometry.js"></script>
 <script src="js/dxf.js"></script>
+<script src="js/dxfimport.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

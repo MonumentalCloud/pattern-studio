@@ -50,6 +50,22 @@ can be saved/opened as `.pattern.json` files.
 
 SVG export (true-size, mm) is also available for printing or Inkscape.
 
+## DXF import
+
+The **Open** button also accepts `.dxf` — patterns from Seamly2D/Valentina, CLO3D
+(File → Export → DXF), Inkscape, or any CAD tool:
+
+- Reads `LINE`, `LWPOLYLINE`/`POLYLINE` (including **bulge arcs** — curves come in as
+  real beziers, not facets), `ARC` and `CIRCLE`; `SPLINE`/`TEXT`/etc. are skipped with
+  a note. Loose lines/arcs are chained into outlines; closed loops become pieces,
+  small circles become drill holes.
+- Units come from the file header when declared; otherwise you get one prompt with a
+  size-based guess (mm/cm/in).
+- Straight runs are simplified (0.5 mm tolerance), so densely flattened exports don't
+  arrive with hundreds of points; sub-centimetre debris (notch/stitch slits) is filtered.
+- Imported pieces default to seam allowance 0, since an exported outline is usually
+  already the cutting line.
+
 ## Keyboard
 
 `V` select · `P` pen · `N` notch · `H` hole · `G` grain · `W` weld · `S` stitch · `M` measure ·
@@ -69,8 +85,8 @@ outward-normal orientation, curve splitting, and DXF structure/scale/notch geome
 
 - [x] Edge-length editing (type a number, the curve adjusts) for walking seams
 - [x] Weld/join two pieces along matching edges
-- [ ] DXF import (LINE/POLYLINE/ARC/CIRCLE → pieces; AAMA/ASTM aware, so CLO3D's
-      DXF export imports too — `.zprj` itself is proprietary, export DXF from CLO instead)
+- [x] DXF import (LINE/POLYLINE/ARC/CIRCLE → pieces; CLO3D's DXF export imports too —
+      `.zprj` itself is proprietary, export DXF from CLO instead)
 - [ ] GarmentCode importer — open [GarmentCode](https://github.com/maria-korosteleva/GarmentCode) /
       Design2GarmentCode specification JSONs as editable pieces (verified compatible:
       cm units, panels map to pieces, quadratic/cubic curves map to handles exactly)

@@ -1259,7 +1259,55 @@
     download(safeName() + '.svg', svgText, 'image/svg+xml');
   }
 
+  /* global DXFImport */
+  function importDXFText(text, filename) {
+    let raw;
+    try { raw = DXFImport.parse(text); } catch (e) {
+      alert('Could not read that DXF: ' + e.message);
+      return;
+    }
+    let scale = DXFImport.unitScale(raw.insunits);
+    if (scale == null) {
+      const guess = DXFImport.guessUnits(raw);
+      const ans = prompt(`"${filename}" doesn't declare its units.\nWhat are they? (mm / cm / in)`, guess);
+      if (ans == null) return;
+      scale = { mm: 0.1, cm: 1, in: 2.54, inch: 2.54, inches: 2.54 }[ans.trim().toLowerCase()];
+      if (!scale) { alert('Unknown unit "' + ans + '" — try mm, cm or in.'); return; }
+    }
+    const res = DXFImport.build(raw, scale);
+    if (!res.pieces.length) {
+      alert('No usable outlines found in that DXF.' +
+        (res.warnings.length ? '\n' + res.warnings.join('\n') : ''));
+      return;
+    }
+    beginChange();
+    const base = doc.pieces.length;
+    res.pieces.forEach((p, i) => {
+      doc.pieces.push({
+        id: uid(),
+        name: filename.replace(/\.dxf$/i, '') + (res.pieces.length > 1 ? ' ' + (i + 1) : ''),
+        visible: true,
+        seamAllowance: 0, // an imported outline IS the cutting line
+        notchLength: 0.4,
+        path: { closed: p.closed, nodes: p.nodes },
+        notches: [], holes: p.holes || [], stitchSlits: [], grain: null, foldSeg: null,
+      });
+    });
+    endChange();
+    selectPiece(doc.pieces[base].id);
+    renderAll();
+    zoomFit();
+    $('status-hint').textContent = `Imported ${res.pieces.length} piece(s)` +
+      (res.warnings.length ? ' · ' + res.warnings.join(' · ') : '');
+  }
+
   function openJSON(file) {
+    if (/\.dxf$/i.test(file.name)) {
+      const rd = new FileReader();
+      rd.onload = () => importDXFText(String(rd.result), file.name);
+      rd.readAsText(file);
+      return;
+    }
     const rd = new FileReader();
     rd.onload = () => {
       try {
