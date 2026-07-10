@@ -1285,12 +1285,12 @@
     res.pieces.forEach((p, i) => {
       doc.pieces.push({
         id: uid(),
-        name: filename.replace(/\.dxf$/i, '') + (res.pieces.length > 1 ? ' ' + (i + 1) : ''),
+        name: p.name || filename.replace(/\.dxf$/i, '') + (res.pieces.length > 1 ? ' ' + (i + 1) : ''),
         visible: true,
         seamAllowance: 0, // an imported outline IS the cutting line
         notchLength: 0.4,
         path: { closed: p.closed, nodes: p.nodes },
-        notches: [], holes: p.holes || [], stitchSlits: [], grain: null, foldSeg: null,
+        notches: [], holes: p.holes || [], stitchSlits: [], grain: p.grain || null, foldSeg: null,
       });
     });
     endChange();

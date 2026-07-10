@@ -532,6 +532,68 @@ t('import: unit guessing (mm for big raw extents, cm otherwise)', () => {
     Math.abs(DXFImport.unitScale(1) - 2.54) < 1e-9 && DXFImport.unitScale(0) === null);
 });
 
+t('import: CLO-style BLOCK/INSERT geometry is expanded', () => {
+  // geometry inside BLOCKS, referenced from ENTITIES via INSERT — plus a
+  // layer-7 grainline inside the piece and POINT markers, like CLO exports
+  const text = [
+    '0', 'SECTION', '2', 'BLOCKS',
+    '0', 'BLOCK', '8', '1', '2', 'Front_M', '70', '64', '10', '0', '20', '0',
+    '0', 'POLYLINE', '8', '14', '66', '1', '70', '1',
+    '0', 'VERTEX', '8', '14', '10', '0', '20', '0',
+    '0', 'VERTEX', '8', '14', '10', '200', '20', '0',
+    '0', 'VERTEX', '8', '14', '10', '200', '20', '300',
+    '0', 'VERTEX', '8', '14', '10', '0', '20', '300',
+    '0', 'SEQEND',
+    '0', 'LINE', '8', '7', '10', '100', '20', '50', '11', '100', '21', '250',   // grain inside
+    '0', 'LINE', '8', '7', '10', '900', '20', '900', '11', '900', '21', '1100', // grain outside
+    '0', 'POINT', '8', '2', '10', '0', '20', '0',
+    '0', 'POINT', '8', '3', '10', '200', '20', '0',
+    '0', 'TEXT', '8', '1', '10', '0', '20', '-10', '1', 'PIECE NAME: Front',
+    '0', 'ENDBLK',
+    '0', 'ENDSEC',
+    '0', 'SECTION', '2', 'ENTITIES',
+    '0', 'INSERT', '8', '1', '2', 'Front_M', '10', '0', '20', '0',
+    '0', 'INSERT', '8', '1', '2', 'MissingBlock', '10', '0', '20', '0',
+    '0', 'ENDSEC', '0', 'EOF',
+  ].join('\r\n');
+  const raw = DXFImport.parse(text);
+  assert(raw.blocks.Front_M, 'block captured');
+  assert(DXFImport.guessUnits(raw) === 'mm', 'extent from block geometry: ' + DXFImport.rawExtent(raw));
+  const res = DXFImport.build(raw, 0.1);
+  assert(res.pieces.length === 1, 'pieces: ' + res.pieces.length);
+  const p = res.pieces[0];
+  assert(p.closed && p.name === 'Front_M', 'named from block: ' + p.name);
+  const bb = Geo.bbox(Geo.pathPolyline(p.nodes, true, 0.1));
+  assert(Math.abs((bb.maxX - bb.minX) - 20) < 0.01 && Math.abs((bb.maxY - bb.minY) - 30) < 0.01,
+    'size 20x30cm: ' + JSON.stringify(bb));
+  assert(p.grain && Math.abs(Math.hypot(p.grain.x2 - p.grain.x1, p.grain.y2 - p.grain.y1) - 20) < 0.01,
+    'inside grainline attached: ' + JSON.stringify(p.grain));
+  assert(res.warnings.some((w) => w.includes('grainline')), 'outside grainline dropped');
+  assert(res.warnings.some((w) => w.includes('POINT')), 'points skipped');
+  assert(res.warnings.some((w) => w.includes('INSERT')), 'unresolvable INSERT reported');
+});
+
+t('import: INSERT placement transform (offset, rotation, scale)', () => {
+  const text = [
+    '0', 'SECTION', '2', 'BLOCKS',
+    '0', 'BLOCK', '8', '0', '2', 'sq', '70', '0', '10', '0', '20', '0',
+    '0', 'LWPOLYLINE', '8', '0', '90', '4', '70', '1',
+    '10', '0', '20', '0', '10', '10', '20', '0', '10', '10', '20', '10', '10', '0', '20', '10',
+    '0', 'ENDBLK',
+    '0', 'ENDSEC',
+    '0', 'SECTION', '2', 'ENTITIES',
+    '0', 'INSERT', '8', '0', '2', 'sq', '10', '100', '20', '0', '41', '2', '42', '2', '50', '90',
+    '0', 'ENDSEC', '0', 'EOF',
+  ].join('\r\n');
+  const res = DXFImport.build(DXFImport.parse(text), 1);
+  assert(res.pieces.length === 1 && res.pieces[0].closed);
+  // 10-unit square scaled x2 -> 20cm sides, rotated 90° (still axis-aligned)
+  assert(Math.abs(Geo.pathLength(res.pieces[0].nodes, true) - 80) < 0.01,
+    'perimeter: ' + Geo.pathLength(res.pieces[0].nodes, true));
+  const bb = Geo.bbox(Geo.pathPolyline(res.pieces[0].nodes, true, 0.1));
+  assert(Math.abs((bb.maxX - bb.minX) - 20) < 0.01 && Math.abs((bb.maxY - bb.minY) - 20) < 0.01);
+});
+
 t('import: SPLINE and TEXT are skipped with a warning, circles become pieces/holes', () => {
   const raw = DXFImport.parse(mkDXF(
     0, 'LWPOLYLINE', 8, 0, 90, 4, 70, 1, 10, 0, 20, 0, 10, 20, 20, 0, 10, 20, 20, 20, 10, 0, 20, 20,

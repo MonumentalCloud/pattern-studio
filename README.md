@@ -59,6 +59,9 @@ The **Open** button also accepts `.dxf` — patterns from Seamly2D/Valentina, CL
   real beziers, not facets), `ARC` and `CIRCLE`; `SPLINE`/`TEXT`/etc. are skipped with
   a note. Loose lines/arcs are chained into outlines; closed loops become pieces,
   small circles become drill holes.
+- **`BLOCK`/`INSERT` structure is expanded** — garment CAD exports (CLO, AAMA/ASTM)
+  put each piece in a block and only reference it from the entities section. Pieces
+  are named from their blocks, and AAMA layer-7 lines import as grainlines.
 - Units come from the file header when declared; otherwise you get one prompt with a
   size-based guess (mm/cm/in).
 - Straight runs are simplified (0.5 mm tolerance), so densely flattened exports don't
