@@ -114,6 +114,7 @@ label.chk { display: flex; align-items: center; gap: 4px; color: var(--dim); cur
 .measure-line { stroke: var(--accent2); stroke-width: 1.4; vector-effect: non-scaling-stroke; }
 .knife-line { stroke: var(--danger); stroke-width: 1.4; stroke-dasharray: 6 3; vector-effect: non-scaling-stroke; }
 .snap-dot { fill: none; stroke: var(--accent2); stroke-width: 2; vector-effect: non-scaling-stroke; }
+.ghost-dot { fill: var(--accent2); opacity: 0.55; stroke: var(--bg); stroke-width: 1; vector-effect: non-scaling-stroke; pointer-events: none; }
 .measure-text, .seg-len-text { fill: var(--accent2); font-family: system-ui, sans-serif; paint-order: stroke; stroke: var(--bg); stroke-width: 0.12em; }
 
 #pen-dialog, #divide-dialog {

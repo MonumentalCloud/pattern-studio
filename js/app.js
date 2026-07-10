@@ -483,7 +483,7 @@
     grain: 'Drag inside a piece to set the grainline · click (no drag) removes it',
     weld: 'Click an edge, then the matching edge on another piece — the second piece moves; both seam edges disappear',
     inset: 'Click edges to select them for a guide line (any order, click again to remove) · click inside a piece for a full-outline ring',
-    knife: 'Drag a line across a piece to cut it in two (endpoints snap to existing points) · or click an open path to cut along it',
+    knife: 'Click two points to cut a piece in two (they snap to existing points) · or click an open path to cut along it · Esc cancels',
     stitch: 'Click an edge or guide line, then its match — both get the same number of stitching slits · same target twice = single run',
     measure: 'Drag to measure a distance',
   };
@@ -493,6 +493,7 @@
     if (t !== 'weld') weldFirst = null;
     if (t !== 'stitch') stitchFirst = null;
     if (t !== 'inset') insetChain = null;
+    if (t !== 'knife') knifeFirst = null;
     $('stitch-props').hidden = t !== 'stitch';
     $('inset-props').hidden = t !== 'inset';
     document.querySelectorAll('#toolbar .tool').forEach((b) =>
@@ -626,6 +627,15 @@
       renderPenPreview();
       return;
     }
+    if (tool === 'knife' && knifeFirst && !drag) {
+      const b = knifeSnap(w);
+      clear(gPreview);
+      el('line', { class: 'knife-line', x1: knifeFirst.x, y1: knifeFirst.y, x2: b.x, y2: b.y }, gPreview);
+      for (const e2 of [knifeFirst, b]) {
+        if (e2.snapped) el('circle', { class: 'snap-dot', cx: e2.x, cy: e2.y, r: px(5) }, gPreview);
+      }
+      return;
+    }
     if (!drag) return;
 
     if (drag.type === 'pan') {
@@ -672,15 +682,6 @@
       renderAll(true);
       return;
     }
-    if (drag.type === 'knife') {
-      drag.b = knifeSnap(w);
-      clear(gPreview);
-      el('line', { class: 'knife-line', x1: drag.a.x, y1: drag.a.y, x2: drag.b.x, y2: drag.b.y }, gPreview);
-      for (const e2 of [drag.a, drag.b]) {
-        if (e2.snapped) el('circle', { class: 'snap-dot', cx: e2.x, cy: e2.y, r: px(5) }, gPreview);
-      }
-      return;
-    }
     if (drag.type === 'measure') {
       drag.b = w;
       clear(gPreview);
@@ -698,20 +699,6 @@
     if (drag) {
       if (drag.type === 'pan') svg.classList.remove('panning');
       else if (drag.type === 'measure') clear(gPreview);
-      else if (drag.type === 'knife') {
-        clear(gPreview);
-        if (Geo.dist(drag.a, drag.b) > 0.3) {
-          // extend slightly past the endpoints so a cut ending exactly on a
-          // node still crosses the outline transversally
-          const dir = Geo.norm(Geo.sub(drag.b, drag.a));
-          const a = Geo.add(drag.a, Geo.scale(dir, -0.2));
-          const b = Geo.add(drag.b, Geo.scale(dir, 0.2));
-          cutWithNodes([
-            { x: a.x, y: a.y, hin: null, hout: null },
-            { x: b.x, y: b.y, hin: null, hout: null },
-          ], null);
-        }
-      }
       else if (drag.type === 'grain') {
         const piece = pieceById(drag.pieceId);
         if (Geo.dist(drag.a, drag.b) < 0.5) piece.grain = drag.hadGrain ? null : piece.grain && null;
@@ -1043,8 +1030,38 @@
     dlg.style.top = Math.min(ev.clientY - wrap.top + 12, wrap.height - 140) + 'px';
     $('dv-dist').focus();
     $('dv-dist').select();
+    renderDivideGhosts('dist');
   }
-  function closeDivideDialog() { $('divide-dialog').hidden = true; svg.focus(); }
+  function closeDivideDialog() {
+    $('divide-dialog').hidden = true;
+    clear(gPreview);
+    svg.focus();
+  }
+
+  // ghost preview of the would-be point(s) for the given mode, live as you type
+  function renderDivideGhosts(mode) {
+    clear(gPreview);
+    const p = selPiece();
+    if (!p || sel.kind !== 'seg' || $('divide-dialog').hidden) return;
+    const n = p.path.nodes.length;
+    const a = p.path.nodes[sel.idx], b = p.path.nodes[(sel.idx + 1) % n];
+    const len = Geo.segLength(a, b);
+    let fr = [];
+    if (mode === 'dist') {
+      const d = parseFloat($('dv-dist').value);
+      if (d > 0 && d < len) fr = [d / len];
+    } else if (mode === 'pct') {
+      const q = parseFloat($('dv-pct').value);
+      if (q > 0 && q < 100) fr = [q / 100];
+    } else {
+      const k = Math.round(parseFloat($('dv-n').value));
+      if (k >= 2 && k <= 50) for (let i = 1; i < k; i++) fr.push(i / k);
+    }
+    for (const t of Geo.segArcParams(a, b, fr)) {
+      const q = Geo.segPoint(a, b, t);
+      el('circle', { class: 'ghost-dot', cx: q.x, cy: q.y, r: px(4.5) }, gPreview);
+    }
+  }
 
   // insert points at the given arc-length fractions (ascending, exclusive 0/1)
   function divideSelectedEdge(fractions) {
@@ -1092,12 +1109,17 @@
     for (let i = 1; i < k; i++) fr.push(i / k);
     divideSelectedEdge(fr);
   });
-  for (const id of ['dv-dist', 'dv-pct', 'dv-n']) {
-    $(id).addEventListener('keydown', (ev) => {
-      if (ev.key === 'Enter') { $(id + '-btn').click(); ev.preventDefault(); }
-      else if (ev.key === 'Escape') { closeDivideDialog(); ev.preventDefault(); }
-      ev.stopPropagation();
-    });
+  {
+    const dvModes = { 'dv-dist': 'dist', 'dv-pct': 'pct', 'dv-n': 'n' };
+    for (const id of ['dv-dist', 'dv-pct', 'dv-n']) {
+      $(id).addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter') { $(id + '-btn').click(); ev.preventDefault(); }
+        else if (ev.key === 'Escape') { closeDivideDialog(); ev.preventDefault(); }
+        ev.stopPropagation();
+      });
+      $(id).addEventListener('input', () => renderDivideGhosts(dvModes[id]));
+      $(id).addEventListener('focus', () => renderDivideGhosts(dvModes[id]));
+    }
   }
   for (const id of ['pd-len', 'pd-ang']) {
     $(id).addEventListener('keydown', (ev) => {
@@ -1402,20 +1424,42 @@
     return best || { x: w.x, y: w.y, snapped: false };
   }
 
+  let knifeFirst = null; // first of the two cut points
+
   function knifeDown(w) {
     // clicking an open (non-guide) path uses it as the cut path
-    let bestPath = null;
-    for (const p of doc.pieces) {
-      if (p.visible === false || p.guide || p.path.closed || p.path.nodes.length < 2) continue;
-      const hit = Geo.nearestOnPath(p.path.nodes, false, w);
-      if (hit && hit.dist < px(8) && (!bestPath || hit.dist < bestPath.hit.dist)) bestPath = { piece: p, hit };
-    }
-    if (bestPath) {
-      cutWithNodes(JSON.parse(JSON.stringify(bestPath.piece.path.nodes)), bestPath.piece);
+    if (!knifeFirst) {
+      let bestPath = null;
+      for (const p of doc.pieces) {
+        if (p.visible === false || p.guide || p.path.closed || p.path.nodes.length < 2) continue;
+        const hit = Geo.nearestOnPath(p.path.nodes, false, w);
+        if (hit && hit.dist < px(8) && (!bestPath || hit.dist < bestPath.hit.dist)) bestPath = { piece: p, hit };
+      }
+      if (bestPath) {
+        cutWithNodes(JSON.parse(JSON.stringify(bestPath.piece.path.nodes)), bestPath.piece);
+        return;
+      }
+      knifeFirst = knifeSnap(w);
+      clear(gPreview);
+      if (knifeFirst.snapped) el('circle', { class: 'snap-dot', cx: knifeFirst.x, cy: knifeFirst.y, r: px(5) }, gPreview);
+      $('status-hint').textContent = 'Now click the second cut point · Esc cancels';
       return;
     }
-    const a = knifeSnap(w);
-    drag = { type: 'knife', a, b: a };
+    // second point: perform the cut
+    const b = knifeSnap(w);
+    const a = knifeFirst;
+    knifeFirst = null;
+    clear(gPreview);
+    if (Geo.dist(a, b) < 0.3) { $('status-hint').textContent = HINTS.knife; return; }
+    // extend slightly past the points so a cut ending exactly on a node still
+    // crosses the outline transversally
+    const dir = Geo.norm(Geo.sub(b, a));
+    const ea = Geo.add(a, Geo.scale(dir, -0.2));
+    const eb = Geo.add(b, Geo.scale(dir, 0.2));
+    cutWithNodes([
+      { x: ea.x, y: ea.y, hin: null, hout: null },
+      { x: eb.x, y: eb.y, hin: null, hout: null },
+    ], null);
   }
 
   function cutWithNodes(cutNodes, sourcePiece) {
@@ -1675,6 +1719,10 @@
       } else if (tool === 'inset' && insetChain) {
         insetChain = null;
         $('status-hint').textContent = HINTS.inset;
+      } else if (tool === 'knife' && knifeFirst) {
+        knifeFirst = null;
+        clear(gPreview);
+        $('status-hint').textContent = HINTS.knife;
       } else { clearSel(); renderAll(); }
       return;
     }
