@@ -410,6 +410,19 @@
       }
     }
 
+    // selected stitch holes (single or set)
+    if (sel.kind === 'slit' || (sel.kind === 'slits' && sel.slits)) {
+      const outS = piece.path.closed ? Geo.outwardSign(Geo.pathPolyline(nodes, true, 0.1)) : 1;
+      const picked = sel.kind === 'slit' ? [sel.idx] : sel.slits;
+      for (const i of picked) {
+        const sl2 = (piece.stitchSlits || [])[i];
+        if (!sl2 || sl2.seg >= n) continue;
+        const ln = Geo.slitLine(nodes[sl2.seg], nodes[(sl2.seg + 1) % n], sl2, outS);
+        const c = Geo.lerp(ln.a, ln.b, 0.5);
+        el('circle', { class: 'snap-dot', cx: c.x, cy: c.y, r: px(5) }, gOverlay);
+      }
+    }
+
     // nodes
     nodes.forEach((nd, i) => {
       const isSel = (sel.kind === 'node' && sel.idx === i) ||
@@ -485,14 +498,19 @@
     const showMove = piece && (showNode || showSeg || showSegs || sel.kind === 'hole' ||
       (sel.kind === 'nodes' && sel.nodes.length > 0));
     const slitSel = piece && sel.kind === 'slit' && (piece.stitchSlits || [])[sel.idx];
-    $('sel-props').hidden = !(showNode || showSeg || showSegs || showMove || slitSel);
-    $('sel-del-run-row').hidden = !slitSel;
+    const slitsSel = piece && sel.kind === 'slits' && sel.slits && sel.slits.length > 0;
+    $('sel-props').hidden = !(showNode || showSeg || showSegs || showMove || slitSel || slitsSel);
+    $('sel-del-run-row').hidden = !(slitSel || slitsSel);
     if (slitSel) {
       const runOf = (sl) => (slitSel.run != null ? sl.run === slitSel.run : sl.seg === slitSel.seg);
       const count = piece.stitchSlits.filter(runOf).length;
       $('sp-del-run').textContent = `Delete stitch line (${count} hole${count > 1 ? 's' : ''})`;
       $('sel-hint').textContent =
-        'One hole of a stitch line — Del removes just this hole; the button removes the whole line. Holes stay separate marks and export as cut slits.';
+        'One hole of a stitch line — Del removes just this hole; the button removes the whole line. Shift-click or drag a box to gather several holes.';
+    } else if (slitsSel) {
+      $('sp-del-run').textContent = `Delete ${sel.slits.length} stitch holes`;
+      $('sel-hint').textContent =
+        `${sel.slits.length} stitch holes selected — Del (or the button) removes them · Shift-click holes to add/remove · drag a box over more.`;
     }
     $('sel-node-row').hidden = !showNode;
     $('sel-round-row').hidden = !showNode;
@@ -1107,6 +1125,29 @@
               done = true;
             }
           }
+          if (!done && prevPiece && (prevPiece.stitchSlits || []).length) {
+            // no points caught: a box over a section of stitch holes grabs them
+            const pn = prevPiece.path.nodes;
+            const nn = pn.length;
+            const outS = prevPiece.path.closed ? Geo.outwardSign(Geo.pathPolyline(pn, true, 0.1)) : 1;
+            const idxs = [];
+            prevPiece.stitchSlits.forEach((sl2, i) => {
+              if (sl2.seg >= nn) return;
+              const ln = Geo.slitLine(pn[sl2.seg], pn[(sl2.seg + 1) % nn], sl2, outS);
+              const c = Geo.lerp(ln.a, ln.b, 0.5);
+              if (c.x >= x0 && c.x <= x1 && c.y >= y0 && c.y <= y1) idxs.push(i);
+            });
+            if (idxs.length) {
+              sel.pieceId = prevPiece.id;
+              sel.nodes = [];
+              multiSel = [];
+              if (idxs.length === 1) { sel.kind = 'slit'; sel.idx = idxs[0]; }
+              else { sel.kind = 'slits'; sel.slits = idxs; sel.idx = -1; }
+              $('status-hint').textContent =
+                `${idxs.length} stitch hole${idxs.length > 1 ? 's' : ''} selected — Del removes them · Shift-click holes to add/remove`;
+              done = true;
+            }
+          }
           if (!done) {
             const ids = [];
             for (const p of doc.pieces) {
@@ -1400,7 +1441,22 @@
       const nti = hitNotch(piece, w);
       if (nti >= 0) { sel.kind = 'notch'; sel.idx = nti; renderAll(true); renderSidebar(); return; }
       const sli = hitSlit(piece, w);
-      if (sli >= 0) { sel.kind = 'slit'; sel.idx = sli; renderAll(true); renderSidebar(); return; }
+      if (sli >= 0) {
+        if (ev.shiftKey || sel.kind === 'slits') {
+          // gather several stitch holes; click toggles once a set exists
+          const set = new Set(sel.kind === 'slits' ? sel.slits
+            : (sel.kind === 'slit' ? [sel.idx] : []));
+          if (set.has(sli)) set.delete(sli); else set.add(sli);
+          const arr = [...set].sort((a2, b2) => a2 - b2);
+          sel.nodes = [];
+          if (!arr.length) { sel.kind = null; sel.idx = -1; }
+          else if (arr.length === 1) { sel.kind = 'slit'; sel.idx = arr[0]; }
+          else { sel.kind = 'slits'; sel.slits = arr; sel.idx = -1; }
+          renderAll(true); renderSidebar();
+          return;
+        }
+        sel.kind = 'slit'; sel.idx = sli; renderAll(true); renderSidebar(); return;
+      }
       const hi = (piece.holes || []).findIndex((h) => Geo.dist(h, w) < px(8));
       if (hi >= 0) { sel.kind = 'hole'; sel.idx = hi; renderAll(true); renderSidebar(); return; }
       // 3. segment of the selected piece — dragging moves the edge freely;
@@ -3179,6 +3235,10 @@
     } else if (sel.kind === 'slit') {
       piece.stitchSlits.splice(sel.idx, 1);
       sel.kind = null;
+    } else if (sel.kind === 'slits' && sel.slits && sel.slits.length) {
+      for (const i of sel.slits.slice().sort((a, b) => b - a)) piece.stitchSlits.splice(i, 1);
+      sel.kind = null;
+      sel.slits = [];
     } else if (sel.kind === 'hole') {
       piece.holes.splice(sel.idx, 1);
       sel.kind = null;
@@ -3661,7 +3721,10 @@
     const p = selPiece();
     if (!p) return;
     let keep = null;
-    if (sel.kind === 'slit' && (p.stitchSlits || [])[sel.idx]) {
+    if (sel.kind === 'slits' && sel.slits && sel.slits.length) {
+      const drop = new Set(sel.slits);
+      keep = (s, i) => !drop.has(i);
+    } else if (sel.kind === 'slit' && (p.stitchSlits || [])[sel.idx]) {
       const sl = p.stitchSlits[sel.idx];
       keep = (s) => (sl.run != null ? s.run !== sl.run : s.seg !== sl.seg);
     } else if (sel.kind === 'seg') {
@@ -3673,7 +3736,7 @@
     beginChange();
     p.stitchSlits = (p.stitchSlits || []).filter(keep);
     endChange();
-    if (sel.kind === 'slit') { sel.kind = null; sel.idx = -1; }
+    if (sel.kind === 'slit' || sel.kind === 'slits') { sel.kind = null; sel.idx = -1; sel.slits = []; }
     renderAll(); renderSidebar();
     $('status-hint').textContent = 'Stitch line deleted';
   });
