@@ -3354,6 +3354,7 @@
       : 'Save the project to a file on your computer (Ctrl+S)';
   }
   if (FS_OK) {
+    $('btn-save').title = 'Save the project to a file on your computer (Ctrl+S)';
     fsStore('readonly', (st) => st.get('project'))
       .then((h) => { if (h && !fileHandle) rememberHandle(h); })
       .catch(() => {});
