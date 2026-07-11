@@ -2660,7 +2660,9 @@
     stitchMultiHint();
   }
 
-  // run an independent single run of holes along every selected target
+  // run holes along every selected target. Contiguous edges of a closed piece
+  // stitch as ONE run along the mitred inset line (like a guide), so spacing
+  // stays even around corners and inset runs never overshoot them.
   function stitchApplyMulti() {
     if (!stitchMulti.length) return;
     const spacing = Math.max(0.1, parseFloat($('st-spacing').value) || 0.3);
@@ -2668,20 +2670,88 @@
     const off = parseFloat($('st-off').value) || 0;
     beginChange();
     let total = 0, runs = 0;
+    const fracs = (len, loop) => {
+      const count = Math.max(2, Math.round(len / spacing));
+      const fr = [];
+      for (let i = 0; i < count; i++) fr.push(loop ? i / count : (i + 0.5) / count);
+      return fr;
+    };
+    const guideIds = new Set();
+    const byPiece = new Map(); // non-guide closed pieces: id -> Set(segs)
     for (const tg of stitchMulti) {
       const piece = pieceById(tg.pieceId);
-      if (!piece || (!piece.guide && tg.seg >= piece.path.nodes.length)) continue;
-      const t = stitchTarget(piece, tg.seg);
-      if (t.len < 1e-6) continue;
-      const count = Math.max(2, Math.round(t.len / spacing));
-      const fr = [];
-      for (let i = 0; i < count; i++) fr.push(t.loop ? i / count : (i + 0.5) / count);
-      piece.stitchSlits = piece.stitchSlits || [];
-      for (const pos of t.place(fr)) {
-        piece.stitchSlits.push({ seg: pos.seg, t: pos.t, len: slitLen, ang: 45, off: t.whole ? 0 : off });
+      if (!piece) continue;
+      if (piece.guide) { guideIds.add(piece.id); continue; }
+      if (tg.seg >= piece.path.nodes.length) continue;
+      if (!piece.path.closed) {
+        // open paths: plain per-edge run (no corner chaining to worry about)
+        const t = stitchTarget(piece, tg.seg);
+        if (t.len < 1e-6) continue;
+        piece.stitchSlits = piece.stitchSlits || [];
+        for (const pos of t.place(fracs(t.len, false))) {
+          piece.stitchSlits.push({ seg: pos.seg, t: pos.t, len: slitLen, ang: 45, off });
+          total++;
+        }
+        runs++;
+        continue;
       }
-      total += count;
+      if (!byPiece.has(piece.id)) byPiece.set(piece.id, new Set());
+      byPiece.get(piece.id).add(tg.seg);
+    }
+    // guides: holes along their whole length, on the line itself
+    for (const gid of guideIds) {
+      const piece = pieceById(gid);
+      const t = stitchTarget(piece, 0);
+      if (t.len < 1e-6) continue;
+      piece.stitchSlits = piece.stitchSlits || [];
+      for (const pos of t.place(fracs(t.len, t.loop))) {
+        piece.stitchSlits.push({ seg: pos.seg, t: pos.t, len: slitLen, ang: 45, off: 0 });
+        total++;
+      }
       runs++;
+    }
+    // closed pieces: contiguous arcs become single mitred runs
+    for (const [pid, segsSet] of byPiece) {
+      const piece = pieceById(pid);
+      const nodes = piece.path.nodes;
+      const n = nodes.length;
+      const os = Geo.outwardSign(Geo.pathPolyline(nodes, true, 0.05));
+      piece.stitchSlits = piece.stitchSlits || [];
+      const stitchAlong = (pathNodes, loop) => {
+        const L = Geo.pathLength(pathNodes, loop);
+        if (L < 1e-6) return;
+        for (const pos of Geo.pathArcParams(pathNodes, loop, fracs(L, loop))) {
+          const P = Geo.segPoint(pathNodes[pos.seg], pathNodes[(pos.seg + 1) % pathNodes.length], pos.t);
+          // anchor the hole back onto the piece's own edge, with the exact
+          // per-hole inset so it stays on the mitred line at corners
+          const hit = Geo.nearestOnPath(nodes, true, P);
+          if (!hit) continue;
+          const a = nodes[hit.seg], b = nodes[(hit.seg + 1) % n];
+          const q = Geo.segPoint(a, b, hit.t);
+          const tan = Geo.segTangent(a, b, hit.t);
+          const nrm = { x: os * tan.y, y: -os * tan.x };
+          const offI = (q.x - P.x) * nrm.x + (q.y - P.y) * nrm.y;
+          piece.stitchSlits.push({ seg: hit.seg, t: hit.t, len: slitLen, ang: 45, off: offI });
+          total++;
+        }
+        runs++;
+      };
+      if (segsSet.size === n) {
+        // full outline: one closed loop, inset (or on the line when off = 0)
+        const base = Geo.dedupe(Geo.pathPolyline(nodes, true, 0.02));
+        const pts = off ? Geo.offsetClosed(base, -off) : base;
+        if (pts.length >= 3) {
+          stitchAlong(Geo.simplifyPoly(pts, 0.005, true).map((p) => ({ x: p.x, y: p.y, hin: null, hout: null })), true);
+        }
+      } else {
+        for (let s0 = 0; s0 < n; s0++) {
+          if (!segsSet.has(s0) || segsSet.has((s0 - 1 + n) % n)) continue;
+          const arc = [s0];
+          let nx = (s0 + 1) % n;
+          while (segsSet.has(nx)) { arc.push(nx); nx = (nx + 1) % n; }
+          stitchAlong(edgeGuideNodes(piece, arc, off), false);
+        }
+      }
     }
     endChange();
     stitchMulti = [];
