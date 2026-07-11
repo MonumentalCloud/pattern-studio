@@ -492,7 +492,7 @@
       if (slitCount) $('sp-clear-slits').textContent = `Remove ${slitCount} stitch hole${slitCount > 1 ? 's' : ''}`;
       $('sel-hint').textContent = piece.foldSeg === sel.idx
         ? 'This edge is the fold — the piece unfolds across it on export.'
-        : 'Drag the edge to protrude it into a tab (Alt-drag slides the edge instead) · type a length to resize (● = start) · double-click inserts a point · right-click divides.';
+        : 'Drag the edge to slide it outward/inward · Alt-drag protrudes it into a tab · type a length to resize (● = start) · double-click inserts a point · right-click divides.';
     }
   }
 
@@ -1208,9 +1208,9 @@
       if (sli >= 0) { sel.kind = 'slit'; sel.idx = sli; renderAll(true); renderSidebar(); return; }
       const hi = (piece.holes || []).findIndex((h) => Geo.dist(h, w) < px(8));
       if (hi >= 0) { sel.kind = 'hole'; sel.idx = hi; renderAll(true); renderSidebar(); return; }
-      // 3. segment of the selected piece — dragging it protrudes the edge
-      // along its normal (a tab / recess with straight side walls);
-      // Alt-drag slides the edge instead, stretching the neighbouring edges
+      // 3. segment of the selected piece — dragging it slides the edge along
+      // its normal (outward / inward), stretching the neighbouring edges;
+      // Alt-drag protrudes it instead (a tab / recess with straight walls)
       const hit = Geo.nearestOnPath(piece.path.nodes, piece.path.closed, w);
       if (hit && hit.dist < px(6)) {
         sel.kind = 'seg'; sel.idx = hit.seg; sel.nodes = [];
@@ -1221,7 +1221,7 @@
         beginChange();
         drag = {
           type: 'seg', pieceId: piece.id, idx: hit.seg,
-          mode: ev.altKey ? 'slide' : 'extrude', inserted: false,
+          mode: ev.altKey ? 'extrude' : 'slide', inserted: false,
           start: w, applied: 0, n: { x: os * tan.y, y: -os * tan.x },
         };
         renderAll(true); renderSidebar();
