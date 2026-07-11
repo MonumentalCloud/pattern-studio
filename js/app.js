@@ -526,6 +526,15 @@
         : (piece.stitchSlits || []).filter((sl) => sl.seg === sel.idx).length;
       $('sel-clear-slits-row').hidden = !slitCount;
       if (slitCount) $('sp-clear-slits').textContent = `Remove ${slitCount} stitch hole${slitCount > 1 ? 's' : ''}`;
+      // ...and the whole stitch line(s) touching this edge, corners included
+      if (slitCount) {
+        const onEdge = (s2) => piece.guide || s2.seg === sel.idx;
+        const runsHere = new Set((piece.stitchSlits || []).filter(onEdge).map((s2) => s2.run).filter((r) => r != null));
+        const runTotal = (piece.stitchSlits || []).filter((s2) =>
+          (s2.run != null ? runsHere.has(s2.run) : onEdge(s2))).length;
+        $('sel-del-run-row').hidden = false;
+        $('sp-del-run').textContent = `Delete stitch line (${runTotal} hole${runTotal > 1 ? 's' : ''})`;
+      }
       $('sel-hint').textContent = piece.foldSeg === sel.idx
         ? 'This edge is the fold — the piece unfolds across it on export.'
         : 'Drag the edge to move it · type a length to resize (● = start) · double-click inserts a point · right-click divides · the Offset tool (O) slides/protrudes it along its normal.';
@@ -3650,14 +3659,21 @@
   });
   $('sp-del-run').addEventListener('click', () => {
     const p = selPiece();
-    const sl = p && sel.kind === 'slit' && (p.stitchSlits || [])[sel.idx];
-    if (!sl) return;
+    if (!p) return;
+    let keep = null;
+    if (sel.kind === 'slit' && (p.stitchSlits || [])[sel.idx]) {
+      const sl = p.stitchSlits[sel.idx];
+      keep = (s) => (sl.run != null ? s.run !== sl.run : s.seg !== sl.seg);
+    } else if (sel.kind === 'seg') {
+      const onEdge = (s2) => p.guide || s2.seg === sel.idx;
+      const runsHere = new Set((p.stitchSlits || []).filter(onEdge).map((s2) => s2.run).filter((r) => r != null));
+      keep = (s) => !(s.run != null ? runsHere.has(s.run) : onEdge(s));
+    }
+    if (!keep) return;
     beginChange();
-    p.stitchSlits = p.stitchSlits.filter((s) =>
-      (sl.run != null ? s.run !== sl.run : s.seg !== sl.seg));
+    p.stitchSlits = (p.stitchSlits || []).filter(keep);
     endChange();
-    sel.kind = null;
-    sel.idx = -1;
+    if (sel.kind === 'slit') { sel.kind = null; sel.idx = -1; }
     renderAll(); renderSidebar();
     $('status-hint').textContent = 'Stitch line deleted';
   });
