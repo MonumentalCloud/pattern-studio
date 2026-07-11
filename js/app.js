@@ -3526,6 +3526,44 @@
   });
   $('pp-dup').addEventListener('click', () => { const p = selPiece(); if (p) duplicatePiece(p, false); });
   $('pp-mirror').addEventListener('click', () => { const p = selPiece(); if (p) duplicatePiece(p, true); });
+  $('pp-inset-btn').addEventListener('click', () => {
+    const p = selPiece();
+    if (!p) return;
+    if (!p.path.closed) { $('status-hint').textContent = 'Inset copies need a closed outline.'; return; }
+    const d = parseFloat($('pp-inset-d').value) || 0;
+    if (!d) return;
+    const src = effPiece(p); // folded pieces inset their full unfolded shape
+    const pts = Geo.offsetClosed(Geo.dedupe(Geo.pathPolyline(src.path.nodes, true, 0.02)), -d);
+    if (pts.length < 3) { $('status-hint').textContent = 'That distance swallows the whole piece.'; return; }
+    const copy = {
+      id: uid(),
+      name: p.name + (d > 0 ? ' inset' : ' outset'),
+      visible: true,
+      seamAllowance: p.seamAllowance,
+      notchLength: p.notchLength,
+      path: {
+        closed: true,
+        nodes: Geo.simplifyPoly(pts, 0.01, true).map((q) => ({ x: q.x, y: q.y, hin: null, hout: null })),
+      },
+      notches: [], stitchSlits: [],
+      holes: JSON.parse(JSON.stringify(p.holes || [])),
+      cutouts: JSON.parse(JSON.stringify(p.cutouts || [])),
+      grain: p.grain ? { ...p.grain } : null,
+      foldSeg: null,
+    };
+    if (p.guide) copy.guide = true;
+    beginChange();
+    doc.pieces.push(copy);
+    endChange();
+    selectPiece(copy.id);
+    renderAll();
+    $('status-hint').textContent =
+      `"${copy.name}" created ${fmt(Math.abs(d))} cm ${d > 0 ? 'inside' : 'outside'} the original — it sits on top; drag or Move it away`;
+  });
+  $('pp-inset-d').addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter') { $('pp-inset-btn').click(); ev.preventDefault(); }
+    ev.stopPropagation();
+  });
   $('pp-del').addEventListener('click', () => {
     const p = selPiece(); if (!p) return;
     beginChange();

@@ -35,6 +35,7 @@ can be saved/opened as `.pattern.json` files.
 | **Weld** | fuse two pieces into one along matching edges — the second piece is rigidly moved into place, both seam edges disappear, notches/holes/grainline carried over · **seam leftovers that coincide sew up**: weld two mirrored halves whose joining edge carries half a cut-out (e.g. a half-circle bite) and the doubled line disappears while the bite closes into an **internal cutout** — a real hole, cut intact on the `CUT` layer, that moves/mirrors/copies with the piece |
 | **Fold-line pieces** | draft half a symmetric piece, mark a straight edge as the fold — the mirrored half renders live and every edit updates it; exports unfold to the full cutting outline with the fold on the `MARK` layer |
 | **Mirror copy** | mirrored duplicate for left/right pieces — handles, notches and holes are remapped correctly |
+| **Inset copy** | duplicate a piece with its outline offset **inward** by a set distance (lining / padding layers) — lands concentric on the original; negative distance grows it outward; holes and cutouts ride along |
 | **Measure** | drag to measure any distance; edge lengths and piece perimeters shown live (for walking seams) |
 | **Snap** | to grid (0.1–1 cm), to existing points, and to **any point along another outline** (projected onto the curve) — for the pen, shapes, node drags and the knife · dragging a whole piece magnets its points onto other pieces' points or edges for exact placement |
 | **Undo/redo** | Ctrl+Z / Ctrl+Y, 100 steps |
