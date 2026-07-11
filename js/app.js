@@ -356,6 +356,17 @@
         }, gOverlay);
       }
     }
+    if (tool === 'stitch' && stitchMulti.length) {
+      for (const tg of stitchMulti) {
+        const tp = pieceById(tg.pieceId);
+        if (!tp || (!tp.guide && tg.seg >= tp.path.nodes.length)) continue;
+        const tn = tp.path.nodes;
+        el('path', {
+          class: 'seg-highlight weld',
+          d: tp.guide ? pathD(tn, tp.path.closed) : segD(tn[tg.seg], tn[(tg.seg + 1) % tn.length]),
+        }, gOverlay);
+      }
+    }
     if (multiSel.length > 1) return; // group selection: no per-node overlay
     const piece = selPiece();
     if (!piece || tool === 'pen') return;
@@ -525,6 +536,7 @@
   let tool = 'select';
   let weldFirst = null; // weld tool: { pieceId, seg } of the first picked edge
   let stitchFirst = null; // stitch tool: same, for the first edge of a matched pair
+  let stitchMulti = []; // stitch tool: [{pieceId, seg}] targets for a bulk run
   const HINTS = {
     select: 'Click a piece or point to select · drag to move · Shift-click pieces or edges to gather several · drag empty space to box-select pieces (piece selected: its points · +Shift: its edges) · Del deletes',
     pen: 'Click = corner, drag = curve · right-click = type exact length/angle · click the first point to close · Esc finishes open',
@@ -537,14 +549,14 @@
     knife: 'Click two points to cut a piece in two (they snap to existing points) · or click an open path to cut along it · Esc cancels',
     round: 'Drag outward from a corner point — the drag distance sets the fillet radius, live preview shows the arc',
     bool: 'Click the base piece (A), then the other (B) — combined with the op from the panel · overlapping outlines must cross exactly twice · Subtract with B fully inside A punches it through as a hole',
-    stitch: 'Click an edge or guide line, then its match — both get the same number of stitching slits · same target twice = single run',
+    stitch: 'Click an edge or guide line, then its match — both get the same number of stitching slits · same target twice = single run · Shift-click or drag a box to select MANY targets, then Enter runs holes along each',
     measure: 'Drag to measure a distance',
   };
   function setTool(t) {
     tool = t;
     if (t !== 'pen') finishDraft(false);
     if (t !== 'weld') weldFirst = null;
-    if (t !== 'stitch') stitchFirst = null;
+    if (t !== 'stitch') { stitchFirst = null; stitchMulti = []; }
     if (t !== 'offset') insetChain = null;
     if (t !== 'knife') knifeFirst = null;
     if (t !== 'bool') boolFirst = null;
@@ -662,7 +674,7 @@
     if (tool === 'knife') return knifeDown(w);
     if (tool === 'round') return roundDown(w);
     if (tool === 'bool') return boolDown(w);
-    if (tool === 'stitch') return stitchDown(w);
+    if (tool === 'stitch') return stitchDown(ev, w);
     if (tool === 'measure') { drag = { type: 'measure', a: w, b: w }; return; }
   });
 
@@ -1028,6 +1040,14 @@
           if (x1 - x0 > 0.2 || y1 - y0 > 0.2) offsetBoxAdd(x0, y0, x1, y1);
           else { clearSel(); } // click on empty space clears the edge set
           renderAll(true); renderSidebar();
+          drag = null;
+          return;
+        }
+        if (drag.mode === 'stitch-add') {
+          // stitch tool: box-select targets; a plain empty click clears them
+          if (x1 - x0 > 0.2 || y1 - y0 > 0.2) stitchBoxAdd(x0, y0, x1, y1);
+          else { stitchMulti = []; stitchFirst = null; $('status-hint').textContent = HINTS.stitch; }
+          renderAll(true);
           drag = null;
           return;
         }
@@ -2576,18 +2596,97 @@
   }
 
   // ---- stitch tool ----
-  function stitchDown(w) {
+  function stitchTargetKey(tg) {
+    const p = pieceById(tg.pieceId);
+    return tg.pieceId + '/' + (p && p.guide ? 'guide' : tg.seg);
+  }
+  function stitchMultiHint() {
+    $('status-hint').textContent = stitchMulti.length
+      ? `${stitchMulti.length} stitch target${stitchMulti.length > 1 ? 's' : ''} selected — Enter (or "Stitch selected") runs holes along each · click toggles · drag a box adds more · Esc cancels`
+      : HINTS.stitch;
+  }
+
+  function stitchDown(ev, w) {
     const res = nearestEdgeAt(w, true);
-    if (!res) return;
+    if (!res) {
+      // empty space: drag a box to gather many targets; a plain click clears
+      drag = { type: 'marquee', mode: 'stitch-add', a: w, b: w };
+      return;
+    }
+    if (ev.shiftKey || stitchMulti.length) {
+      // multi mode: every click toggles the target in the set
+      const tg = { pieceId: res.piece.id, seg: res.hit.seg };
+      const k = stitchTargetKey(tg);
+      const idx = stitchMulti.findIndex((t) => stitchTargetKey(t) === k);
+      if (idx >= 0) stitchMulti.splice(idx, 1); else stitchMulti.push(tg);
+      stitchFirst = null;
+      stitchMultiHint();
+      renderAll(true);
+      return;
+    }
     if (!stitchFirst || !pieceById(stitchFirst.pieceId)) {
       stitchFirst = { pieceId: res.piece.id, seg: res.hit.seg };
       selectPiece(res.piece.id);
-      $('status-hint').textContent = 'Now click the matching edge (same edge again = single run) · Esc cancels';
+      $('status-hint').textContent = 'Now click the matching edge (same edge again = single run) · Shift-click selects many at once · Esc cancels';
       renderAll(true); renderSidebar();
       return;
     }
     const pA = pieceById(stitchFirst.pieceId);
     stitchEdges(pA, stitchFirst.seg, res.piece, res.hit.seg);
+  }
+
+  // box-select stitch targets: edges with both endpoints inside; guide lines
+  // that fit entirely inside come in as whole-path targets
+  function stitchBoxAdd(x0, y0, x1, y1) {
+    const inside = (nd) => nd.x >= x0 && nd.x <= x1 && nd.y >= y0 && nd.y <= y1;
+    const have = new Set(stitchMulti.map(stitchTargetKey));
+    const add = (tg) => {
+      const k = stitchTargetKey(tg);
+      if (!have.has(k)) { have.add(k); stitchMulti.push(tg); }
+    };
+    for (const p of doc.pieces) {
+      if (p.visible === false || p.path.nodes.length < 2) continue;
+      if (p.guide) {
+        if (p.path.nodes.every(inside)) add({ pieceId: p.id, seg: 0 });
+        continue;
+      }
+      const n = p.path.nodes.length;
+      const segCount = p.path.closed ? n : n - 1;
+      for (let i = 0; i < segCount; i++) {
+        if (inside(p.path.nodes[i]) && inside(p.path.nodes[(i + 1) % n])) add({ pieceId: p.id, seg: i });
+      }
+    }
+    stitchFirst = null;
+    stitchMultiHint();
+  }
+
+  // run an independent single run of holes along every selected target
+  function stitchApplyMulti() {
+    if (!stitchMulti.length) return;
+    const spacing = Math.max(0.1, parseFloat($('st-spacing').value) || 0.3);
+    const slitLen = Math.max(0.05, parseFloat($('st-len').value) || 0.15);
+    const off = parseFloat($('st-off').value) || 0;
+    beginChange();
+    let total = 0, runs = 0;
+    for (const tg of stitchMulti) {
+      const piece = pieceById(tg.pieceId);
+      if (!piece || (!piece.guide && tg.seg >= piece.path.nodes.length)) continue;
+      const t = stitchTarget(piece, tg.seg);
+      if (t.len < 1e-6) continue;
+      const count = Math.max(2, Math.round(t.len / spacing));
+      const fr = [];
+      for (let i = 0; i < count; i++) fr.push(t.loop ? i / count : (i + 0.5) / count);
+      piece.stitchSlits = piece.stitchSlits || [];
+      for (const pos of t.place(fr)) {
+        piece.stitchSlits.push({ seg: pos.seg, t: pos.t, len: slitLen, ang: 45, off: t.whole ? 0 : off });
+      }
+      total += count;
+      runs++;
+    }
+    endChange();
+    stitchMulti = [];
+    $('status-hint').textContent = `${total} stitching slits over ${runs} run${runs > 1 ? 's' : ''}`;
+    renderAll();
   }
 
   // Put the SAME number of slits on both targets, at equal arc-length
@@ -2672,14 +2771,20 @@
       return;
     }
     if ((ev.ctrlKey || ev.metaKey) && k === 'd') { duplicateSelection(); ev.preventDefault(); return; }
+    if (k === 'enter' && tool === 'stitch' && stitchMulti.length) {
+      stitchApplyMulti();
+      ev.preventDefault();
+      return;
+    }
     if (k === 'escape') {
       if (tool === 'pen' && draft) finishDraft(false);
       else if (tool === 'weld' && weldFirst) {
         weldFirst = null;
         $('status-hint').textContent = HINTS.weld;
         renderAll(true);
-      } else if (tool === 'stitch' && stitchFirst) {
+      } else if (tool === 'stitch' && (stitchFirst || stitchMulti.length)) {
         stitchFirst = null;
+        stitchMulti = [];
         $('status-hint').textContent = HINTS.stitch;
         renderAll(true);
       } else if (tool === 'offset' && (insetChain || sel.kind === 'seg' || sel.kind === 'segs')) {
@@ -3482,6 +3587,10 @@
   $('of-dist').addEventListener('keydown', (ev) => {
     if (ev.key === 'Enter') { $('of-apply').click(); ev.preventDefault(); }
     ev.stopPropagation();
+  });
+  $('st-apply').addEventListener('click', () => {
+    if (stitchMulti.length) stitchApplyMulti();
+    else $('status-hint').textContent = 'Nothing selected — Shift-click edges/guide lines (or drag a box over them) first.';
   });
   // typing exact coordinates for the selected point
   for (const key of ['x', 'y']) {
