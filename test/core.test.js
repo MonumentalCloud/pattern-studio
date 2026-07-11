@@ -710,4 +710,65 @@ t('import: SPLINE and TEXT are skipped with a warning, circles become pieces/hol
     JSON.stringify(res.warnings));
 });
 
+console.log('sew slits (weld seam cleanup)');
+
+t('sewSlits: a welded double seam sews up, the enclosed loop becomes a cutout', () => {
+  // two 10x10 halves joined at x=10 with a diamond bite across the seam; the
+  // top seam segment was welded away, leaving the lower seam drawn twice
+  // ((10,6)->(10,10) and back) and the diamond reachable only through the slit
+  const nodes = [
+    N(10, 4), N(8, 5), N(10, 6), N(10, 10), N(0, 10), N(0, 0),
+    N(10, 0), N(20, 0), N(20, 10), N(10, 10), N(10, 6), N(12, 5),
+  ];
+  const res = Geo.sewSlits(nodes, 0.01);
+  assert(res, 'coincident pair not found');
+  assert(res.cutouts.length === 1, 'cutouts: ' + res.cutouts.length);
+  assert(res.cutouts[0].length === 4, 'diamond nodes: ' + res.cutouts[0].length);
+  const dArea = Math.abs(Geo.polyArea(Geo.pathPolyline(res.cutouts[0], true, 0.1)));
+  assert(Math.abs(dArea - 4) < 0.01, 'diamond area: ' + dArea);
+  assert(res.outline.length === 6, 'outline nodes: ' + res.outline.length);
+  const oArea = Math.abs(Geo.polyArea(Geo.pathPolyline(res.outline, true, 0.1)));
+  assert(Math.abs(oArea - 200) < 0.01, 'outline area: ' + oArea);
+  // nothing of the slit remains on the outline
+  assert(!res.outline.some((nd) => Math.abs(nd.x - 10) < 1e-9 && nd.y > 0.1 && nd.y < 9.9),
+    'slit nodes left in outline: ' + JSON.stringify(res.outline));
+  assert(res.segMap[3] && res.segMap[3].loop === -1, 'outline seg remap');
+  assert(res.segMap[2] === null && res.segMap[9] === null, 'slit segs removed');
+  assert(res.segMap[0] && res.segMap[0].loop === 0, 'diamond seg remap');
+});
+
+t('sewSlits: leaves ordinary outlines alone', () => {
+  assert(Geo.sewSlits([N(0, 0), N(10, 0), N(10, 10), N(0, 10)], 0.01) === null, 'square must not sew');
+});
+
+t('sewSlits: curved slits (mirrored handles) sew too', () => {
+  // square with a zero-width CURVED slit poking in from the top edge:
+  // in at (5,0), curve to (4,3), back out along the exact same curve
+  const nodes = [
+    N(0, 0), N(5, 0, null, { x: 0, y: 1.5 }), N(4, 3, { x: 1, y: -1 }, { x: 1, y: -1 }),
+    N(5, 0, { x: 0, y: 1.5 }, null), N(10, 0), N(10, 10), N(0, 10),
+  ];
+  const res = Geo.sewSlits(nodes, 0.01);
+  assert(res, 'curved slit not found');
+  assert(res.cutouts.length === 0, 'no loop enclosed: ' + res.cutouts.length);
+  assert(res.outline.length === 5, 'outline nodes: ' + res.outline.length);
+  const oArea = Math.abs(Geo.polyArea(Geo.pathPolyline(res.outline, true, 0.1)));
+  assert(Math.abs(oArea - 100) < 0.05, 'outline area: ' + oArea);
+});
+
+t('pieceShapes: internal cutouts export as closed CUT polylines', () => {
+  const piece = {
+    id: 'x', name: 'joined', visible: true, seamAllowance: 0, notchLength: 0.4,
+    path: { closed: true, nodes: [N(0, 0), N(20, 0), N(20, 10), N(0, 10)] },
+    notches: [], holes: [], stitchSlits: [], grain: null, foldSeg: null,
+    cutouts: [{ nodes: [N(10, 4), N(8, 5), N(10, 6), N(12, 5)] }],
+  };
+  const s = DXF.pieceShapes(piece);
+  const cut = s.polylines.filter((p) => p.layer === 'CUT');
+  assert(cut.length === 2, 'outline + cutout on CUT: ' + cut.length);
+  assert(cut.every((p) => p.closed), 'both closed');
+  const dxf = DXF.exportDXF({ pieces: [piece] });
+  assert(dxf.includes('AC1009'), 'still R12');
+});
+
 console.log(`\n${passed} tests passed${process.exitCode ? ' (with failures)' : ''}`);

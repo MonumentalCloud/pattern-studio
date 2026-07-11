@@ -132,9 +132,17 @@
         }));
       }
     }
+    const cutouts = [];
+    for (const c of piece.cutouts || []) {
+      cutouts.push(c);
+      const refl = Geo.reflectNodes(c.nodes, a, b);
+      const cen = Geo.centroid(Geo.pathPolyline(c.nodes, true, 0.1));
+      const mcen = Geo.centroid(Geo.pathPolyline(refl, true, 0.1));
+      if (Geo.dist(cen, mcen) > 0.05) cutouts.push({ nodes: refl });
+    }
     const out = Object.assign({}, piece, {
       path: { closed: true, nodes: res.nodes },
-      notches, holes, stitchSlits, foldSeg: null, mirrorStart: n - 1,
+      notches, holes, stitchSlits, cutouts, foldSeg: null, mirrorStart: n - 1,
     });
     return out;
   }
@@ -199,6 +207,13 @@
         const end = Geo.add(p, Geo.scale(nrm, sa - notchLen)); // inward
         out.lines.push({ layer: 'CUT', a: start, b: end });
       }
+    }
+
+    // internal cutouts: real cut loops inside the outline (e.g. a hole formed
+    // by welding two mirrored halves)
+    for (const c of piece.cutouts || []) {
+      if (!c.nodes || c.nodes.length < 3) continue;
+      out.polylines.push({ layer: 'CUT', pts: Geo.dedupe(Geo.pathPolyline(c.nodes, true, FLATTEN_TOL_CM)), closed: true });
     }
 
     // stitching slits: diagonal cuts on (or inset from) the stitch line

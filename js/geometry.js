@@ -576,6 +576,97 @@
     return { nodes, segMapA, segMapB, flipT, xform };
   }
 
+  // Sew up self-coincident seams in a closed path: segments that lie exactly
+  // on top of each other with opposite directions (a zero-width slit — e.g.
+  // two mirrored halves of a cut-out meeting along a weld) are removed
+  // pairwise and the remaining segments re-chain into loops. The largest loop
+  // is the outline; detached loops (a hole enclosed by the slit) come back as
+  // cutouts. Returns null when nothing coincides, else { outline, cutouts,
+  // segMap } with segMap[oldSeg] = { loop: -1 (outline) | cutout idx, seg } or
+  // null for removed segments.
+  function sewSlits(nodes, tol) {
+    const n = nodes.length;
+    if (n < 4) return null;
+    const t = tol == null ? 0.01 : tol;
+    const near = (p, q) => Math.abs(p.x - q.x) <= t && Math.abs(p.y - q.y) <= t;
+    const hv = (h) => h || { x: 0, y: 0 };
+    const hnear = (h1, h2) => Math.abs(hv(h1).x - hv(h2).x) <= t && Math.abs(hv(h1).y - hv(h2).y) <= t;
+    const A = (i) => nodes[i], B = (i) => nodes[(i + 1) % n];
+    const dead = new Array(n).fill(false);
+    let removed = 0;
+    for (let i = 0; i < n; i++) {
+      if (dead[i]) continue;
+      for (let j = i + 1; j < n; j++) {
+        if (dead[j]) continue;
+        // reversed coincidence: i runs a->b, j runs b->a with matching handles
+        if (near(A(i), B(j)) && near(B(i), A(j)) &&
+            hnear(A(i).hout, B(j).hin) && hnear(B(i).hin, A(j).hout)) {
+          dead[i] = dead[j] = true;
+          removed += 2;
+          break;
+        }
+      }
+    }
+    if (!removed) return null;
+    // cluster surviving endpoints, then chain segments into loops (directions
+    // are preserved, so each cluster has one outgoing surviving segment)
+    const clusters = [];
+    const clusterOf = (p) => {
+      for (const c of clusters) if (near(c, p)) return c.id;
+      const c = { x: p.x, y: p.y, id: clusters.length };
+      clusters.push(c);
+      return c.id;
+    };
+    const live = [];
+    for (let i = 0; i < n; i++) {
+      if (!dead[i]) live.push({ i, a: clusterOf(A(i)), b: clusterOf(B(i)) });
+    }
+    const byStart = new Map();
+    for (const s of live) byStart.set(s.a, s);
+    const used = new Set();
+    const loops = [];
+    for (const s0 of live) {
+      if (used.has(s0.i)) continue;
+      const run = [];
+      let s = s0;
+      while (s && !used.has(s.i)) {
+        used.add(s.i);
+        run.push(s);
+        s = byStart.get(s.b);
+      }
+      if (run.length >= 2 && s === s0) loops.push(run);
+    }
+    if (!loops.length) return null;
+    // rebuild node lists: each junction keeps the incoming end's hin and the
+    // outgoing start's hout (the in-between handles died with the slit)
+    const built = loops.map((run) => {
+      const out = [];
+      const order = [];
+      for (let k = 0; k < run.length; k++) {
+        const cur = run[k];
+        const prevEnd = B(run[(k - 1 + run.length) % run.length].i);
+        const start = A(cur.i);
+        out.push({
+          x: start.x, y: start.y,
+          hin: prevEnd.hin ? { x: prevEnd.hin.x, y: prevEnd.hin.y } : null,
+          hout: start.hout ? { x: start.hout.x, y: start.hout.y } : null,
+        });
+        order.push(cur.i);
+      }
+      return { nodes: out, order };
+    });
+    const absArea = (nds) => Math.abs(polyArea(pathPolyline(nds, true, 0.1)));
+    built.sort((u, v) => absArea(v.nodes) - absArea(u.nodes));
+    if (built[0].nodes.length < 3) return null;
+    const segMap = new Array(n).fill(null);
+    built.forEach((loop, li) => {
+      loop.order.forEach((oldSeg, newSeg) => {
+        segMap[oldSeg] = { loop: li === 0 ? -1 : li - 1, seg: newSeg };
+      });
+    });
+    return { outline: built[0].nodes, cutouts: built.slice(1).map((l) => l.nodes), segMap };
+  }
+
   return {
     sub, add, scale, dot, len, dist, norm, lerp,
     segCtrl, segIsLine, segPoint, segTangent, segFlatten, segLength,
@@ -583,6 +674,6 @@
     pathPolyline, pathLength, polyArea, bbox, centroid, dedupe,
     outwardSign, offsetClosed, nearestOnPath, pointInPolygon, splitSeg, setSegLength,
     reverseNodes, weldClosedPaths, reflectPoint, reflectNodes, segArcParams, slitLine,
-    pathArcParams, simplifyPoly, offsetOpen, pathIntersections,
+    pathArcParams, simplifyPoly, offsetOpen, pathIntersections, sewSlits,
   };
 });

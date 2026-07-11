@@ -300,6 +300,11 @@
         }
       }
 
+      // internal cutouts — real cut lines, drawn like the outline
+      for (const c of rp.cutouts || []) {
+        if (c.nodes && c.nodes.length > 2) el('path', { class: 'piece-cutout', d: pathD(c.nodes, true) }, g);
+      }
+
       // holes
       for (const h of rp.holes || []) {
         el('circle', { class: 'piece-hole', cx: h.x, cy: h.y, r: h.r || 0.15 }, g);
@@ -1297,6 +1302,9 @@
   function movePiece(piece, dx, dy) {
     for (const nd of piece.path.nodes) { nd.x += dx; nd.y += dy; }
     for (const h of piece.holes || []) { h.x += dx; h.y += dy; }
+    for (const c of piece.cutouts || []) {
+      for (const nd of c.nodes) { nd.x += dx; nd.y += dy; }
+    }
     if (piece.grain) {
       piece.grain.x1 += dx; piece.grain.y1 += dy;
       piece.grain.x2 += dx; piece.grain.y2 += dy;
@@ -1827,11 +1835,41 @@
       const b = res.xform({ x: pB.grain.x2, y: pB.grain.y2 });
       grain = { x1: a.x, y1: a.y, x2: b.x, y2: b.y };
     }
-    pA.path.nodes = res.nodes;
+    // existing internal cutouts ride along (B's rigidly transformed with it)
+    const xformNode = (nd) => {
+      const p = res.xform(nd);
+      const h = (hh) => {
+        if (!hh) return null;
+        const q = res.xform({ x: nd.x + hh.x, y: nd.y + hh.y });
+        return { x: q.x - p.x, y: q.y - p.y };
+      };
+      return { x: p.x, y: p.y, hin: h(nd.hin), hout: h(nd.hout) };
+    };
+    const cutouts = (pA.cutouts || []).map((c) => ({ nodes: c.nodes.map((nd) => ({ ...nd })) }))
+      .concat((pB.cutouts || []).map((c) => ({ nodes: c.nodes.map(xformNode) })));
+    // seam leftovers lying exactly on top of each other (two mirrored halves
+    // of a hole meeting along the join) sew up: the doubled line disappears
+    // and the enclosed loop becomes an internal cutout, cut but intact
+    let outline = res.nodes;
+    const sew = Geo.sewSlits(res.nodes, 0.02);
+    if (sew) {
+      outline = sew.outline;
+      for (const c of sew.cutouts) cutouts.push({ nodes: c });
+      const remap = (arr) => arr.filter((m) => {
+        const to = sew.segMap[m.seg];
+        if (!to || to.loop !== -1) return false; // died with the slit / on a cutout
+        m.seg = to.seg;
+        return true;
+      });
+      remap(notches);
+      remap(stitchSlits);
+    }
+    pA.path.nodes = outline;
     pA.notches = notches;
     pA.holes = holes;
     pA.stitchSlits = stitchSlits;
     pA.grain = grain;
+    pA.cutouts = cutouts;
     pA.name = pA.name + '+' + pB.name;
     doc.pieces = doc.pieces.filter((p) => p.id !== pB.id);
     endChange();
@@ -2287,6 +2325,11 @@
     const polyA = Geo.pathPolyline(nodesA, true, 0.05);
     const hA = [], hB = [];
     for (const h of clone.holes || []) (Geo.pointInPolygon(polyA, h) ? hA : hB).push(h);
+    const cA = [], cB = [];
+    for (const c of clone.cutouts || []) {
+      const cen = Geo.centroid(Geo.pathPolyline(c.nodes, true, 0.1));
+      (Geo.pointInPolygon(polyA, cen) ? cA : cB).push(c);
+    }
     let gA = null, gB = null;
     if (clone.grain) {
       const gm = { x: (clone.grain.x1 + clone.grain.x2) / 2, y: (clone.grain.y1 + clone.grain.y2) / 2 };
@@ -2300,13 +2343,14 @@
     target.notches = nA;
     target.stitchSlits = sA;
     target.holes = hA;
+    target.cutouts = cA;
     target.grain = gA;
     target.foldSeg = null;
     const pieceB = {
       id: uid(), name: base + ' 2', visible: true,
       seamAllowance: target.seamAllowance, notchLength: target.notchLength,
       path: { closed: true, nodes: nodesB },
-      notches: nB, stitchSlits: sB, holes: hB, grain: gB, foldSeg: null,
+      notches: nB, stitchSlits: sB, holes: hB, cutouts: cB, grain: gB, foldSeg: null,
     };
     doc.pieces.splice(doc.pieces.indexOf(target) + 1, 0, pieceB);
     if (sourcePiece) doc.pieces = doc.pieces.filter((p) => p.id !== sourcePiece.id);
@@ -2442,6 +2486,8 @@
     }
     const resultPoly = Geo.pathPolyline(nodes, true, 0.05);
     const holes = (cA.holes || []).concat(cB.holes || []).filter((h) => Geo.pointInPolygon(resultPoly, h));
+    const cutouts = (cA.cutouts || []).concat(cB.cutouts || []).filter((c) =>
+      Geo.pointInPolygon(resultPoly, Geo.centroid(Geo.pathPolyline(c.nodes, true, 0.1))));
     let grain = null;
     if (cA.grain) {
       const gm = { x: (cA.grain.x1 + cA.grain.x2) / 2, y: (cA.grain.y1 + cA.grain.y2) / 2 };
@@ -2452,6 +2498,7 @@
     pA.notches = notches;
     pA.stitchSlits = slits;
     pA.holes = holes;
+    pA.cutouts = cutouts;
     pA.grain = grain;
     pA.foldSeg = null;
     doc.pieces = doc.pieces.filter((q) => q.id !== pB.id);
@@ -2893,6 +2940,11 @@
       }
       if (copy.foldSeg != null && copy.path.closed) copy.foldSeg = (2 * n - 2 - copy.foldSeg) % n;
       for (const h of copy.holes || []) h.x = 2 * cx - h.x;
+      for (const c of copy.cutouts || []) {
+        c.nodes = c.nodes
+          .map((nd) => ({ x: 2 * cx - nd.x, y: nd.y, hin: refl(nd.hout), hout: refl(nd.hin) }))
+          .reverse();
+      }
       if (copy.grain) {
         copy.grain.x1 = 2 * cx - copy.grain.x1;
         copy.grain.x2 = 2 * cx - copy.grain.x2;

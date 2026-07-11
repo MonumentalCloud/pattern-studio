@@ -109,6 +109,8 @@ label.chk { display: flex; align-items: center; gap: 4px; color: var(--dim); cur
 .piece-slit { stroke: var(--cut); stroke-width: 1.4; vector-effect: non-scaling-stroke; }
 .piece-guide { fill: none; stroke: var(--mark); stroke-width: 1.2; stroke-dasharray: 4 3; vector-effect: non-scaling-stroke; }
 .piece.selected .piece-guide { stroke: var(--accent); }
+.piece-cutout { fill: var(--bg); stroke: var(--text); stroke-width: 1.4; vector-effect: non-scaling-stroke; }
+.piece.selected .piece-cutout { stroke: var(--accent); stroke-width: 2; }
 .piece-hole { fill: none; stroke: var(--mark); stroke-width: 1.4; vector-effect: non-scaling-stroke; }
 .piece-grain { stroke: var(--mark); stroke-width: 1.4; vector-effect: non-scaling-stroke; fill: none; }
 .piece-label { fill: var(--dim); font-family: system-ui, sans-serif; pointer-events: none; }
