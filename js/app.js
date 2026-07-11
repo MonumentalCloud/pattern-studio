@@ -560,6 +560,19 @@
       $('sel-hint').textContent = tool === 'offset'
         ? `${sel.segs.length} edges selected — drag one to apply the mode live, or type a distance and Apply.`
         : `${sel.segs.length} edges selected — drag one (or arrows / Move by) to move them together · Shift-click adds/removes · the Offset tool (O) slides/protrudes the set.`;
+      // stitch holes across ALL selected edges delete together
+      const inSel = (s2) => piece.guide || sel.segs.includes(s2.seg);
+      const slitCount = (piece.stitchSlits || []).filter(inSel).length;
+      $('sel-clear-slits-row').hidden = !slitCount;
+      if (slitCount) {
+        $('sp-clear-slits').textContent = `Remove ${slitCount} stitch hole${slitCount > 1 ? 's' : ''}`;
+        const runsHere = new Set((piece.stitchSlits || []).filter(inSel).map((s2) => s2.run).filter((r) => r != null));
+        const runTotal = (piece.stitchSlits || []).filter((s2) =>
+          (s2.run != null ? runsHere.has(s2.run) : inSel(s2))).length;
+        $('sel-del-run-row').hidden = false;
+        $('sp-del-run').textContent =
+          `Delete stitch line${runsHere.size > 1 ? 's' : ''} (${runTotal} hole${runTotal > 1 ? 's' : ''})`;
+      }
     } else if (sel.kind === 'nodes') {
       $('sel-hint').textContent =
         `${sel.nodes.length} points selected — drag or arrows move them · type Δx/Δy for an exact move.`;
@@ -1110,41 +1123,42 @@
             }
           }
           if (!done && prevPiece) {
-            const idxs = [];
+            const nodeIdxs = [];
             prevPiece.path.nodes.forEach((nd, i) => {
-              if (nd.x >= x0 && nd.x <= x1 && nd.y >= y0 && nd.y <= y1) idxs.push(i);
+              if (nd.x >= x0 && nd.x <= x1 && nd.y >= y0 && nd.y <= y1) nodeIdxs.push(i);
             });
-            if (idxs.length) {
-              sel.pieceId = prevPiece.id;
-              sel.kind = 'nodes';
-              sel.idx = -1;
-              sel.nodes = idxs;
-              multiSel = [];
-              $('status-hint').textContent =
-                `${idxs.length} point${idxs.length > 1 ? 's' : ''} selected — drag or arrows move them together · Del deletes`;
-              done = true;
+            // stitch holes in the box too — whichever the box caught MORE of
+            // wins (dense imported outlines have points everywhere, which
+            // used to make hole sections unselectable)
+            const slitIdxs = [];
+            if ((prevPiece.stitchSlits || []).length) {
+              const pn = prevPiece.path.nodes;
+              const nn = pn.length;
+              const outS = prevPiece.path.closed ? Geo.outwardSign(Geo.pathPolyline(pn, true, 0.1)) : 1;
+              prevPiece.stitchSlits.forEach((sl2, i) => {
+                if (sl2.seg >= nn) return;
+                const ln = Geo.slitLine(pn[sl2.seg], pn[(sl2.seg + 1) % nn], sl2, outS);
+                const c = Geo.lerp(ln.a, ln.b, 0.5);
+                if (c.x >= x0 && c.x <= x1 && c.y >= y0 && c.y <= y1) slitIdxs.push(i);
+              });
             }
-          }
-          if (!done && prevPiece && (prevPiece.stitchSlits || []).length) {
-            // no points caught: a box over a section of stitch holes grabs them
-            const pn = prevPiece.path.nodes;
-            const nn = pn.length;
-            const outS = prevPiece.path.closed ? Geo.outwardSign(Geo.pathPolyline(pn, true, 0.1)) : 1;
-            const idxs = [];
-            prevPiece.stitchSlits.forEach((sl2, i) => {
-              if (sl2.seg >= nn) return;
-              const ln = Geo.slitLine(pn[sl2.seg], pn[(sl2.seg + 1) % nn], sl2, outS);
-              const c = Geo.lerp(ln.a, ln.b, 0.5);
-              if (c.x >= x0 && c.x <= x1 && c.y >= y0 && c.y <= y1) idxs.push(i);
-            });
-            if (idxs.length) {
+            if (slitIdxs.length > nodeIdxs.length) {
               sel.pieceId = prevPiece.id;
               sel.nodes = [];
               multiSel = [];
-              if (idxs.length === 1) { sel.kind = 'slit'; sel.idx = idxs[0]; }
-              else { sel.kind = 'slits'; sel.slits = idxs; sel.idx = -1; }
+              if (slitIdxs.length === 1) { sel.kind = 'slit'; sel.idx = slitIdxs[0]; }
+              else { sel.kind = 'slits'; sel.slits = slitIdxs; sel.idx = -1; }
               $('status-hint').textContent =
-                `${idxs.length} stitch hole${idxs.length > 1 ? 's' : ''} selected — Del removes them · Shift-click holes to add/remove`;
+                `${slitIdxs.length} stitch hole${slitIdxs.length > 1 ? 's' : ''} selected — Del removes them · Shift-click holes to add/remove`;
+              done = true;
+            } else if (nodeIdxs.length) {
+              sel.pieceId = prevPiece.id;
+              sel.kind = 'nodes';
+              sel.idx = -1;
+              sel.nodes = nodeIdxs;
+              multiSel = [];
+              $('status-hint').textContent =
+                `${nodeIdxs.length} point${nodeIdxs.length > 1 ? 's' : ''} selected — drag or arrows move them together · Del deletes`;
               done = true;
             }
           }
@@ -3711,11 +3725,12 @@
   }
   $('sp-clear-slits').addEventListener('click', () => {
     const p = selPiece();
-    if (!p || sel.kind !== 'seg') return;
+    if (!p || (sel.kind !== 'seg' && sel.kind !== 'segs')) return;
+    const segsSel = new Set(sel.kind === 'segs' ? sel.segs : [sel.idx]);
     beginChange();
-    p.stitchSlits = p.guide ? [] : (p.stitchSlits || []).filter((sl) => sl.seg !== sel.idx);
+    p.stitchSlits = p.guide ? [] : (p.stitchSlits || []).filter((sl) => !segsSel.has(sl.seg));
     endChange();
-    renderAll();
+    renderAll(); renderSidebar();
   });
   $('sp-del-run').addEventListener('click', () => {
     const p = selPiece();
@@ -3727,8 +3742,9 @@
     } else if (sel.kind === 'slit' && (p.stitchSlits || [])[sel.idx]) {
       const sl = p.stitchSlits[sel.idx];
       keep = (s) => (sl.run != null ? s.run !== sl.run : s.seg !== sl.seg);
-    } else if (sel.kind === 'seg') {
-      const onEdge = (s2) => p.guide || s2.seg === sel.idx;
+    } else if (sel.kind === 'seg' || sel.kind === 'segs') {
+      const segsSel = new Set(sel.kind === 'segs' ? sel.segs : [sel.idx]);
+      const onEdge = (s2) => p.guide || segsSel.has(s2.seg);
       const runsHere = new Set((p.stitchSlits || []).filter(onEdge).map((s2) => s2.run).filter((r) => r != null));
       keep = (s) => !(s.run != null ? runsHere.has(s.run) : onEdge(s));
     }
