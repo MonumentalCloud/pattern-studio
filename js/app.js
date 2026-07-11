@@ -505,8 +505,9 @@
         ? 'This edge is the fold — the piece unfolds across it on export.'
         : 'Drag the edge to move it · type a length to resize (● = start) · double-click inserts a point · right-click divides · the Offset tool (O) slides/protrudes it along its normal.';
     } else if (showSegs) {
-      $('sel-hint').textContent =
-        `${sel.segs.length} edges selected — with the Offset tool, drag one to apply the mode live, or type a distance and Apply.`;
+      $('sel-hint').textContent = tool === 'offset'
+        ? `${sel.segs.length} edges selected — drag one to apply the mode live, or type a distance and Apply.`
+        : `${sel.segs.length} edges selected — drag one (or arrows / Move by) to move them together · Shift-click adds/removes · the Offset tool (O) slides/protrudes the set.`;
     } else if (sel.kind === 'nodes') {
       $('sel-hint').textContent =
         `${sel.nodes.length} points selected — drag or arrows move them · type Δx/Δy for an exact move.`;
@@ -520,7 +521,7 @@
   let weldFirst = null; // weld tool: { pieceId, seg } of the first picked edge
   let stitchFirst = null; // stitch tool: same, for the first edge of a matched pair
   const HINTS = {
-    select: 'Click a piece or point to select · drag to move · drag empty space to box-select pieces (piece selected: its points · +Shift: its edges) · Del deletes',
+    select: 'Click a piece or point to select · drag to move · Shift-click edges to gather several · drag empty space to box-select pieces (piece selected: its points · +Shift: its edges) · Del deletes',
     pen: 'Click = corner, drag = curve · right-click = type exact length/angle · click the first point to close · Esc finishes open',
     shape: 'Drag corner to corner — the panel picks rectangle or ellipse · snaps to grid and existing points',
     notch: 'Click near an edge to add a notch',
@@ -1029,7 +1030,25 @@
           // with a piece selected, the marquee grabs its POINTS first
           const prevPiece = drag.prevPieceId ? pieceById(drag.prevPieceId) : null;
           let done = false;
-          if (prevPiece) {
+          if (prevPiece && drag.shift) {
+            // Shift-marquee: grab the piece's EDGES (both endpoints inside),
+            // adding to any existing edge selection
+            const nodes = prevPiece.path.nodes;
+            const n = nodes.length;
+            const segCount = prevPiece.path.closed ? n : n - 1;
+            const inside = (nd) => nd.x >= x0 && nd.x <= x1 && nd.y >= y0 && nd.y <= y1;
+            const set = new Set(selectedSegsOf(prevPiece));
+            for (let i = 0; i < segCount; i++) {
+              if (inside(nodes[i]) && inside(nodes[(i + 1) % n])) set.add(i);
+            }
+            if (set.size) {
+              setSegSelection(prevPiece, [...set].sort((sa, sb) => sa - sb));
+              $('status-hint').textContent =
+                `${set.size} edge${set.size > 1 ? 's' : ''} selected — drag one to move them together · switch to Offset (O) to slide/protrude them`;
+              done = true;
+            }
+          }
+          if (!done && prevPiece) {
             const idxs = [];
             prevPiece.path.nodes.forEach((nd, i) => {
               if (nd.x >= x0 && nd.x <= x1 && nd.y >= y0 && nd.y <= y1) idxs.push(i);
@@ -1335,10 +1354,27 @@
       if (sli >= 0) { sel.kind = 'slit'; sel.idx = sli; renderAll(true); renderSidebar(); return; }
       const hi = (piece.holes || []).findIndex((h) => Geo.dist(h, w) < px(8));
       if (hi >= 0) { sel.kind = 'hole'; sel.idx = hi; renderAll(true); renderSidebar(); return; }
-      // 3. segment of the selected piece — dragging moves the edge freely
-      // (the Offset tool handles slide-along-normal / protrude / guides)
+      // 3. segment of the selected piece — dragging moves the edge freely;
+      // Shift-click gathers several edges into a set (the Offset tool then
+      // slides/protrudes the same set along its normals)
       const hit = Geo.nearestOnPath(piece.path.nodes, piece.path.closed, w);
       if (hit && hit.dist < px(6)) {
+        if (ev.shiftKey) {
+          const cur = new Set(selectedSegsOf(piece));
+          if (cur.has(hit.seg)) cur.delete(hit.seg); else cur.add(hit.seg);
+          setSegSelection(piece, [...cur].sort((x, y) => x - y));
+          renderAll(true); renderSidebar();
+          return;
+        }
+        if (sel.kind === 'segs' && sel.segs.includes(hit.seg)) {
+          // drag any edge of the set: the whole set moves freely together
+          const nn = piece.path.nodes.length;
+          const ks = new Set();
+          for (const i of sel.segs) { ks.add(i); ks.add((i + 1) % nn); }
+          beginChange();
+          drag = { type: 'nodes', pieceId: piece.id, idxs: [...ks], start: w, applied: { x: 0, y: 0 } };
+          return;
+        }
         sel.kind = 'seg'; sel.idx = hit.seg; sel.nodes = [];
         beginChange();
         drag = { type: 'seg', pieceId: piece.id, idx: hit.seg, start: w, applied: { x: 0, y: 0 } };
@@ -1368,8 +1404,9 @@
         return;
       }
     }
-    // 5. empty space: marquee — points of the already-selected piece, else pieces
-    drag = { type: 'marquee', a: w, b: w, prevPieceId: sel.pieceId };
+    // 5. empty space: marquee — points of the already-selected piece (Shift:
+    // its edges), else pieces
+    drag = { type: 'marquee', a: w, b: w, prevPieceId: sel.pieceId, shift: ev.shiftKey };
     renderAll(true); renderSidebar();
   }
 
