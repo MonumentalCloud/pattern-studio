@@ -3464,6 +3464,13 @@
     }));
     if (!res.ok && res.status !== 404) {
       const body = await res.text().catch(() => '');
+      if (res.status === 403 && body.includes('Resource not accessible')) {
+        throw new Error('the token cannot write to ' + ((gh && gh.repo) || 'the repo') + '.\n\n' +
+          'Fix it on github.com → Settings → Developer settings → Fine-grained tokens → your token:\n' +
+          '1. Repository access: "Only select repositories" — make sure ' + ((gh && gh.repo) || 'your repo') + ' is in the list\n' +
+          '2. Permissions → Repository permissions → Contents: "Read and write"\n\n' +
+          'Then paste the token here again (Disconnect → Connect).');
+      }
       throw new Error('GitHub said ' + res.status + (res.status === 401 ? ' — token rejected' : '') +
         (body ? ': ' + body.slice(0, 140) : ''));
     }
@@ -3491,6 +3498,12 @@
       if (check.status === 404) {
         throw new Error(`repo "${repo}" not found (or the token can't see it). ` +
           'Create it on github.com/new, and give the token Contents read & write on it.');
+      }
+      const info = await check.json().catch(() => ({}));
+      if (info.permissions && !info.permissions.push) {
+        throw new Error(`the token can only READ "${repo}" — saving needs write.\n\n` +
+          'Edit the token on github.com → Settings → Developer settings → Fine-grained tokens:\n' +
+          'Permissions → Repository permissions → Contents: "Read and write", then reconnect.');
       }
       localStorage.setItem(GH_KEY, JSON.stringify(gh));
       $('gh-token').value = '';
