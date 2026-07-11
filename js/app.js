@@ -484,7 +484,16 @@
     const showSegs = piece && sel.kind === 'segs' && sel.segs && sel.segs.length > 0;
     const showMove = piece && (showNode || showSeg || showSegs || sel.kind === 'hole' ||
       (sel.kind === 'nodes' && sel.nodes.length > 0));
-    $('sel-props').hidden = !(showNode || showSeg || showSegs || showMove);
+    const slitSel = piece && sel.kind === 'slit' && (piece.stitchSlits || [])[sel.idx];
+    $('sel-props').hidden = !(showNode || showSeg || showSegs || showMove || slitSel);
+    $('sel-del-run-row').hidden = !slitSel;
+    if (slitSel) {
+      const runOf = (sl) => (slitSel.run != null ? sl.run === slitSel.run : sl.seg === slitSel.seg);
+      const count = piece.stitchSlits.filter(runOf).length;
+      $('sp-del-run').textContent = `Delete stitch line (${count} hole${count > 1 ? 's' : ''})`;
+      $('sel-hint').textContent =
+        'One hole of a stitch line — Del removes just this hole; the button removes the whole line. Holes stay separate marks and export as cut slits.';
+    }
     $('sel-node-row').hidden = !showNode;
     $('sel-round-row').hidden = !showNode;
     $('sel-handle-row').hidden = true;
@@ -2596,6 +2605,12 @@
   }
 
   // ---- stitch tool ----
+  // each generated run gets an id so a whole stitch line can be picked and
+  // deleted as one object (slits stay separate marks until DXF export)
+  function nextStitchRun(piece) {
+    return (piece.stitchSlits || []).reduce((m, s) => Math.max(m, s.run || 0), 0) + 1;
+  }
+
   function stitchTargetKey(tg) {
     const p = pieceById(tg.pieceId);
     return tg.pieceId + '/' + (p && p.guide ? 'guide' : tg.seg);
@@ -2688,8 +2703,9 @@
         const t = stitchTarget(piece, tg.seg);
         if (t.len < 1e-6) continue;
         piece.stitchSlits = piece.stitchSlits || [];
+        const run = nextStitchRun(piece);
         for (const pos of t.place(fracs(t.len, false))) {
-          piece.stitchSlits.push({ seg: pos.seg, t: pos.t, len: slitLen, ang: 45, off });
+          piece.stitchSlits.push({ seg: pos.seg, t: pos.t, len: slitLen, ang: 45, off, run });
           total++;
         }
         runs++;
@@ -2704,8 +2720,9 @@
       const t = stitchTarget(piece, 0);
       if (t.len < 1e-6) continue;
       piece.stitchSlits = piece.stitchSlits || [];
+      const run = nextStitchRun(piece);
       for (const pos of t.place(fracs(t.len, t.loop))) {
-        piece.stitchSlits.push({ seg: pos.seg, t: pos.t, len: slitLen, ang: 45, off: 0 });
+        piece.stitchSlits.push({ seg: pos.seg, t: pos.t, len: slitLen, ang: 45, off: 0, run });
         total++;
       }
       runs++;
@@ -2721,6 +2738,7 @@
       const stitchAlong = (pathNodes, loop) => {
         const L = Geo.pathLength(pathNodes, loop);
         if (L < 1e-6) return;
+        const run = nextStitchRun(piece);
         for (const pos of Geo.pathArcParams(pathNodes, loop, fracs(L, loop))) {
           const P = Geo.segPoint(pathNodes[pos.seg], pathNodes[(pos.seg + 1) % pathNodes.length], pos.t);
           if (off > 0.05 && !Geo.pointInPolygon(piecePoly, P)) continue; // never outside
@@ -2733,7 +2751,12 @@
           const tan = Geo.segTangent(a, b, hit.t);
           const nrm = { x: os * tan.y, y: -os * tan.x };
           const offI = (q.x - P.x) * nrm.x + (q.y - P.y) * nrm.y;
-          piece.stitchSlits.push({ seg: hit.seg, t: hit.t, len: slitLen, ang: 45, off: offI });
+          // near corners the anchor is the vertex, so P - q also has a
+          // tangential part — store it, or the slit drifts off the line
+          const tofI = (P.x - q.x) * tan.x + (P.y - q.y) * tan.y;
+          const slit = { seg: hit.seg, t: hit.t, len: slitLen, ang: 45, off: offI, run };
+          if (Math.abs(tofI) > 1e-6) slit.toff = tofI;
+          piece.stitchSlits.push(slit);
           total++;
         }
         runs++;
@@ -2801,9 +2824,10 @@
     beginChange();
     const put = (piece, target) => {
       piece.stitchSlits = piece.stitchSlits || [];
+      const run = nextStitchRun(piece);
       for (const pos of target.place(frFor(target))) {
         // holes sit ON a guide line; the Inset field only applies to raw edges
-        piece.stitchSlits.push({ seg: pos.seg, t: pos.t, len: slitLen, ang: 45, off: target.whole ? 0 : off });
+        piece.stitchSlits.push({ seg: pos.seg, t: pos.t, len: slitLen, ang: 45, off: target.whole ? 0 : off, run });
       }
     };
     put(pA, tA);
@@ -3180,6 +3204,7 @@
         sl.seg = copy.path.closed ? (2 * n - 2 - sl.seg) % n : (n - 2 - sl.seg);
         sl.t = 1 - sl.t;
         sl.ang = -(sl.ang == null ? 45 : sl.ang); // keep the diagonal mirrored
+        if (sl.toff) sl.toff = -sl.toff; // tangent reverses with the path
       }
       if (copy.foldSeg != null && copy.path.closed) copy.foldSeg = (2 * n - 2 - copy.foldSeg) % n;
       for (const h of copy.holes || []) h.x = 2 * cx - h.x;
@@ -3622,6 +3647,19 @@
     p.stitchSlits = p.guide ? [] : (p.stitchSlits || []).filter((sl) => sl.seg !== sel.idx);
     endChange();
     renderAll();
+  });
+  $('sp-del-run').addEventListener('click', () => {
+    const p = selPiece();
+    const sl = p && sel.kind === 'slit' && (p.stitchSlits || [])[sel.idx];
+    if (!sl) return;
+    beginChange();
+    p.stitchSlits = p.stitchSlits.filter((s) =>
+      (sl.run != null ? s.run !== sl.run : s.seg !== sl.seg));
+    endChange();
+    sel.kind = null;
+    sel.idx = -1;
+    renderAll(); renderSidebar();
+    $('status-hint').textContent = 'Stitch line deleted';
   });
   function segOffsetNormal(p, i) {
     const n = p.path.nodes.length;

@@ -517,6 +517,11 @@
       const n = { x: os * tan.y, y: -os * tan.x }; // outward normal
       p = { x: p.x - n.x * sl.off, y: p.y - n.y * sl.off };
     }
+    if (sl.toff) {
+      // tangential offset: lets a hole anchored at a corner sit exactly on a
+      // mitred inset line (the pure-normal model can't express that)
+      p = { x: p.x + tan.x * sl.toff, y: p.y + tan.y * sl.toff };
+    }
     const ang = (sl.ang == null ? 45 : sl.ang) * Math.PI / 180;
     const c = Math.cos(ang), s = Math.sin(ang);
     const d = { x: c * tan.x - s * tan.y, y: s * tan.x + c * tan.y };

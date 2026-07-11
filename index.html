@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pattern Studio</title>
-<link rel="stylesheet" href="style.css?v=39">
+<link rel="stylesheet" href="style.css?v=40">
 </head>
 <body>
 <div id="app">
   <header id="topbar">
-    <span id="logo" title="build 39">✂ Pattern Studio</span>
+    <span id="logo" title="build 40">✂ Pattern Studio</span>
     <input id="doc-name" type="text" value="Untitled pattern" spellcheck="false" title="Pattern name">
     <span class="sep"></span>
     <button id="btn-new" title="New document">New</button>
@@ -188,6 +188,9 @@
         <div class="row" id="sel-clear-slits-row" hidden>
           <button id="sp-clear-slits" title="Delete every stitching slit on this edge (zoom in to pick single ones)">Remove stitch holes</button>
         </div>
+        <div class="row" id="sel-del-run-row" hidden>
+          <button id="sp-del-run" class="danger" title="Delete every hole of the stitch line this hole belongs to">Delete stitch line</button>
+        </div>
         <div class="row hint" id="sel-hint"></div>
       </section>
       <section id="offset-props" hidden>
@@ -281,9 +284,9 @@
   </div>
 </div>
 <input id="file-input" type="file" accept=".json,.dxf,application/json" hidden>
-<script src="js/geometry.js?v=39"></script>
-<script src="js/dxf.js?v=39"></script>
-<script src="js/dxfimport.js?v=39"></script>
-<script src="js/app.js?v=39"></script>
+<script src="js/geometry.js?v=40"></script>
+<script src="js/dxf.js?v=40"></script>
+<script src="js/dxfimport.js?v=40"></script>
+<script src="js/app.js?v=40"></script>
 </body>
 </html>

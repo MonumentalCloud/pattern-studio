@@ -129,6 +129,7 @@
           seg: s2,
           t: res.flipT ? 1 - sl.t : sl.t,
           ang: -(sl.ang == null ? 45 : sl.ang), // reflection mirrors the diagonal
+          toff: sl.toff ? -sl.toff : undefined, // tangent reverses with the path
         }));
       }
     }
