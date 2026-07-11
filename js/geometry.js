@@ -178,6 +178,54 @@
 
   // Offset a closed polygon outward by d (cm). d > 0 grows the shape.
   // Input should be deduped. Uses miter joins with bevel fallback.
+  // proper interior intersection of segments a-b and c-d (endpoints excluded)
+  function segCross(a, b, c, d) {
+    const rx = b.x - a.x, ry = b.y - a.y;
+    const sx = d.x - c.x, sy = d.y - c.y;
+    const den = rx * sy - ry * sx;
+    if (Math.abs(den) < 1e-12) return null;
+    const t = ((c.x - a.x) * sy - (c.y - a.y) * sx) / den;
+    const u = ((c.x - a.x) * ry - (c.y - a.y) * rx) / den;
+    const e = 1e-9;
+    if (t <= e || t >= 1 - e || u <= e || u >= 1 - e) return null;
+    return { x: a.x + rx * t, y: a.y + ry * t };
+  }
+
+  // Remove self-intersection loops from a polyline/polygon: where the path
+  // crosses itself (an offset past a spike narrower than the distance), the
+  // shorter of the two loops is excised. No-op for clean paths.
+  function clipLoops(ptsIn, closed) {
+    let pts = ptsIn.slice();
+    const chainLen = (arr, loop) => {
+      let L = 0;
+      for (let i = 0; i < (loop ? arr.length : arr.length - 1); i++) {
+        L += dist(arr[i], arr[(i + 1) % arr.length]);
+      }
+      return L;
+    };
+    let guard = 0;
+    let found = true;
+    while (found && guard++ < 60) {
+      found = false;
+      const n = pts.length;
+      const segCount = closed ? n : n - 1;
+      for (let i = 0; i < segCount && !found; i++) {
+        for (let j = i + 2; j < segCount; j++) {
+          if (closed && i === 0 && j === n - 1) continue; // wrap-adjacent
+          const X = segCross(pts[i], pts[(i + 1) % n], pts[j], pts[(j + 1) % n]);
+          if (!X) continue;
+          const inner = [X].concat(pts.slice(i + 1, j + 1));           // the loop
+          const outer = pts.slice(0, i + 1).concat([X], pts.slice(j + 1)); // the rest
+          // keep whichever side carries more of the path
+          pts = chainLen(inner, true) > chainLen(outer, closed) ? inner : outer;
+          found = true;
+          break;
+        }
+      }
+    }
+    return pts;
+  }
+
   function offsetClosed(ptsIn, d) {
     const pts = dedupe(ptsIn);
     const n = pts.length;
@@ -201,7 +249,7 @@
         out.push(add(p1, scale(norm(add(nu, nv)), mlen)));
       }
     }
-    return dedupe(out);
+    return dedupe(clipLoops(out, true));
   }
 
   // Offset an OPEN polyline by d to the s-outward side (negative d = inward).
@@ -238,7 +286,7 @@
         out.push(add(pts[i], scale(norm(add(nu, nv)), mlen)));
       }
     }
-    return dedupe(out);
+    return dedupe(clipLoops(out, false));
   }
 
   // Intersections between two paths (curves included), with the parameter on
@@ -674,6 +722,6 @@
     pathPolyline, pathLength, polyArea, bbox, centroid, dedupe,
     outwardSign, offsetClosed, nearestOnPath, pointInPolygon, splitSeg, setSegLength,
     reverseNodes, weldClosedPaths, reflectPoint, reflectNodes, segArcParams, slitLine,
-    pathArcParams, simplifyPoly, offsetOpen, pathIntersections, sewSlits,
+    pathArcParams, simplifyPoly, offsetOpen, pathIntersections, sewSlits, clipLoops,
   };
 });

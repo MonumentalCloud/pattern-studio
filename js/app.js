@@ -2715,13 +2715,15 @@
       const piece = pieceById(pid);
       const nodes = piece.path.nodes;
       const n = nodes.length;
-      const os = Geo.outwardSign(Geo.pathPolyline(nodes, true, 0.05));
+      const piecePoly = Geo.pathPolyline(nodes, true, 0.05);
+      const os = Geo.outwardSign(piecePoly);
       piece.stitchSlits = piece.stitchSlits || [];
       const stitchAlong = (pathNodes, loop) => {
         const L = Geo.pathLength(pathNodes, loop);
         if (L < 1e-6) return;
         for (const pos of Geo.pathArcParams(pathNodes, loop, fracs(L, loop))) {
           const P = Geo.segPoint(pathNodes[pos.seg], pathNodes[(pos.seg + 1) % pathNodes.length], pos.t);
+          if (off > 0.05 && !Geo.pointInPolygon(piecePoly, P)) continue; // never outside
           // anchor the hole back onto the piece's own edge, with the exact
           // per-hole inset so it stays on the mitred line at corners
           const hit = Geo.nearestOnPath(nodes, true, P);

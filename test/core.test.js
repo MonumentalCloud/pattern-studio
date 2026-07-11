@@ -771,4 +771,65 @@ t('pieceShapes: internal cutouts export as closed CUT polylines', () => {
   assert(dxf.includes('AC1009'), 'still R12');
 });
 
+console.log('offset loop clipping (narrow spikes)');
+
+const selfCrossings = (pts, closed) => {
+  let count = 0;
+  const n = pts.length;
+  const segs = closed ? n : n - 1;
+  const cross = (a, b, c, d) => {
+    const rx = b.x - a.x, ry = b.y - a.y, sx = d.x - c.x, sy = d.y - c.y;
+    const den = rx * sy - ry * sx;
+    if (Math.abs(den) < 1e-12) return false;
+    const t = ((c.x - a.x) * sy - (c.y - a.y) * sx) / den;
+    const u = ((c.x - a.x) * ry - (c.y - a.y) * rx) / den;
+    return t > 1e-9 && t < 1 - 1e-9 && u > 1e-9 && u < 1 - 1e-9;
+  };
+  for (let i = 0; i < segs; i++) {
+    for (let j = i + 2; j < segs; j++) {
+      if (closed && i === 0 && j === n - 1) continue;
+      if (cross(pts[i], pts[(i + 1) % n], pts[j], pts[(j + 1) % n])) count++;
+    }
+  }
+  return count;
+};
+
+t('offsetClosed: insetting past a narrow spike clips the inverted loop', () => {
+  // 20x10 body with a spike (4 wide at the base, 4 tall) — inset 1 makes the
+  // spike's two side-offsets cross; the loop beyond the crossing must go
+  const poly = [
+    { x: 0, y: 0 }, { x: 8, y: 0 }, { x: 10, y: -4 }, { x: 12, y: 0 },
+    { x: 20, y: 0 }, { x: 20, y: 10 }, { x: 0, y: 10 },
+  ];
+  const inset = Geo.offsetClosed(poly, -1);
+  assert(inset.length >= 3, 'degenerate inset');
+  assert(selfCrossings(inset, true) === 0, 'self-intersections left: ' + selfCrossings(inset, true));
+  // every inset point stays inside the original outline
+  for (const p of inset) assert(Geo.pointInPolygon(poly, p), 'outside: ' + JSON.stringify(p));
+  // the plain outward direction (seam allowance) is untouched for clean shapes
+  const sq = [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }];
+  const out = Geo.offsetClosed(sq, 1);
+  assert(Math.abs(Geo.polyArea(out) - 144) < 0.01, 'clean outward offset changed: ' + Geo.polyArea(out));
+});
+
+t('offsetOpen: a run over a spike clips its crossing too', () => {
+  const run = [
+    { x: 0, y: 0 }, { x: 8, y: 0 }, { x: 10, y: -4 }, { x: 12, y: 0 }, { x: 20, y: 0 },
+  ];
+  const off = Geo.offsetOpen(run, -1, 1); // 1cm to the inside of the piece
+  assert(selfCrossings(off, false) === 0, 'open offset still crosses itself');
+  // the clipped line keeps the full offset distance from the original path —
+  // before clipping, the inverted loop dipped back to ~0 from the spike sides
+  const dSeg = (P, A, B) => {
+    const vx = B.x - A.x, vy = B.y - A.y;
+    const t2 = Math.max(0, Math.min(1, ((P.x - A.x) * vx + (P.y - A.y) * vy) / (vx * vx + vy * vy)));
+    return Math.hypot(P.x - (A.x + vx * t2), P.y - (A.y + vy * t2));
+  };
+  for (const p of off) {
+    let dm = Infinity;
+    for (let i = 0; i < run.length - 1; i++) dm = Math.min(dm, dSeg(p, run[i], run[i + 1]));
+    assert(dm > 0.99, `point ${JSON.stringify(p)} only ${dm.toFixed(3)} from the path`);
+  }
+});
+
 console.log(`\n${passed} tests passed${process.exitCode ? ' (with failures)' : ''}`);
