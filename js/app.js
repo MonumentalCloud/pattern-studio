@@ -526,7 +526,7 @@
   let weldFirst = null; // weld tool: { pieceId, seg } of the first picked edge
   let stitchFirst = null; // stitch tool: same, for the first edge of a matched pair
   const HINTS = {
-    select: 'Click a piece or point to select · drag to move · Shift-click edges to gather several · drag empty space to box-select pieces (piece selected: its points · +Shift: its edges) · Del deletes',
+    select: 'Click a piece or point to select · drag to move · Shift-click pieces or edges to gather several · drag empty space to box-select pieces (piece selected: its points · +Shift: its edges) · Del deletes',
     pen: 'Click = corner, drag = curve · right-click = type exact length/angle · click the first point to close · Esc finishes open',
     shape: 'Drag corner to corner — the panel picks rectangle or ellipse · snaps to grid and existing points',
     notch: 'Click near an edge to add a notch',
@@ -1076,12 +1076,15 @@
               const bb = Geo.bbox(Geo.pathPolyline(p.path.nodes, p.path.closed, 0.2));
               if (bb.minX <= x1 && bb.maxX >= x0 && bb.minY <= y1 && bb.maxY >= y0) ids.push(p.id);
             }
+            // Shift adds to the existing group instead of replacing it
+            const base = drag.shift ? (multiSel.length ? multiSel : (sel.pieceId ? [sel.pieceId] : [])) : [];
+            const merged = [...new Set([...base, ...ids])];
             clearSel();
-            if (ids.length) {
-              sel.pieceId = ids[0];
-              multiSel = ids;
+            if (merged.length) {
+              sel.pieceId = merged[0];
+              multiSel = merged;
               $('status-hint').textContent =
-                `${ids.length} piece${ids.length > 1 ? 's' : ''} selected — drag or arrow keys move them together · Del deletes`;
+                `${merged.length} piece${merged.length > 1 ? 's' : ''} selected — drag or arrow keys move them together · Del deletes`;
             }
           }
         } else {
@@ -1366,7 +1369,7 @@
       // Shift-click gathers several edges into a set (the Offset tool then
       // slides/protrudes the same set along its normals)
       const hit = Geo.nearestOnPath(piece.path.nodes, piece.path.closed, w);
-      if (hit && hit.dist < px(6)) {
+      if (hit && hit.dist < px(6) && multiSel.length <= 1) {
         if (ev.shiftKey) {
           const cur = new Set(selectedSegsOf(piece));
           if (cur.has(hit.seg)) cur.delete(hit.seg); else cur.add(hit.seg);
@@ -1399,6 +1402,21 @@
       const onEdge = Geo.nearestOnPath(ep.path.nodes, ep.path.closed, w);
       const inside = ep.path.closed && Geo.pointInPolygon(poly, w);
       if (inside || (onEdge && onEdge.dist < px(6))) {
+        if (ev.shiftKey) {
+          // Shift-click: toggle the piece (guide lines included) in a group
+          const set = new Set(multiSel.length ? multiSel : (sel.pieceId ? [sel.pieceId] : []));
+          if (set.has(p.id)) set.delete(p.id); else set.add(p.id);
+          const ids = [...set];
+          clearSel();
+          if (ids.length) {
+            sel.pieceId = ids[0];
+            multiSel = ids;
+            $('status-hint').textContent =
+              `${ids.length} piece${ids.length > 1 ? 's' : ''} selected — drag or arrow keys move them together · Shift-click adds/removes · Del deletes`;
+          }
+          renderAll(true); renderSidebar();
+          return;
+        }
         if (multiSel.length > 1 && multiSel.includes(p.id)) {
           // drag the whole marquee group together
           beginChange();
