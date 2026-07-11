@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pattern Studio</title>
-<link rel="stylesheet" href="style.css?v=29">
+<link rel="stylesheet" href="style.css?v=30">
 </head>
 <body>
 <div id="app">
   <header id="topbar">
-    <span id="logo" title="build 29">✂ Pattern Studio</span>
+    <span id="logo" title="build 30">✂ Pattern Studio</span>
     <input id="doc-name" type="text" value="Untitled pattern" spellcheck="false" title="Pattern name">
     <span class="sep"></span>
     <button id="btn-new" title="New document">New</button>
@@ -129,6 +129,12 @@
         <div class="row stats">
           <span>Perimeter <b id="pp-perim">–</b></span>
         </div>
+        <div class="row">
+          <label>Move by</label>
+          <input id="pp-dx" type="number" step="0.1" value="0" title="Δx (cm): + right, − left">
+          <input id="pp-dy" type="number" step="0.1" value="0" title="Δy (cm): + down, − up"> <em>cm</em>
+          <button id="pp-move-btn" title="Move the piece (or every marquee-selected piece) by exactly this much (Enter applies)">Move</button>
+        </div>
         <div class="row btns">
           <button id="pp-dup">Duplicate</button>
           <button id="pp-mirror" title="Mirrored copy (for asymmetric pieces / left+right)">Mirror copy</button>
@@ -170,6 +176,12 @@
           <input id="sp-seg-off" type="number" step="0.1" value="1" title="Distance along the edge's normal: + outward, − inward"> <em>cm</em>
           <button id="sp-seg-slide-btn" title="Slide the whole edge along its normal, stretching the neighbouring edges">Slide</button>
           <button id="sp-seg-off-btn" title="Extrude this edge into a tab/recess — its corners stay, straight side walls form">Protrude</button>
+        </div>
+        <div class="row" id="sel-move-row" hidden>
+          <label>Move by</label>
+          <input id="sp-dx" type="number" step="0.1" value="0" title="Δx (cm): + right, − left">
+          <input id="sp-dy" type="number" step="0.1" value="0" title="Δy (cm): + down, − up"> <em>cm</em>
+          <button id="sp-move-btn" title="Move the selection by exactly this much (Enter applies)">Move</button>
         </div>
         <div class="row" id="sel-fold-row" hidden>
           <button id="sp-fold" title="Draft half the piece and mirror it across this edge — the piece unfolds to the full shape on export">Make fold line</button>
@@ -261,9 +273,9 @@
   </div>
 </div>
 <input id="file-input" type="file" accept=".json,.dxf,application/json" hidden>
-<script src="js/geometry.js?v=29"></script>
-<script src="js/dxf.js?v=29"></script>
-<script src="js/dxfimport.js?v=29"></script>
-<script src="js/app.js?v=29"></script>
+<script src="js/geometry.js?v=30"></script>
+<script src="js/dxf.js?v=30"></script>
+<script src="js/dxfimport.js?v=30"></script>
+<script src="js/app.js?v=30"></script>
 </body>
 </html>

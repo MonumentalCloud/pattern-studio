@@ -466,19 +466,22 @@
     const showNode = piece && sel.kind === 'node' && piece.path.nodes[sel.idx];
     const showSeg = piece && sel.kind === 'seg';
     const showSegs = piece && sel.kind === 'segs' && sel.segs && sel.segs.length > 0;
-    $('sel-props').hidden = !(showNode || showSeg || showSegs);
+    const showMove = piece && (showNode || showSeg || showSegs || sel.kind === 'hole' ||
+      (sel.kind === 'nodes' && sel.nodes.length > 0));
+    $('sel-props').hidden = !(showNode || showSeg || showSegs || showMove);
     $('sel-node-row').hidden = !showNode;
     $('sel-round-row').hidden = !showNode;
     $('sel-handle-row').hidden = true;
     $('sel-seg-row').hidden = !showSeg;
     $('sel-seg-anchor-row').hidden = !showSeg;
     $('sel-offset-row').hidden = !(showSeg || showSegs);
+    $('sel-move-row').hidden = !showMove;
     $('sel-fold-row').hidden = !showSeg;
     $('sel-clear-slits-row').hidden = true;
     if (showNode) {
       const nd = piece.path.nodes[sel.idx];
-      $('sp-x').value = fmt(nd.x);
-      $('sp-y').value = fmt(nd.y);
+      if (document.activeElement !== $('sp-x')) $('sp-x').value = fmt(nd.x);
+      if (document.activeElement !== $('sp-y')) $('sp-y').value = fmt(nd.y);
       $('sel-handle-row').hidden = !(nd.hin || nd.hout);
       $('sp-del-hin').disabled = !nd.hin;
       $('sp-del-hout').disabled = !nd.hout;
@@ -505,6 +508,11 @@
     } else if (showSegs) {
       $('sel-hint').textContent =
         `${sel.segs.length} edges selected — drag one (or Offset ▸ Slide) to outset/inset them together, mitred at shared corners · Protrude tabs each edge · Shift-click adds/removes edges.`;
+    } else if (sel.kind === 'nodes') {
+      $('sel-hint').textContent =
+        `${sel.nodes.length} points selected — drag or arrows move them · type Δx/Δy for an exact move.`;
+    } else if (sel.kind === 'hole') {
+      $('sel-hint').textContent = 'Drill hole — drag or arrows move it · type Δx/Δy for an exact move.';
     }
   }
 
@@ -2518,6 +2526,14 @@
     if (pendingSnapshot === null) pendingSnapshot = JSON.stringify(doc);
     if (nudgeTimer) clearTimeout(nudgeTimer);
     nudgeTimer = setTimeout(() => { nudgeTimer = null; endChange(); renderSidebar(); }, 600);
+    applyMove(dx, dy);
+    renderAll(true);
+  }
+
+  // move whatever is selected by (dx, dy) — shared by the arrow keys and the
+  // exact Δx/Δy inputs; the caller owns the undo step
+  function applyMove(dx, dy) {
+    const piece = selPiece();
     if (multiSel.length > 1) {
       for (const id of multiSel) { const p = pieceById(id); if (p) movePiece(p, dx, dy); }
     } else if (sel.kind === 'nodes' && sel.nodes.length) {
@@ -2556,7 +2572,6 @@
     } else {
       movePiece(piece, dx, dy);
     }
-    renderAll(true);
   }
 
   // Fillet geometry for rounding a corner with radius R. Pure computation —
@@ -3247,6 +3262,51 @@
     renderAll();
     $('status-hint').textContent = `Edge slid ${val > 0 ? 'outward' : 'inward'} by ${fmt(Math.abs(val))} cm`;
   });
+  // typing exact coordinates for the selected point
+  for (const key of ['x', 'y']) {
+    $('sp-' + key).addEventListener('change', () => {
+      const p = selPiece();
+      if (!p || sel.kind !== 'node' || !p.path.nodes[sel.idx]) return;
+      const v = parseFloat($('sp-' + key).value);
+      if (!isFinite(v)) return;
+      beginChange();
+      p.path.nodes[sel.idx][key] = v;
+      endChange();
+      renderAll(true);
+    });
+  }
+  // exact Δx/Δy move for the current selection / the whole piece
+  $('sp-move-btn').addEventListener('click', () => {
+    if (!selPiece()) return;
+    const dx = parseFloat($('sp-dx').value) || 0;
+    const dy = parseFloat($('sp-dy').value) || 0;
+    if (!dx && !dy) return;
+    beginChange();
+    applyMove(dx, dy);
+    endChange();
+    renderAll(); renderSidebar();
+    $('status-hint').textContent = `Moved by (${fmt(dx)}, ${fmt(dy)}) cm`;
+  });
+  $('pp-move-btn').addEventListener('click', () => {
+    const dx = parseFloat($('pp-dx').value) || 0;
+    const dy = parseFloat($('pp-dy').value) || 0;
+    if (!dx && !dy) return;
+    const ids = multiSel.length > 1 ? multiSel : (selPiece() ? [selPiece().id] : []);
+    if (!ids.length) return;
+    beginChange();
+    for (const id of ids) { const p = pieceById(id); if (p) movePiece(p, dx, dy); }
+    endChange();
+    renderAll(); renderSidebar();
+    $('status-hint').textContent =
+      `${ids.length > 1 ? ids.length + ' pieces' : 'Piece'} moved by (${fmt(dx)}, ${fmt(dy)}) cm`;
+  });
+  for (const [inp, btn] of [['sp-dx', 'sp-move-btn'], ['sp-dy', 'sp-move-btn'],
+    ['pp-dx', 'pp-move-btn'], ['pp-dy', 'pp-move-btn']]) {
+    $(inp).addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') { $(btn).click(); ev.preventDefault(); }
+      ev.stopPropagation();
+    });
+  }
   $('sp-fold').addEventListener('click', () => {
     const p = selPiece();
     if (!p || sel.kind !== 'seg' || !p.path.closed) return;
