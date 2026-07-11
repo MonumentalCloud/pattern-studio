@@ -57,9 +57,16 @@ label.chk { display: flex; align-items: center; gap: 4px; color: var(--dim); cur
 #main { flex: 1; display: flex; min-height: 0; }
 
 #toolbar {
-  display: flex; flex-direction: column; gap: 4px;
+  display: flex; flex-direction: column; gap: 2px;
   padding: 8px 6px; background: var(--panel);
   border-right: 1px solid var(--border);
+  overflow-y: auto;
+}
+#toolbar .tgroup { display: flex; flex-direction: column; gap: 2px; }
+#toolbar .tgroup + .tgroup { margin-top: 6px; padding-top: 4px; border-top: 1px solid var(--border); }
+#toolbar .glabel {
+  font-size: 9px; font-style: normal; text-transform: uppercase; letter-spacing: 0.1em;
+  color: var(--dim); text-align: center; opacity: 0.8;
 }
 #toolbar .tool {
   display: flex; flex-direction: column; align-items: center; gap: 2px;
@@ -115,6 +122,7 @@ label.chk { display: flex; align-items: center; gap: 4px; color: var(--dim); cur
 .knife-line { stroke: var(--danger); stroke-width: 1.4; stroke-dasharray: 6 3; vector-effect: non-scaling-stroke; }
 .snap-dot { fill: none; stroke: var(--accent2); stroke-width: 2; vector-effect: non-scaling-stroke; }
 .ghost-dot { fill: var(--accent2); opacity: 0.55; stroke: var(--bg); stroke-width: 1; vector-effect: non-scaling-stroke; pointer-events: none; }
+.marquee { fill: #4fa3ff18; stroke: var(--accent); stroke-width: 1; stroke-dasharray: 5 4; vector-effect: non-scaling-stroke; }
 .measure-text, .seg-len-text { fill: var(--accent2); font-family: system-ui, sans-serif; paint-order: stroke; stroke: var(--bg); stroke-width: 0.12em; }
 
 #pen-dialog, #divide-dialog {

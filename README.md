@@ -22,7 +22,7 @@ can be saved/opened as `.pattern.json` files.
 |---|---|
 | **Shape tool** | drag rectangles and ellipses (circle = equal drag) with live dimensions, snapped to grid and points |
 | **Pen tool** | click = corner point, click-drag = curve (bezier handles), click the first point to close the piece · live length readout while drawing · **right-click to type an exact length + angle** for the next segment |
-| **Edit** | drag points and handles · double-click a point to toggle corner↔smooth · double-click an edge to insert a point · **right-click an edge to divide it** at a distance (cm), a percentage, or into N equal parts (arc-length accurate on curves) · Del removes · delete a single curve handle by dragging it onto its point, double-clicking it, or the ×&nbsp;in / ×&nbsp;out buttons |
+| **Edit** | drag points and handles · **arrow keys move the selection** (piece, node, edge, hole; Shift = 5×, Alt = 0.1cm; notches/slits slide along their edge) · **drag on empty canvas to marquee-select** several pieces (move together, Del deletes all) · **round a corner**: select a point, type a radius, Round · double-click a point to toggle corner↔smooth · double-click an edge to insert a point · **right-click an edge to divide it** at a distance (cm), a percentage, or into N equal parts (arc-length accurate on curves) · Del removes · delete a single curve handle by dragging it onto its point, double-clicking it, or the ×&nbsp;in / ×&nbsp;out buttons |
 | **Seam allowance** | per-piece width (cm); the dashed line is the cutting line, computed as a true outward offset — also what goes on the DXF `CUT` layer |
 | **Notches** | click an edge; exported as short slits from the cutting line inward (so the laser cuts them) |
 | **Inset guides** | click an edge (or inside a piece for the full outline) → a dashed guide line inset by a set distance — the scribed stitch line; click edges in any order to add/remove them from the run (mitered around corners; non-adjacent picks make separate runs until bridged); exports to `MARK` (engrave/skip), never cut |
@@ -77,7 +77,7 @@ The **Open** button also accepts `.dxf` — patterns from Seamly2D/Valentina, CL
 
 `V` select · `P` pen · `R` shape · `N` notch · `H` hole · `G` grain · `W` weld · `I` inset · `S` stitch · `K` knife · `B` boolean · `M` measure ·
 `Space`+drag or two-finger scroll pan · pinch/`Ctrl`+scroll zoom · `0` fit · `Del` delete · `Ctrl+Z/Y` undo/redo ·
-`Ctrl+S` save project · `Esc`/`Enter` finish pen path
+`Ctrl+S` save project · `Esc`/`Enter` finish pen path · arrows nudge selection (`Shift` ×5, `Alt` fine)
 
 ## Tests
 
