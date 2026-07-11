@@ -74,6 +74,12 @@ label.chk { display: flex; align-items: center; gap: 4px; color: var(--dim); cur
   background: transparent; border: 1px solid transparent;
 }
 #toolbar .tool span { font-size: 10.5px; color: var(--dim); }
+#toolbar .tool kbd {
+  margin-left: 3px; padding: 0 3px; font-size: 8.5px; font-family: inherit;
+  color: var(--dim); opacity: 0.75; border: 1px solid #ffffff26;
+  border-radius: 3px;
+}
+#toolbar .tool.active kbd { color: var(--accent); border-color: var(--accent); opacity: 0.9; }
 #toolbar .tool:hover { background: var(--panel2); }
 #toolbar .tool.active { background: var(--panel2); border-color: var(--accent); }
 #toolbar .tool.active span { color: var(--accent); }

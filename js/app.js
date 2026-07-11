@@ -513,14 +513,14 @@
   let weldFirst = null; // weld tool: { pieceId, seg } of the first picked edge
   let stitchFirst = null; // stitch tool: same, for the first edge of a matched pair
   const HINTS = {
-    select: 'Click a piece or point to select · drag to move · Del deletes',
+    select: 'Click a piece or point to select · drag to move · drag empty space to box-select pieces (piece selected: its points · +Shift: its edges) · Del deletes',
     pen: 'Click = corner, drag = curve · right-click = type exact length/angle · click the first point to close · Esc finishes open',
     shape: 'Drag corner to corner — the panel picks rectangle or ellipse · snaps to grid and existing points',
     notch: 'Click near an edge to add a notch',
     hole: 'Click inside a piece to add a drill hole',
     grain: 'Drag inside a piece to set the grainline · click (no drag) removes it',
     weld: 'Click an edge, then the matching edge on another piece — the second piece moves; both seam edges disappear',
-    inset: 'Click edges to select them for a guide line (any order, click again to remove) · click inside a piece for a full-outline ring',
+    inset: 'Click edges to select them for a guide line (any order, click again to remove) · drag a box to add many edges at once · click inside a piece for a full-outline ring',
     knife: 'Click two points to cut a piece in two (they snap to existing points) · or click an open path to cut along it · Esc cancels',
     round: 'Drag outward from a corner point — the drag distance sets the fillet radius, live preview shows the arc',
     bool: 'Click the base piece (A), then the other (B) — combined with the op from the panel · outlines must cross exactly twice',
@@ -995,11 +995,44 @@
         clear(gPreview);
         const x0 = Math.min(drag.a.x, drag.b.x), x1 = Math.max(drag.a.x, drag.b.x);
         const y0 = Math.min(drag.a.y, drag.b.y), y1 = Math.max(drag.a.y, drag.b.y);
+        if (drag.mode === 'inset') {
+          // inset tool: a drag adds every caught edge to the guide run,
+          // a plain click keeps the old toggle behaviour
+          if (x1 - x0 > 0.2 || y1 - y0 > 0.2) insetMarquee(x0, y0, x1, y1);
+          else insetClick(drag.a);
+          drag = null;
+          return;
+        }
         if (x1 - x0 > 0.2 || y1 - y0 > 0.2) {
           // with a piece selected, the marquee grabs its POINTS first
           const prevPiece = drag.prevPieceId ? pieceById(drag.prevPieceId) : null;
           let done = false;
-          if (prevPiece) {
+          if (prevPiece && drag.shift) {
+            // Shift-marquee: grab the piece's EDGES (both endpoints inside),
+            // adding to any existing edge selection
+            const nodes = prevPiece.path.nodes;
+            const n = nodes.length;
+            const segCount = prevPiece.path.closed ? n : n - 1;
+            const inside = (nd) => nd.x >= x0 && nd.x <= x1 && nd.y >= y0 && nd.y <= y1;
+            const set = new Set(sel.pieceId === prevPiece.id
+              ? (sel.kind === 'segs' ? sel.segs : (sel.kind === 'seg' ? [sel.idx] : []))
+              : []);
+            for (let i = 0; i < segCount; i++) {
+              if (inside(nodes[i]) && inside(nodes[(i + 1) % n])) set.add(i);
+            }
+            if (set.size) {
+              const segs = [...set].sort((sa, sb) => sa - sb);
+              sel.pieceId = prevPiece.id;
+              sel.nodes = [];
+              multiSel = [];
+              if (segs.length === 1) { sel.kind = 'seg'; sel.idx = segs[0]; }
+              else { sel.kind = 'segs'; sel.segs = segs; sel.idx = -1; }
+              $('status-hint').textContent =
+                `${segs.length} edge${segs.length > 1 ? 's' : ''} selected — drag one (or Offset ▸ Slide) to outset/inset together`;
+              done = true;
+            }
+          }
+          if (!done && prevPiece) {
             const idxs = [];
             prevPiece.path.nodes.forEach((nd, i) => {
               if (nd.x >= x0 && nd.x <= x1 && nd.y >= y0 && nd.y <= y1) idxs.push(i);
@@ -1351,8 +1384,9 @@
         return;
       }
     }
-    // 5. empty space: marquee — points of the already-selected piece, else pieces
-    drag = { type: 'marquee', a: w, b: w, prevPieceId: sel.pieceId };
+    // 5. empty space: marquee — points of the already-selected piece (Shift:
+    // its edges), else pieces
+    drag = { type: 'marquee', a: w, b: w, prevPieceId: sel.pieceId, shift: ev.shiftKey };
     renderAll(true); renderSidebar();
   }
 
@@ -1793,6 +1827,38 @@
   let insetChain = null; // { pieceId, d, segs: Set, guideIds: [] }
 
   function insetDown(w) {
+    // click = toggle one edge (or full outline); drag = box-select many edges.
+    // decided on pointerup by how far the pointer moved
+    drag = { type: 'marquee', mode: 'inset', a: w, b: w };
+  }
+
+  // marquee for the inset tool: add every edge fully inside the box to the run
+  function insetMarquee(x0, y0, x1, y1) {
+    const d = Math.max(0.05, parseFloat($('in-dist').value) || 0.3);
+    const inside = (nd) => nd.x >= x0 && nd.x <= x1 && nd.y >= y0 && nd.y <= y1;
+    let best = null; // the current chain's piece wins, then most edges caught
+    for (const p of doc.pieces) {
+      if (p.visible === false || p.guide || !p.path.closed || p.path.nodes.length < 3) continue;
+      const nodes = p.path.nodes;
+      const n = nodes.length;
+      const segs = [];
+      for (let i = 0; i < n; i++) {
+        if (inside(nodes[i]) && inside(nodes[(i + 1) % n])) segs.push(i);
+      }
+      if (!segs.length) continue;
+      const score = segs.length + (insetChain && insetChain.pieceId === p.id ? 1000 : 0);
+      if (!best || score > best.score) best = { piece: p, segs, score };
+    }
+    if (!best) return;
+    const piece = best.piece;
+    if (!insetChain || insetChain.pieceId !== piece.id || insetChain.d !== d) {
+      insetChain = { pieceId: piece.id, d, segs: new Set(), guideIds: [] };
+    }
+    for (const s of best.segs) insetChain.segs.add(s);
+    regenChainGuides(piece);
+  }
+
+  function insetClick(w) {
     const d = Math.max(0.05, parseFloat($('in-dist').value) || 0.3);
     // an edge of a real (non-guide) closed piece → toggle it in the selection
     let bestEdge = null;

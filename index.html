@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pattern Studio</title>
-<link rel="stylesheet" href="style.css?v=28">
+<link rel="stylesheet" href="style.css?v=29">
 </head>
 <body>
 <div id="app">
   <header id="topbar">
-    <span id="logo" title="build 28">✂ Pattern Studio</span>
+    <span id="logo" title="build 29">✂ Pattern Studio</span>
     <input id="doc-name" type="text" value="Untitled pattern" spellcheck="false" title="Pattern name">
     <span class="sep"></span>
     <button id="btn-new" title="New document">New</button>
@@ -35,27 +35,27 @@
   <div id="main">
     <nav id="toolbar">
       <div class="tgroup">
-        <button class="tool active" data-tool="select" title="Select / edit (V)">⬚<span>Select</span></button>
-        <button class="tool" data-tool="measure" title="Measure distance (M)">📏<span>Measure</span></button>
+        <button class="tool active" data-tool="select" title="Select / edit (V)">⬚<span>Select<kbd>V</kbd></span></button>
+        <button class="tool" data-tool="measure" title="Measure distance (M)">📏<span>Measure<kbd>M</kbd></span></button>
       </div>
       <div class="tgroup"><em class="glabel">draw</em>
-        <button class="tool" data-tool="pen" title="Pen — click for corners, drag for curves (P)">✒<span>Pen</span></button>
-        <button class="tool" data-tool="shape" title="Drag a rectangle or ellipse (R)">▭<span>Shape</span></button>
+        <button class="tool" data-tool="pen" title="Pen — click for corners, drag for curves (P)">✒<span>Pen<kbd>P</kbd></span></button>
+        <button class="tool" data-tool="shape" title="Drag a rectangle or ellipse (R)">▭<span>Shape<kbd>R</kbd></span></button>
       </div>
       <div class="tgroup"><em class="glabel">reshape</em>
-        <button class="tool" data-tool="round" title="Round a corner: drag outward from a point, distance = radius (O)">⌒<span>Round</span></button>
-        <button class="tool" data-tool="knife" title="Cut a piece in two: click two points, or click an open path to cut along it (K)">✄<span>Knife</span></button>
-        <button class="tool" data-tool="bool" title="Union / subtract / intersect two overlapping pieces (B)">∪<span>Boolean</span></button>
-        <button class="tool" data-tool="weld" title="Weld two pieces into one along matching edges (W)">⋈<span>Weld</span></button>
+        <button class="tool" data-tool="round" title="Round a corner: drag outward from a point, distance = radius (O)">⌒<span>Round<kbd>O</kbd></span></button>
+        <button class="tool" data-tool="knife" title="Cut a piece in two: click two points, or click an open path to cut along it (K)">✄<span>Knife<kbd>K</kbd></span></button>
+        <button class="tool" data-tool="bool" title="Union / subtract / intersect two overlapping pieces (B)">∪<span>Boolean<kbd>B</kbd></span></button>
+        <button class="tool" data-tool="weld" title="Weld two pieces into one along matching edges (W)">⋈<span>Weld<kbd>W</kbd></span></button>
       </div>
       <div class="tgroup"><em class="glabel">sew</em>
-        <button class="tool" data-tool="inset" title="Inset guide line: click an edge, or inside a piece for the full outline (I)">⫏<span>Inset</span></button>
-        <button class="tool" data-tool="stitch" title="Matched stitching slits along edges or guide lines (S)">⋰<span>Stitch</span></button>
-        <button class="tool" data-tool="notch" title="Add notch on an edge (N)">⌖<span>Notch</span></button>
+        <button class="tool" data-tool="inset" title="Inset guide line: click an edge, or inside a piece for the full outline (I)">⫏<span>Inset<kbd>I</kbd></span></button>
+        <button class="tool" data-tool="stitch" title="Matched stitching slits along edges or guide lines (S)">⋰<span>Stitch<kbd>S</kbd></span></button>
+        <button class="tool" data-tool="notch" title="Add notch on an edge (N)">⌖<span>Notch<kbd>N</kbd></span></button>
       </div>
       <div class="tgroup"><em class="glabel">mark</em>
-        <button class="tool" data-tool="hole" title="Add drill hole (H)">◉<span>Hole</span></button>
-        <button class="tool" data-tool="grain" title="Drag to set grainline (G)">⇕<span>Grain</span></button>
+        <button class="tool" data-tool="hole" title="Add drill hole (H)">◉<span>Hole<kbd>H</kbd></span></button>
+        <button class="tool" data-tool="grain" title="Drag to set grainline (G)">⇕<span>Grain<kbd>G</kbd></span></button>
       </div>
     </nav>
 
@@ -261,9 +261,9 @@
   </div>
 </div>
 <input id="file-input" type="file" accept=".json,.dxf,application/json" hidden>
-<script src="js/geometry.js?v=28"></script>
-<script src="js/dxf.js?v=28"></script>
-<script src="js/dxfimport.js?v=28"></script>
-<script src="js/app.js?v=28"></script>
+<script src="js/geometry.js?v=29"></script>
+<script src="js/dxf.js?v=29"></script>
+<script src="js/dxfimport.js?v=29"></script>
+<script src="js/app.js?v=29"></script>
 </body>
 </html>
