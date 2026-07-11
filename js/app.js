@@ -3322,7 +3322,70 @@
   }
   const safeName = () => (doc.name || 'pattern').replace(/[^\w\-가-힣 ]+/g, '').trim() || 'pattern';
 
-  function saveJSON() { download(safeName() + '.pattern.json', JSON.stringify(doc, null, 1), 'application/json'); }
+  // ---------- local file save (File System Access API, Chrome/Edge) ----------
+  // First save asks where; after that, Save writes straight to that file on
+  // disk — no downloads, no cloud. Falls back to a download elsewhere.
+  const FS_OK = typeof window.showSaveFilePicker === 'function';
+  let fileHandle = null;
+
+  function fsStore(mode, fn) {
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open('patternStudioFiles', 1);
+      req.onupgradeneeded = () => req.result.createObjectStore('handles');
+      req.onerror = () => reject(req.error);
+      req.onsuccess = () => {
+        try {
+          const tx = req.result.transaction('handles', mode);
+          const r = fn(tx.objectStore('handles'));
+          tx.oncomplete = () => { req.result.close(); resolve(r && r.result); };
+          tx.onerror = () => { req.result.close(); reject(tx.error); };
+        } catch (e) { // e.g. a handle that can't be structured-cloned
+          req.result.close();
+          reject(e);
+        }
+      };
+    });
+  }
+  function rememberHandle(h) {
+    fileHandle = h;
+    fsStore('readwrite', (st) => (h ? st.put(h, 'project') : st.delete('project'))).catch(() => {});
+    $('btn-save').title = h
+      ? `Save to ${h.name} (Ctrl+S) · Shift-click to Save As`
+      : 'Save the project to a file on your computer (Ctrl+S)';
+  }
+  if (FS_OK) {
+    fsStore('readonly', (st) => st.get('project'))
+      .then((h) => { if (h && !fileHandle) rememberHandle(h); })
+      .catch(() => {});
+  }
+
+  async function saveJSON(saveAs) {
+    const data = JSON.stringify(doc, null, 1);
+    if (FS_OK) {
+      try {
+        if (!fileHandle || saveAs) {
+          rememberHandle(await window.showSaveFilePicker({
+            suggestedName: safeName() + '.pattern.json',
+            types: [{ description: 'Pattern Studio project', accept: { 'application/json': ['.json'] } }],
+          }));
+        } else if (fileHandle.queryPermission &&
+            (await fileHandle.queryPermission({ mode: 'readwrite' })) !== 'granted') {
+          if ((await fileHandle.requestPermission({ mode: 'readwrite' })) !== 'granted') {
+            throw new Error('permission denied');
+          }
+        }
+        const w = await fileHandle.createWritable();
+        await w.write(data);
+        await w.close();
+        $('status-hint').textContent = `Saved to ${fileHandle.name} ✓`;
+        return;
+      } catch (e) {
+        if (e && e.name === 'AbortError') return; // picker cancelled — not an error
+        // fall back to a download so the work is never lost
+      }
+    }
+    download(safeName() + '.pattern.json', data, 'application/json');
+  }
 
   function exportDXF() {
     const ok = doc.pieces.some((p) => p.visible !== false && p.path.nodes.length >= 2);
@@ -3580,6 +3643,7 @@
       doc = parsed;
       endChange();
       clearSel();
+      if (FS_OK) rememberHandle(null); // cloud project ≠ the last local file
       $('doc-name').value = doc.name || 'Untitled pattern';
       renderAll();
       zoomFit();
@@ -3615,15 +3679,36 @@
     doc = newDoc();
     endChange();
     clearSel();
+    if (FS_OK) rememberHandle(null); // a new pattern must not overwrite the old file
     $('doc-name').value = doc.name;
     renderAll();
   });
-  $('btn-open').addEventListener('click', () => $('file-input').click());
+  $('btn-open').addEventListener('click', async () => {
+    if (FS_OK && typeof window.showOpenFilePicker === 'function') {
+      try {
+        const [h] = await window.showOpenFilePicker({
+          types: [{
+            description: 'Pattern project or DXF',
+            accept: { 'application/json': ['.json'], 'application/dxf': ['.dxf'] },
+          }],
+        });
+        const file = await h.getFile();
+        openJSON(file);
+        // opening a project remembers its file, so Save writes back to it
+        if (/\.json$/i.test(file.name)) rememberHandle(h);
+        return;
+      } catch (e) {
+        if (e && e.name === 'AbortError') return;
+        // fall through to the classic input on anything unexpected
+      }
+    }
+    $('file-input').click();
+  });
   $('file-input').addEventListener('change', (e) => {
     if (e.target.files[0]) openJSON(e.target.files[0]);
     e.target.value = '';
   });
-  $('btn-save').addEventListener('click', saveJSON);
+  $('btn-save').addEventListener('click', (ev) => saveJSON(ev.shiftKey));
   $('btn-export-dxf').addEventListener('click', exportDXF);
   $('btn-export-svg').addEventListener('click', exportSVG);
   $('btn-undo').addEventListener('click', undo);
@@ -3683,6 +3768,52 @@
   });
   $('pp-inset-d').addEventListener('keydown', (ev) => {
     if (ev.key === 'Enter') { $('pp-inset-btn').click(); ev.preventDefault(); }
+    ev.stopPropagation();
+  });
+  $('pp-scale-btn').addEventListener('click', () => {
+    const f = (parseFloat($('pp-scale').value) || 0) / 100;
+    if (!(f > 0) || Math.abs(f - 1) < 1e-9) return;
+    const ids = multiSel.length > 1 ? multiSel : (selPiece() ? [selPiece().id] : []);
+    if (!ids.length) return;
+    // one shared centre, so a scaled group keeps its relative placement
+    const pts = [];
+    for (const id of ids) {
+      const p = pieceById(id);
+      if (p) pts.push(...Geo.pathPolyline(p.path.nodes, p.path.closed, 0.2));
+    }
+    if (!pts.length) return;
+    const bb = Geo.bbox(pts);
+    const cx = (bb.minX + bb.maxX) / 2, cy = (bb.minY + bb.maxY) / 2;
+    const sp = (pt) => { pt.x = cx + (pt.x - cx) * f; pt.y = cy + (pt.y - cy) * f; };
+    const sh = (h) => { if (h) { h.x *= f; h.y *= f; } };
+    beginChange();
+    for (const id of ids) {
+      const p = pieceById(id);
+      if (!p) continue;
+      for (const nd of p.path.nodes) { sp(nd); sh(nd.hin); sh(nd.hout); }
+      for (const h of p.holes || []) { sp(h); h.r = (h.r || 0.15) * f; }
+      for (const c of p.cutouts || []) {
+        for (const nd of c.nodes) { sp(nd); sh(nd.hin); sh(nd.hout); }
+      }
+      for (const sl of p.stitchSlits || []) {
+        // positions scale with the piece; the slit length is a tooling choice
+        if (sl.off) sl.off *= f;
+        if (sl.toff) sl.toff *= f;
+      }
+      if (p.grain) {
+        const a = { x: p.grain.x1, y: p.grain.y1 }, b = { x: p.grain.x2, y: p.grain.y2 };
+        sp(a); sp(b);
+        p.grain = { x1: a.x, y1: a.y, x2: b.x, y2: b.y };
+      }
+    }
+    endChange();
+    renderAll(); renderSidebar();
+    $('pp-scale').value = 100;
+    $('status-hint').textContent =
+      `Scaled ${ids.length > 1 ? ids.length + ' pieces' : 'piece'} to ${Math.round(f * 1000) / 10}%`;
+  });
+  $('pp-scale').addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter') { $('pp-scale-btn').click(); ev.preventDefault(); }
     ev.stopPropagation();
   });
   $('pp-del').addEventListener('click', () => {
