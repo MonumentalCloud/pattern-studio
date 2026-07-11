@@ -536,7 +536,7 @@
     offset: 'Click edges to select them (click again to deselect, drag a box for several) · drag a selected edge to apply the mode live · Apply uses the exact distance · in Guide mode click inside a piece for a full ring · Esc clears',
     knife: 'Click two points to cut a piece in two (they snap to existing points) · or click an open path to cut along it · Esc cancels',
     round: 'Drag outward from a corner point — the drag distance sets the fillet radius, live preview shows the arc',
-    bool: 'Click the base piece (A), then the other (B) — combined with the op from the panel · outlines must cross exactly twice',
+    bool: 'Click the base piece (A), then the other (B) — combined with the op from the panel · overlapping outlines must cross exactly twice · Subtract with B fully inside A punches it through as a hole',
     stitch: 'Click an edge or guide line, then its match — both get the same number of stitching slits · same target twice = single run',
     measure: 'Drag to measure a distance',
   };
@@ -2414,10 +2414,58 @@
 
   function booleanPieces(pA, pB, op) {
     const hits = Geo.pathIntersections(pA.path.nodes, true, pB.path.nodes, true);
+    if (hits.length === 0) {
+      // no crossings: one piece may sit entirely inside the other
+      const polyA0 = Geo.pathPolyline(pA.path.nodes, true, 0.05);
+      const polyB0 = Geo.pathPolyline(pB.path.nodes, true, 0.05);
+      const bInA = pB.path.nodes.every((nd) => Geo.pointInPolygon(polyA0, nd));
+      const aInB = pA.path.nodes.every((nd) => Geo.pointInPolygon(polyB0, nd));
+      if (op === 'subtract' && bInA) {
+        // punch B through A: it becomes an internal cutout (a real hole on CUT)
+        beginChange();
+        pA.cutouts = (pA.cutouts || []).concat(
+          [{ nodes: pB.path.nodes.map((nd) => JSON.parse(JSON.stringify(nd))) }],
+          (pB.cutouts || []).map((c) => ({ nodes: JSON.parse(JSON.stringify(c.nodes)) })));
+        doc.pieces = doc.pieces.filter((q) => q.id !== pB.id);
+        endChange();
+        boolFirst = null;
+        selectPiece(pA.id);
+        setTool('select');
+        renderAll();
+        $('status-hint').textContent = `Subtract: "${pB.name}" punched through "${pA.name}" as an internal cutout`;
+        return;
+      }
+      if (op === 'intersect' && (bInA || aInB)) {
+        // the contained piece IS the intersection
+        beginChange();
+        doc.pieces = doc.pieces.filter((q) => q.id !== (bInA ? pA.id : pB.id));
+        endChange();
+        boolFirst = null;
+        selectPiece(bInA ? pB.id : pA.id);
+        setTool('select');
+        renderAll();
+        $('status-hint').textContent = 'Intersect: kept the contained piece';
+        return;
+      }
+      if (op === 'union' && (bInA || aInB)) {
+        // the containing piece IS the union
+        beginChange();
+        doc.pieces = doc.pieces.filter((q) => q.id !== (bInA ? pB.id : pA.id));
+        endChange();
+        boolFirst = null;
+        selectPiece(bInA ? pA.id : pB.id);
+        setTool('select');
+        renderAll();
+        $('status-hint').textContent = 'Union: kept the containing piece';
+        return;
+      }
+      alert(op === 'subtract'
+        ? 'The outlines don\'t touch. To punch a hole, place the piece to subtract fully inside the other; to trim, overlap the outlines.'
+        : 'The two outlines don\'t cross — overlap the pieces first.');
+      return;
+    }
     if (hits.length !== 2) {
-      alert(hits.length === 0
-        ? 'The two outlines don\'t cross — overlap the pieces first.'
-        : `The outlines cross ${hits.length} times — boolean ops currently need exactly 2 crossings.`);
+      alert(`The outlines cross ${hits.length} times — boolean ops currently need exactly 2 crossings.`);
       return;
     }
     beginChange();

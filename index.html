@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pattern Studio</title>
-<link rel="stylesheet" href="style.css?v=33">
+<link rel="stylesheet" href="style.css?v=34">
 </head>
 <body>
 <div id="app">
   <header id="topbar">
-    <span id="logo" title="build 33">✂ Pattern Studio</span>
+    <span id="logo" title="build 34">✂ Pattern Studio</span>
     <input id="doc-name" type="text" value="Untitled pattern" spellcheck="false" title="Pattern name">
     <span class="sep"></span>
     <button id="btn-new" title="New document">New</button>
@@ -217,7 +217,8 @@
             <option value="intersect">Intersect (A ∩ B)</option>
           </select></div>
         <div class="row hint">Click the base piece (A), then the other (B). The result keeps A's name and
-          settings; works when the two outlines cross exactly twice.</div>
+          settings; overlapping outlines must cross exactly twice. Subtract with B fully
+          inside A punches it through as an internal cutout — a hole on the CUT layer.</div>
       </section>
       <section id="stitch-props" hidden>
         <h3>Stitch holes</h3>
@@ -272,9 +273,9 @@
   </div>
 </div>
 <input id="file-input" type="file" accept=".json,.dxf,application/json" hidden>
-<script src="js/geometry.js?v=33"></script>
-<script src="js/dxf.js?v=33"></script>
-<script src="js/dxfimport.js?v=33"></script>
-<script src="js/app.js?v=33"></script>
+<script src="js/geometry.js?v=34"></script>
+<script src="js/dxf.js?v=34"></script>
+<script src="js/dxfimport.js?v=34"></script>
+<script src="js/app.js?v=34"></script>
 </body>
 </html>
