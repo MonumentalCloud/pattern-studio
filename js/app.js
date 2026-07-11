@@ -166,8 +166,12 @@
   // ---------- snapping ----------
   function snapStep() { return parseFloat($('sel-grid').value) || 0.5; }
   function snapOn() { return $('chk-snap').checked; }
+  let alignGuides = []; // transient dashed lines while a snap lines up with far points
+
   function snap(p, skipPieceId, skipNodeIdx) {
-    // priority: existing nodes, then points anywhere along other outlines, then grid
+    alignGuides = [];
+    // priority: existing nodes, then points anywhere along other outlines,
+    // then orthogonal alignment with other points, then grid
     const tol = px(9);
     let best = null, bd = tol;
     for (const piece of doc.pieces) {
@@ -187,9 +191,35 @@
       if (hit && hit.dist < be) { be = hit.dist; bestE = hit.point; }
     }
     if (bestE) return { x: bestE.x, y: bestE.y };
-    if (!snapOn()) return { x: p.x, y: p.y };
-    const s = snapStep();
-    return { x: Math.round(p.x / s) * s, y: Math.round(p.y / s) * s };
+    // orthogonal alignment: same x / same y as any point on the canvas,
+    // each axis independently (a dashed guide shows the reference point)
+    const at = px(6);
+    let ax = null, adx = at, ay = null, ady = at;
+    for (const piece of doc.pieces) {
+      if (piece.visible === false) continue;
+      piece.path.nodes.forEach((n, i) => {
+        if (piece.id === skipPieceId && i === skipNodeIdx) return;
+        const dx = Math.abs(n.x - p.x), dy = Math.abs(n.y - p.y);
+        if (dx < adx) { adx = dx; ax = n; }
+        if (dy < ady) { ady = dy; ay = n; }
+      });
+    }
+    const out = { x: ax ? ax.x : p.x, y: ay ? ay.y : p.y };
+    if ((!ax || !ay) && snapOn()) {
+      const s = snapStep();
+      if (!ax) out.x = Math.round(out.x / s) * s;
+      if (!ay) out.y = Math.round(out.y / s) * s;
+    }
+    if (ax) alignGuides.push({ x1: ax.x, y1: ax.y, x2: out.x, y2: out.y });
+    if (ay && ay !== ax) alignGuides.push({ x1: ay.x, y1: ay.y, x2: out.x, y2: out.y });
+    return out;
+  }
+
+  function drawAlignGuides(group) {
+    for (const g2 of alignGuides) {
+      el('line', { class: 'align-guide', x1: g2.x1, y1: g2.y1, x2: g2.x2, y2: g2.y2 }, group);
+      el('circle', { class: 'snap-dot', cx: g2.x1, cy: g2.y1, r: px(4) }, group);
+    }
   }
 
   // ---------- rendering ----------
@@ -343,6 +373,7 @@
 
   function renderOverlay() {
     clear(gOverlay);
+    drawAlignGuides(gOverlay);
     // first edge picked with the weld / stitch tool
     const firstPick = (tool === 'weld' && weldFirst) || (tool === 'stitch' && stitchFirst);
     if (firstPick) {
@@ -365,6 +396,27 @@
           class: 'seg-highlight weld',
           d: tp.guide ? pathD(tn, tp.path.closed) : segD(tn[tg.seg], tn[(tg.seg + 1) % tn.length]),
         }, gOverlay);
+      }
+    }
+    // scale handles around the selected piece / marquee group
+    if (tool === 'select') {
+      const scIds = scaleTargets();
+      if (scIds.length) {
+        const sh = scaleHandles(scIds);
+        if (sh) {
+          el('rect', {
+            class: 'scale-box',
+            x: sh.bb.minX, y: sh.bb.minY,
+            width: sh.bb.maxX - sh.bb.minX, height: sh.bb.maxY - sh.bb.minY,
+          }, gOverlay);
+          const r2 = px(4.5);
+          for (const c of sh.corners) {
+            el('rect', {
+              class: 'scale-handle',
+              x: c.x - r2, y: c.y - r2, width: 2 * r2, height: 2 * r2,
+            }, gOverlay);
+          }
+        }
       }
     }
     if (multiSel.length > 1) return; // group selection: no per-node overlay
@@ -626,6 +678,7 @@
   function renderPenPreview() {
     clear(gPreview);
     if (tool !== 'pen' || !draft || !draft.nodes.length) return;
+    drawAlignGuides(gPreview);
     el('path', { class: 'preview-path', d: pathD(draft.nodes, false) }, gPreview);
     if (draft.mouse) {
       const last = draft.nodes[draft.nodes.length - 1];
@@ -802,6 +855,22 @@
           'font-size': px(12), 'text-anchor': 'middle',
         }, gPreview).textContent = (off > 0 ? '+' : '') + fmt(off) + ' cm';
       }
+      return;
+    }
+    if (drag.type === 'scale') { // corner handle: uniform scale about the opposite corner
+      const d0 = Geo.dist(drag.start, drag.anchor);
+      let f = d0 > 1e-6 ? Geo.dist(w, drag.anchor) / d0 : 1;
+      f = Math.max(0.05, Math.round(f * 100) / 100); // whole-percent steps
+      if (Math.abs(f / drag.applied - 1) > 1e-9) {
+        scalePieces(drag.ids, drag.anchor.x, drag.anchor.y, f / drag.applied);
+        drag.applied = f;
+        renderAll(true);
+      }
+      clear(gPreview);
+      el('text', {
+        class: 'measure-text', x: w.x, y: w.y - px(16),
+        'font-size': px(12), 'text-anchor': 'middle',
+      }, gPreview).textContent = Math.round(drag.applied * 100) + '%';
       return;
     }
     if (drag.type === 'seg') { // select tool: move the edge freely
@@ -988,6 +1057,7 @@
     if (drag.type === 'shape') {
       drag.b = snap(w);
       clear(gPreview);
+      drawAlignGuides(gPreview);
       const x0 = Math.min(drag.a.x, drag.b.x), x1 = Math.max(drag.a.x, drag.b.x);
       const y0 = Math.min(drag.a.y, drag.b.y), y1 = Math.max(drag.a.y, drag.b.y);
       if ($('sh-kind').value === 'ellipse') {
@@ -1019,6 +1089,7 @@
 
   svg.addEventListener('pointerup', (ev) => {
     if (drag) {
+      if (alignGuides.length) { alignGuides = []; renderAll(true); }
       if (drag.type === 'pan') svg.classList.remove('panning');
       else if (drag.type === 'measure') clear(gPreview);
       else if (drag.type === 'shape') {
@@ -1210,7 +1281,8 @@
         drag = null;
         return;
       }
-      if (['node', 'nodes', 'handle', 'piece', 'seg'].includes(drag.type)) { endChange(); renderSidebar(); }
+      if (drag.type === 'scale') clear(gPreview);
+      if (['node', 'nodes', 'handle', 'piece', 'seg', 'scale'].includes(drag.type)) { endChange(); renderSidebar(); }
       if (drag.type === 'pen-handle') renderPenPreview();
       drag = null;
       return;
@@ -1418,8 +1490,54 @@
     return best;
   }
 
+  // corner scale handles for the selected piece / group: they sit a little
+  // outside the bounding box so they never fight with the outline's own nodes
+  function scaleHandles(ids) {
+    const pts = [];
+    for (const id of ids) {
+      const p = pieceById(id);
+      if (!p || p.path.nodes.length < 2) continue;
+      const ep = effPiece(p);
+      pts.push(...Geo.pathPolyline(ep.path.nodes, ep.path.closed, 0.2));
+    }
+    if (!pts.length) return null;
+    const bb = Geo.bbox(pts);
+    const off = px(14) / Math.SQRT2;
+    return {
+      bb,
+      corners: [
+        { x: bb.minX - off, y: bb.minY - off, ax: bb.maxX, ay: bb.maxY },
+        { x: bb.maxX + off, y: bb.minY - off, ax: bb.minX, ay: bb.maxY },
+        { x: bb.maxX + off, y: bb.maxY + off, ax: bb.minX, ay: bb.minY },
+        { x: bb.minX - off, y: bb.maxY + off, ax: bb.maxX, ay: bb.minY },
+      ],
+    };
+  }
+  function scaleTargets() {
+    if (multiSel.length > 1) return multiSel.slice();
+    return selPiece() && sel.kind === null ? [sel.pieceId] : [];
+  }
+
   function selectDown(ev, w) {
     const piece = selPiece();
+    // 0. corner scale handle of the selected piece / group (Shift is a
+    // gathering gesture — it never grabs the handles)
+    const scIds = ev.shiftKey ? [] : scaleTargets();
+    if (scIds.length) {
+      const sh = scaleHandles(scIds);
+      if (sh) {
+        for (const c of sh.corners) {
+          if (Geo.dist(c, w) < px(9)) {
+            beginChange();
+            drag = {
+              type: 'scale', ids: scIds,
+              anchor: { x: c.ax, y: c.ay }, start: { x: c.x, y: c.y }, applied: 1,
+            };
+            return;
+          }
+        }
+      }
+    }
     // 1. handle of the selected node
     if (piece && sel.kind === 'node') {
       const nd = piece.path.nodes[sel.idx];
@@ -3771,23 +3889,11 @@
     if (ev.key === 'Enter') { $('pp-inset-btn').click(); ev.preventDefault(); }
     ev.stopPropagation();
   });
-  $('pp-scale-btn').addEventListener('click', () => {
-    const f = (parseFloat($('pp-scale').value) || 0) / 100;
-    if (!(f > 0) || Math.abs(f - 1) < 1e-9) return;
-    const ids = multiSel.length > 1 ? multiSel : (selPiece() ? [selPiece().id] : []);
-    if (!ids.length) return;
-    // one shared centre, so a scaled group keeps its relative placement
-    const pts = [];
-    for (const id of ids) {
-      const p = pieceById(id);
-      if (p) pts.push(...Geo.pathPolyline(p.path.nodes, p.path.closed, 0.2));
-    }
-    if (!pts.length) return;
-    const bb = Geo.bbox(pts);
-    const cx = (bb.minX + bb.maxX) / 2, cy = (bb.minY + bb.maxY) / 2;
+  // scale pieces about (cx, cy) by factor f — shared by the Scale field and
+  // the drag handles. The caller owns the undo step.
+  function scalePieces(ids, cx, cy, f) {
     const sp = (pt) => { pt.x = cx + (pt.x - cx) * f; pt.y = cy + (pt.y - cy) * f; };
     const sh = (h) => { if (h) { h.x *= f; h.y *= f; } };
-    beginChange();
     for (const id of ids) {
       const p = pieceById(id);
       if (!p) continue;
@@ -3807,6 +3913,23 @@
         p.grain = { x1: a.x, y1: a.y, x2: b.x, y2: b.y };
       }
     }
+  }
+
+  $('pp-scale-btn').addEventListener('click', () => {
+    const f = (parseFloat($('pp-scale').value) || 0) / 100;
+    if (!(f > 0) || Math.abs(f - 1) < 1e-9) return;
+    const ids = multiSel.length > 1 ? multiSel : (selPiece() ? [selPiece().id] : []);
+    if (!ids.length) return;
+    // one shared centre, so a scaled group keeps its relative placement
+    const pts = [];
+    for (const id of ids) {
+      const p = pieceById(id);
+      if (p) pts.push(...Geo.pathPolyline(p.path.nodes, p.path.closed, 0.2));
+    }
+    if (!pts.length) return;
+    const bb = Geo.bbox(pts);
+    beginChange();
+    scalePieces(ids, (bb.minX + bb.maxX) / 2, (bb.minY + bb.maxY) / 2, f);
     endChange();
     renderAll(); renderSidebar();
     $('pp-scale').value = 100;

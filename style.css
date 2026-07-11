@@ -122,6 +122,8 @@ label.chk { display: flex; align-items: center; gap: 4px; color: var(--dim); cur
 .handle-line { stroke: var(--dim); stroke-width: 1; vector-effect: non-scaling-stroke; }
 .handle-dot { fill: var(--accent2); stroke: none; cursor: move; }
 .seg-highlight { fill: none; stroke: var(--accent); stroke-width: 3; vector-effect: non-scaling-stroke; opacity: 0.85; }
+.scale-box { fill: none; stroke: var(--dim); stroke-width: 1; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; opacity: 0.6; pointer-events: none; }
+.scale-handle { fill: var(--panel); stroke: var(--accent); stroke-width: 1.5; vector-effect: non-scaling-stroke; cursor: nwse-resize; }
 .seg-start-dot { fill: var(--accent2); stroke: var(--bg); stroke-width: 1; vector-effect: non-scaling-stroke; pointer-events: none; }
 .seg-highlight.weld { stroke: var(--accent2); stroke-dasharray: 6 4; }
 .preview-path { fill: none; stroke: var(--accent); stroke-width: 1.4; vector-effect: non-scaling-stroke; }
@@ -131,6 +133,7 @@ label.chk { display: flex; align-items: center; gap: 4px; color: var(--dim); cur
 .snap-dot { fill: none; stroke: var(--accent2); stroke-width: 2; vector-effect: non-scaling-stroke; }
 .ghost-dot { fill: var(--accent2); opacity: 0.55; stroke: var(--bg); stroke-width: 1; vector-effect: non-scaling-stroke; pointer-events: none; }
 .marquee { fill: #4fa3ff18; stroke: var(--accent); stroke-width: 1; stroke-dasharray: 5 4; vector-effect: non-scaling-stroke; }
+.align-guide { stroke: var(--accent2); stroke-width: 1; stroke-dasharray: 4 3; vector-effect: non-scaling-stroke; opacity: 0.75; pointer-events: none; }
 .measure-text, .seg-len-text { fill: var(--accent2); font-family: system-ui, sans-serif; paint-order: stroke; stroke: var(--bg); stroke-width: 0.12em; }
 
 #pen-dialog, #divide-dialog, #node-dialog {

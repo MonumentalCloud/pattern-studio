@@ -38,9 +38,9 @@ to a file on your computer** (it asks where once, then `Ctrl+S` saves in place;
 | **Fold-line pieces** | draft half a symmetric piece, mark a straight edge as the fold — the mirrored half renders live and every edit updates it; exports unfold to the full cutting outline with the fold on the `MARK` layer |
 | **Mirror copy** | mirrored duplicate for left/right pieces — handles, notches and holes are remapped correctly |
 | **Inset copy** | duplicate a piece with its outline offset **inward** by a set distance (lining / padding layers) — lands concentric on the original; negative distance grows it outward; holes and cutouts ride along |
-| **Scale** | resize a piece — or every marquee-selected piece about their **shared centre** — by a percentage; curves, holes and cutouts scale along, stitch slit sizes stay as configured |
+| **Scale** | resize a piece — or every marquee-selected piece about their **shared centre** — by a percentage, or **drag the corner handles** around the selection (uniform, anchored at the opposite corner, live % readout); curves, holes and cutouts scale along, stitch slit sizes stay as configured |
 | **Measure** | drag to measure any distance; edge lengths and piece perimeters shown live (for walking seams) |
-| **Snap** | to grid (0.1–1 cm), to existing points, and to **any point along another outline** (projected onto the curve) — for the pen, shapes, node drags and the knife · dragging a whole piece magnets its points onto other pieces' points or edges for exact placement |
+| **Snap** | to grid (0.1–1 cm), to existing points, and to **any point along another outline** (projected onto the curve) — for the pen, shapes, node drags and the knife · **orthogonal alignment**: a point that lines up horizontally/vertically with any other point snaps level with it, with a dashed guide to the reference · dragging a whole piece magnets its points onto other pieces' points or edges for exact placement |
 | **Undo/redo** | Ctrl+Z / Ctrl+Y, 100 steps |
 | **Cloud save (GitHub)** | connect with your own fine-grained token (Contents read/write on one repo you own) — patterns save as versioned files in that repo, load from any device; the token stays in your browser |
 
