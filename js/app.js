@@ -157,10 +157,10 @@
   }
 
   // ---------- selection ----------
-  const sel = { pieceId: null, kind: null, idx: -1 };
+  const sel = { pieceId: null, kind: null, idx: -1, nodes: [] };
   let multiSel = []; // piece ids from a marquee selection (moves/deletes as a group)
-  function clearSel() { sel.pieceId = null; sel.kind = null; sel.idx = -1; multiSel = []; }
-  function selectPiece(id) { sel.pieceId = id; sel.kind = null; sel.idx = -1; multiSel = []; }
+  function clearSel() { sel.pieceId = null; sel.kind = null; sel.idx = -1; sel.nodes = []; multiSel = []; }
+  function selectPiece(id) { sel.pieceId = id; sel.kind = null; sel.idx = -1; sel.nodes = []; multiSel = []; }
   const selPiece = () => (sel.pieceId ? pieceById(sel.pieceId) : null);
 
   // ---------- snapping ----------
@@ -380,8 +380,10 @@
 
     // nodes
     nodes.forEach((nd, i) => {
+      const isSel = (sel.kind === 'node' && sel.idx === i) ||
+        (sel.kind === 'nodes' && sel.nodes.includes(i));
       el('rect', {
-        class: 'node' + (sel.kind === 'node' && sel.idx === i ? ' selected' : ''),
+        class: 'node' + (isSel ? ' selected' : ''),
         x: nd.x - r, y: nd.y - r, width: 2 * r, height: 2 * r,
         'data-role': 'node', 'data-idx': i,
       }, gOverlay);
@@ -499,6 +501,7 @@
     weld: 'Click an edge, then the matching edge on another piece — the second piece moves; both seam edges disappear',
     inset: 'Click edges to select them for a guide line (any order, click again to remove) · click inside a piece for a full-outline ring',
     knife: 'Click two points to cut a piece in two (they snap to existing points) · or click an open path to cut along it · Esc cancels',
+    round: 'Drag outward from a corner point — the drag distance sets the fillet radius, live preview shows the arc',
     bool: 'Click the base piece (A), then the other (B) — combined with the op from the panel · outlines must cross exactly twice',
     stitch: 'Click an edge or guide line, then its match — both get the same number of stitching slits · same target twice = single run',
     measure: 'Drag to measure a distance',
@@ -601,6 +604,7 @@
     if (ev.button !== 0) return;
     if (!$('pen-dialog').hidden) closePenDialog();
     if (!$('divide-dialog').hidden) closeDivideDialog();
+    if (!$('node-dialog').hidden) closeNodeDialog();
     svg.focus();
     const w = screenToWorld(ev);
     const isDbl = ev.timeStamp - lastDown.t < 400 &&
@@ -622,6 +626,7 @@
     if (tool === 'weld') return weldDown(w);
     if (tool === 'inset') return insetDown(w);
     if (tool === 'knife') return knifeDown(w);
+    if (tool === 'round') return roundDown(w);
     if (tool === 'bool') return boolDown(w);
     if (tool === 'stitch') return stitchDown(w);
     if (tool === 'measure') { drag = { type: 'measure', a: w, b: w }; return; }
@@ -676,6 +681,48 @@
       const nd = pieceById(drag.pieceId).path.nodes[drag.idx];
       nd.x = p.x; nd.y = p.y;
       renderAll(true); renderSidebar();
+      return;
+    }
+    if (drag.type === 'nodes') {
+      const piece = pieceById(drag.pieceId);
+      const dx = w.x - drag.start.x, dy = w.y - drag.start.y;
+      const s = snapOn() ? snapStep() : 0.0001;
+      const sdx = Math.round(dx / s) * s, sdy = Math.round(dy / s) * s;
+      const ddx = sdx - drag.applied.x, ddy = sdy - drag.applied.y;
+      if (ddx || ddy) {
+        for (const i of drag.idxs) {
+          const nd = piece.path.nodes[i];
+          if (nd) { nd.x += ddx; nd.y += ddy; }
+        }
+        drag.applied = { x: sdx, y: sdy };
+        renderAll(true);
+      }
+      return;
+    }
+    if (drag.type === 'round') {
+      const piece = pieceById(drag.pieceId);
+      const corner = piece.path.nodes[drag.idx];
+      clear(gPreview);
+      let R = Math.round(Geo.dist(w, corner) / 0.05) * 0.05;
+      R = Math.min(R, drag.maxR);
+      drag.R = R >= 0.05 ? R : 0;
+      if (drag.R) {
+        const fp = filletParams(piece, drag.idx, drag.R);
+        if (!fp.error) {
+          const c1 = { x: fp.A.x + fp.ta.x * fp.k, y: fp.A.y + fp.ta.y * fp.k };
+          const c2 = { x: fp.B.x - fp.tb.x * fp.k, y: fp.B.y - fp.tb.y * fp.k };
+          el('path', {
+            class: 'preview-path',
+            d: `M ${fp.A.x} ${fp.A.y} C ${c1.x} ${c1.y} ${c2.x} ${c2.y} ${fp.B.x} ${fp.B.y}`,
+          }, gPreview);
+          el('circle', { class: 'ghost-dot', cx: fp.A.x, cy: fp.A.y, r: px(3.5) }, gPreview);
+          el('circle', { class: 'ghost-dot', cx: fp.B.x, cy: fp.B.y, r: px(3.5) }, gPreview);
+          el('text', {
+            class: 'measure-text', x: w.x, y: w.y - px(10),
+            'font-size': px(12), 'text-anchor': 'middle',
+          }, gPreview).textContent = 'R ' + fmt(drag.R) + ' cm';
+        }
+      }
       return;
     }
     if (drag.type === 'handle') {
@@ -817,29 +864,63 @@
         renderAll();
       }
       if (drag.type === 'piece') clear(gPreview);
+      if (drag.type === 'round') {
+        clear(gPreview);
+        if (drag.R >= 0.05) {
+          const piece = pieceById(drag.pieceId);
+          if (piece) {
+            selectPiece(piece.id);
+            roundCorner(piece, drag.idx, drag.R);
+          }
+        }
+        drag = null;
+        return;
+      }
       if (drag.type === 'marquee') {
         clear(gPreview);
         const x0 = Math.min(drag.a.x, drag.b.x), x1 = Math.max(drag.a.x, drag.b.x);
         const y0 = Math.min(drag.a.y, drag.b.y), y1 = Math.max(drag.a.y, drag.b.y);
         if (x1 - x0 > 0.2 || y1 - y0 > 0.2) {
-          const ids = [];
-          for (const p of doc.pieces) {
-            if (p.visible === false || p.path.nodes.length < 2) continue;
-            const bb = Geo.bbox(Geo.pathPolyline(p.path.nodes, p.path.closed, 0.2));
-            if (bb.minX <= x1 && bb.maxX >= x0 && bb.minY <= y1 && bb.maxY >= y0) ids.push(p.id);
+          // with a piece selected, the marquee grabs its POINTS first
+          const prevPiece = drag.prevPieceId ? pieceById(drag.prevPieceId) : null;
+          let done = false;
+          if (prevPiece) {
+            const idxs = [];
+            prevPiece.path.nodes.forEach((nd, i) => {
+              if (nd.x >= x0 && nd.x <= x1 && nd.y >= y0 && nd.y <= y1) idxs.push(i);
+            });
+            if (idxs.length) {
+              sel.pieceId = prevPiece.id;
+              sel.kind = 'nodes';
+              sel.idx = -1;
+              sel.nodes = idxs;
+              multiSel = [];
+              $('status-hint').textContent =
+                `${idxs.length} point${idxs.length > 1 ? 's' : ''} selected — drag or arrows move them together · Del deletes`;
+              done = true;
+            }
           }
-          if (ids.length) {
-            sel.pieceId = ids[0];
-            sel.kind = null;
-            sel.idx = -1;
-            multiSel = ids;
-            $('status-hint').textContent =
-              `${ids.length} piece${ids.length > 1 ? 's' : ''} selected — drag or arrow keys move them together · Del deletes`;
+          if (!done) {
+            const ids = [];
+            for (const p of doc.pieces) {
+              if (p.visible === false || p.path.nodes.length < 2) continue;
+              const bb = Geo.bbox(Geo.pathPolyline(p.path.nodes, p.path.closed, 0.2));
+              if (bb.minX <= x1 && bb.maxX >= x0 && bb.minY <= y1 && bb.maxY >= y0) ids.push(p.id);
+            }
+            clearSel();
+            if (ids.length) {
+              sel.pieceId = ids[0];
+              multiSel = ids;
+              $('status-hint').textContent =
+                `${ids.length} piece${ids.length > 1 ? 's' : ''} selected — drag or arrow keys move them together · Del deletes`;
+            }
           }
+        } else {
+          clearSel(); // plain click on empty space
         }
         renderAll(true); renderSidebar();
       }
-      if (['node', 'handle', 'piece'].includes(drag.type)) { endChange(); renderSidebar(); }
+      if (['node', 'nodes', 'handle', 'piece'].includes(drag.type)) { endChange(); renderSidebar(); }
       if (drag.type === 'pen-handle') renderPenPreview();
       drag = null;
       return;
@@ -870,18 +951,7 @@
     // double-click node: toggle corner/smooth
     const ni = hitNode(piece, w);
     if (ni >= 0) {
-      beginChange();
-      const nd = nodes[ni];
-      if (nd.hin || nd.hout) { nd.hin = null; nd.hout = null; }
-      else {
-        const n = nodes.length;
-        const prev = nodes[(ni - 1 + n) % n], next = nodes[(ni + 1) % n];
-        const dir = Geo.norm(Geo.sub(next, prev));
-        const l1 = Geo.dist(nd, prev) / 3, l2 = Geo.dist(nd, next) / 3;
-        nd.hin = Geo.scale(dir, -Math.max(0.3, l1));
-        nd.hout = Geo.scale(dir, Math.max(0.3, l2));
-      }
-      endChange();
+      toggleNodeSmooth(piece, ni);
       sel.kind = 'node'; sel.idx = ni;
       renderAll();
       return;
@@ -1012,7 +1082,13 @@
     if (piece) {
       const ni = hitNode(piece, w);
       if (ni >= 0) {
-        sel.kind = 'node'; sel.idx = ni;
+        if (sel.kind === 'nodes' && sel.nodes.includes(ni)) {
+          // drag the whole point selection together
+          beginChange();
+          drag = { type: 'nodes', pieceId: piece.id, idxs: sel.nodes.slice(), start: w, applied: { x: 0, y: 0 } };
+          return;
+        }
+        sel.kind = 'node'; sel.idx = ni; sel.nodes = [];
         beginChange();
         drag = { type: 'node', pieceId: piece.id, idx: ni };
         renderAll(true); renderSidebar();
@@ -1055,9 +1131,8 @@
         return;
       }
     }
-    // 5. empty space: marquee-select pieces
-    clearSel();
-    drag = { type: 'marquee', a: w, b: w };
+    // 5. empty space: marquee — points of the already-selected piece, else pieces
+    drag = { type: 'marquee', a: w, b: w, prevPieceId: sel.pieceId };
     renderAll(true); renderSidebar();
   }
 
@@ -1139,9 +1214,31 @@
     if (tool === 'pen' && draft && draft.nodes.length) { openPenDialog(ev); return; }
     if (tool === 'select') {
       const w = screenToWorld(ev);
-      // prefer an edge of the selected piece, else any piece's edge
-      let pick = null;
       const sp = selPiece();
+      // a point first: right-click opens the node menu
+      let np = null;
+      if (sp) {
+        const ni = hitNode(sp, w);
+        if (ni >= 0) np = { piece: sp, idx: ni };
+      }
+      if (!np) {
+        for (const p of doc.pieces) {
+          if (p.visible === false || p.guide) continue;
+          const ni = hitNode(p, w);
+          if (ni >= 0) { np = { piece: p, idx: ni }; break; }
+        }
+      }
+      if (np) {
+        selectPiece(np.piece.id);
+        sel.kind = 'node';
+        sel.idx = np.idx;
+        renderAll(true);
+        renderSidebar();
+        openNodeDialog(ev, np.piece, np.idx);
+        return;
+      }
+      // otherwise an edge: divide dialog
+      let pick = null;
       if (sp && sp.path.nodes.length >= 2) {
         const hit = Geo.nearestOnPath(sp.path.nodes, sp.path.closed, w);
         if (hit && hit.dist < px(8)) pick = { piece: sp, hit };
@@ -1156,6 +1253,63 @@
         openDivideDialog(ev, pick.piece, pick.hit.seg);
       }
     }
+  });
+
+  // ---- node dialog (right-click a point) ----
+  function openNodeDialog(ev, piece, idx) {
+    const nd = piece.path.nodes[idx];
+    $('nd-smooth').textContent = nd.hin || nd.hout
+      ? 'Convert to corner (remove handles)'
+      : 'Convert to curve point (add handles)';
+    const dlg = $('node-dialog');
+    const wrap = $('canvas-wrap').getBoundingClientRect();
+    dlg.hidden = false;
+    dlg.style.left = Math.min(ev.clientX - wrap.left + 12, wrap.width - 240) + 'px';
+    dlg.style.top = Math.min(ev.clientY - wrap.top + 12, wrap.height - 130) + 'px';
+  }
+  function closeNodeDialog() { $('node-dialog').hidden = true; svg.focus(); }
+
+  function toggleNodeSmooth(piece, ni) {
+    beginChange();
+    const nodes = piece.path.nodes;
+    const nd = nodes[ni];
+    if (nd.hin || nd.hout) {
+      nd.hin = null;
+      nd.hout = null;
+    } else {
+      const n = nodes.length;
+      const prev = nodes[(ni - 1 + n) % n], next = nodes[(ni + 1) % n];
+      const dir = Geo.norm(Geo.sub(next, prev));
+      const l1 = Geo.dist(nd, prev) / 3, l2 = Geo.dist(nd, next) / 3;
+      nd.hin = Geo.scale(dir, -Math.max(0.3, l1));
+      nd.hout = Geo.scale(dir, Math.max(0.3, l2));
+    }
+    endChange();
+  }
+
+  $('nd-smooth').addEventListener('click', () => {
+    const p = selPiece();
+    if (!p || sel.kind !== 'node' || !p.path.nodes[sel.idx]) { closeNodeDialog(); return; }
+    toggleNodeSmooth(p, sel.idx);
+    closeNodeDialog();
+    renderAll();
+  });
+  $('nd-round-btn').addEventListener('click', () => {
+    const p = selPiece();
+    if (!p || sel.kind !== 'node' || !p.path.nodes[sel.idx]) { closeNodeDialog(); return; }
+    const R = parseFloat($('nd-round-r').value);
+    if (!(R > 0)) { alert('Radius must be positive.'); return; }
+    closeNodeDialog();
+    roundCorner(p, sel.idx, R);
+  });
+  $('nd-del').addEventListener('click', () => {
+    closeNodeDialog();
+    deleteSelection();
+  });
+  $('nd-round-r').addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter') { $('nd-round-btn').click(); ev.preventDefault(); }
+    else if (ev.key === 'Escape') { closeNodeDialog(); ev.preventDefault(); }
+    ev.stopPropagation();
   });
 
   // ---- divide-edge dialog (right-click an edge with the Select tool) ----
@@ -1765,6 +1919,24 @@
       (sourcePiece ? ' (cut path consumed)' : '');
   }
 
+  // ---- round tool: drag outward from a corner, distance = radius ----
+  function roundDown(w) {
+    let best = null, bd = px(9);
+    for (const p of doc.pieces) {
+      if (p.visible === false || p.guide) continue;
+      p.path.nodes.forEach((nd, i) => {
+        const d = Geo.dist(nd, w);
+        if (d < bd) { bd = d; best = { piece: p, idx: i }; }
+      });
+    }
+    if (!best) return;
+    if (isFolded(best.piece)) { alert('Unfold this piece ("Unfold now") before rounding its corners.'); return; }
+    const probe = filletParams(best.piece, best.idx, 0.01);
+    if (probe.error) { $('status-hint').textContent = probe.error; return; }
+    drag = { type: 'round', pieceId: best.piece.id, idx: best.idx, R: 0, maxR: probe.maxR };
+    $('status-hint').textContent = 'Drag outward — the distance sets the radius · release to apply';
+  }
+
   // ---- boolean tool: union / subtract / intersect two closed pieces ----
   let boolFirst = null; // piece id of the base (A)
 
@@ -1981,6 +2153,14 @@
     if ((ev.ctrlKey || ev.metaKey) && k === 'z') { ev.shiftKey ? redo() : undo(); ev.preventDefault(); return; }
     if ((ev.ctrlKey || ev.metaKey) && k === 'y') { redo(); ev.preventDefault(); return; }
     if ((ev.ctrlKey || ev.metaKey) && k === 's') { saveJSON(); ev.preventDefault(); return; }
+    if ((ev.ctrlKey || ev.metaKey) && k === 'c') { if (copySelection()) ev.preventDefault(); return; }
+    if ((ev.ctrlKey || ev.metaKey) && k === 'v') { pasteClipboard(); ev.preventDefault(); return; }
+    if ((ev.ctrlKey || ev.metaKey) && k === 'x') {
+      if (copySelection()) { sel.kind = null; sel.idx = -1; sel.nodes = []; deleteSelection(); }
+      ev.preventDefault();
+      return;
+    }
+    if ((ev.ctrlKey || ev.metaKey) && k === 'd') { duplicateSelection(); ev.preventDefault(); return; }
     if (k === 'escape') {
       if (tool === 'pen' && draft) finishDraft(false);
       else if (tool === 'weld' && weldFirst) {
@@ -2026,6 +2206,7 @@
     else if (k === 'i') setTool('inset');
     else if (k === 'k') setTool('knife');
     else if (k === 'b') setTool('bool');
+    else if (k === 'o') setTool('round');
     else if (k === 's') setTool('stitch');
     else if (k === 'm') setTool('measure');
     else if (k === '0') zoomFit();
@@ -2045,6 +2226,11 @@
     nudgeTimer = setTimeout(() => { nudgeTimer = null; endChange(); renderSidebar(); }, 600);
     if (multiSel.length > 1) {
       for (const id of multiSel) { const p = pieceById(id); if (p) movePiece(p, dx, dy); }
+    } else if (sel.kind === 'nodes' && sel.nodes.length) {
+      for (const i of sel.nodes) {
+        const nd = piece.path.nodes[i];
+        if (nd) { nd.x += dx; nd.y += dy; }
+      }
     } else if (sel.kind === 'node' && piece.path.nodes[sel.idx]) {
       const nd = piece.path.nodes[sel.idx];
       nd.x += dx; nd.y += dy;
@@ -2071,34 +2257,49 @@
     renderAll(true);
   }
 
-  // Round the selected corner with a circular fillet of radius R.
-  function roundCorner(piece, idx, R) {
+  // Fillet geometry for rounding a corner with radius R. Pure computation —
+  // used for the live preview and for the actual edit. Returns { error, maxR }
+  // when the corner can't take R.
+  function filletParams(piece, idx, R) {
     const nodes = piece.path.nodes;
     const n = nodes.length;
     if (!piece.path.closed && (idx === 0 || idx === n - 1)) {
-      alert('End points of an open path have no corner to round.');
-      return;
+      return { error: 'End points of an open path have no corner to round.' };
     }
     const inSeg = (idx - 1 + n) % n, outSeg = idx;
     if (piece.foldSeg === inSeg || piece.foldSeg === outSeg) {
-      alert('This corner touches the fold line — remove the fold first.');
-      return;
+      return { error: 'This corner touches the fold line — remove the fold first.' };
     }
     const corner = nodes[idx], prev = nodes[inSeg], next = nodes[(idx + 1) % n];
     const L1 = Geo.segLength(prev, corner), L2 = Geo.segLength(corner, next);
     const tin = Geo.segTangent(prev, corner, 1), tout = Geo.segTangent(corner, next, 0);
     const phi = Math.acos(Math.min(1, Math.max(-1, Geo.dot(tin, tout))));
-    if (phi < 0.05) { alert('This corner is already (nearly) straight.'); return; }
+    if (phi < 0.05) return { error: 'This corner is already (nearly) straight.' };
+    const maxR = Math.min(L1, L2) * 0.9 / Math.tan(phi / 2);
     const setback = R * Math.tan(phi / 2);
     if (setback > L1 * 0.9 || setback > L2 * 0.9) {
-      alert(`Radius too large for these edges — max here is about ${fmt(Math.min(L1, L2) * 0.9 / Math.tan(phi / 2))} cm.`);
-      return;
+      return { error: `Radius too large for these edges — max here is about ${fmt(maxR)} cm.`, maxR };
     }
     const tA = Geo.segArcParams(prev, corner, [(L1 - setback) / L1])[0];
     const tB = Geo.segArcParams(corner, next, [setback / L2])[0];
-    const ta = Geo.segTangent(prev, corner, tA);   // arc entry direction
-    const tb = Geo.segTangent(corner, next, tB);   // arc exit direction
-    const k = (4 / 3) * Math.tan(phi / 4) * R;
+    return {
+      inSeg,
+      tA, tB,
+      ta: Geo.segTangent(prev, corner, tA),  // arc entry direction
+      tb: Geo.segTangent(corner, next, tB),  // arc exit direction
+      k: (4 / 3) * Math.tan(phi / 4) * R,
+      A: Geo.segPoint(prev, corner, tA),
+      B: Geo.segPoint(corner, next, tB),
+      maxR,
+    };
+  }
+
+  // Round the selected corner with a circular fillet of radius R.
+  function roundCorner(piece, idx, R) {
+    const fp = filletParams(piece, idx, R);
+    if (fp.error) { alert(fp.error); return; }
+    const inSeg = fp.inSeg;
+    const tA = fp.tA, tB = fp.tB, ta = fp.ta, tb = fp.tb, k = fp.k;
     beginChange();
     // NOTE: insertNodeAt replaces the segment's endpoints with copies, so the
     // corner's index must be tracked arithmetically, not by reference
@@ -2125,6 +2326,85 @@
     $('status-hint').textContent = `Corner rounded with a ${fmt(R)} cm radius`;
   }
 
+  // remove one node, dropping marks on its two edges and remapping the rest
+  function deleteNodeAt(piece, idx) {
+    const n = piece.path.nodes.length;
+    const segA = (idx - 1 + n) % n, segB = idx;
+    piece.notches = (piece.notches || []).filter((nt) => nt.seg !== segA && nt.seg !== segB);
+    for (const nt of piece.notches) if (nt.seg > idx) nt.seg -= 1;
+    piece.stitchSlits = (piece.stitchSlits || []).filter((sl) => sl.seg !== segA && sl.seg !== segB);
+    for (const sl of piece.stitchSlits) if (sl.seg > idx) sl.seg -= 1;
+    if (piece.foldSeg != null) {
+      // deleting a fold-edge endpoint destroys the fold
+      if (idx === piece.foldSeg || idx === (piece.foldSeg + 1) % n) piece.foldSeg = null;
+      else if (piece.foldSeg > idx) piece.foldSeg -= 1;
+    }
+    piece.path.nodes.splice(idx, 1);
+  }
+
+  // ---------- clipboard (Ctrl+C/V/X/D) ----------
+  // Stored in localStorage, so paste works across tabs of the app too.
+  const CLIP_KEY = 'patternStudioClipboard.v1';
+
+  function selectionIds() {
+    return multiSel.length ? multiSel.slice() : sel.pieceId ? [sel.pieceId] : [];
+  }
+
+  function copySelection() {
+    const items = selectionIds().map(pieceById).filter(Boolean)
+      .map((p) => JSON.parse(JSON.stringify(p)));
+    if (!items.length) return false;
+    try { localStorage.setItem(CLIP_KEY, JSON.stringify({ pieces: items, n: 0 })); } catch (e) { /* quota */ }
+    $('status-hint').textContent = `Copied ${items.length} piece${items.length > 1 ? 's' : ''} — Ctrl+V pastes`;
+    return true;
+  }
+
+  function pasteClipboard() {
+    let clip = null;
+    try { clip = JSON.parse(localStorage.getItem(CLIP_KEY)); } catch (e) { /* ignore */ }
+    if (!clip || !Array.isArray(clip.pieces) || !clip.pieces.length) return;
+    clip.n = (clip.n || 0) + 1; // each paste lands a bit further
+    try { localStorage.setItem(CLIP_KEY, JSON.stringify(clip)); } catch (e) { /* quota */ }
+    const off = 2 * clip.n;
+    beginChange();
+    const newIds = [];
+    for (const src of clip.pieces) {
+      const p = JSON.parse(JSON.stringify(src));
+      p.id = uid();
+      movePiece(p, off, off);
+      doc.pieces.push(p);
+      newIds.push(p.id);
+    }
+    endChange();
+    clearSel();
+    sel.pieceId = newIds[0];
+    if (newIds.length > 1) multiSel = newIds;
+    renderAll();
+    $('status-hint').textContent = `Pasted ${newIds.length} piece${newIds.length > 1 ? 's' : ''}`;
+  }
+
+  function duplicateSelection() {
+    const ids = selectionIds();
+    if (!ids.length) return;
+    beginChange();
+    const newIds = [];
+    for (const id of ids) {
+      const src = pieceById(id);
+      if (!src) continue;
+      const p = JSON.parse(JSON.stringify(src));
+      p.id = uid();
+      p.name = src.name + ' copy';
+      movePiece(p, 3, 3);
+      doc.pieces.push(p);
+      newIds.push(p.id);
+    }
+    endChange();
+    clearSel();
+    sel.pieceId = newIds[0] || null;
+    if (newIds.length > 1) multiSel = newIds;
+    renderAll();
+  }
+
   function deleteSelection() {
     const piece = selPiece();
     if (!piece) return;
@@ -2142,20 +2422,18 @@
         doc.pieces = doc.pieces.filter((p) => p.id !== piece.id);
         clearSel();
       } else {
-        // drop notches/slits on the two segments touching this node, remap the rest
-        const n = piece.path.nodes.length;
-        const segA = (sel.idx - 1 + n) % n, segB = sel.idx;
-        piece.notches = (piece.notches || []).filter((nt) => nt.seg !== segA && nt.seg !== segB);
-        for (const nt of piece.notches) if (nt.seg > sel.idx) nt.seg -= 1;
-        piece.stitchSlits = (piece.stitchSlits || []).filter((sl) => sl.seg !== segA && sl.seg !== segB);
-        for (const sl of piece.stitchSlits) if (sl.seg > sel.idx) sl.seg -= 1;
-        if (piece.foldSeg != null) {
-          // deleting a fold-edge endpoint destroys the fold
-          if (sel.idx === piece.foldSeg || sel.idx === (piece.foldSeg + 1) % n) piece.foldSeg = null;
-          else if (piece.foldSeg > sel.idx) piece.foldSeg -= 1;
-        }
-        piece.path.nodes.splice(sel.idx, 1);
+        deleteNodeAt(piece, sel.idx);
         sel.kind = null;
+      }
+    } else if (sel.kind === 'nodes' && sel.nodes.length) {
+      const min = piece.path.closed ? 3 : 2;
+      if (piece.path.nodes.length - sel.nodes.length < min) {
+        doc.pieces = doc.pieces.filter((p) => p.id !== piece.id);
+        clearSel();
+      } else {
+        for (const i of sel.nodes.slice().sort((a, b) => b - a)) deleteNodeAt(piece, i);
+        sel.kind = null;
+        sel.nodes = [];
       }
     } else if (sel.kind === 'notch') {
       piece.notches.splice(sel.idx, 1);

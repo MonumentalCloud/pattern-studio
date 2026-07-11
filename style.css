@@ -80,7 +80,7 @@ label.chk { display: flex; align-items: center; gap: 4px; color: var(--dim); cur
 
 #canvas-wrap { flex: 1; position: relative; min-width: 0; }
 #canvas { width: 100%; height: 100%; display: block; background: var(--bg); outline: none; touch-action: none; }
-#canvas.tool-pen, #canvas.tool-notch, #canvas.tool-hole, #canvas.tool-weld, #canvas.tool-stitch, #canvas.tool-inset, #canvas.tool-knife, #canvas.tool-bool { cursor: crosshair; }
+#canvas.tool-pen, #canvas.tool-notch, #canvas.tool-hole, #canvas.tool-weld, #canvas.tool-stitch, #canvas.tool-inset, #canvas.tool-knife, #canvas.tool-bool, #canvas.tool-round { cursor: crosshair; }
 #canvas.tool-grain, #canvas.tool-measure { cursor: crosshair; }
 #canvas.panning { cursor: grab; }
 
@@ -125,16 +125,16 @@ label.chk { display: flex; align-items: center; gap: 4px; color: var(--dim); cur
 .marquee { fill: #4fa3ff18; stroke: var(--accent); stroke-width: 1; stroke-dasharray: 5 4; vector-effect: non-scaling-stroke; }
 .measure-text, .seg-len-text { fill: var(--accent2); font-family: system-ui, sans-serif; paint-order: stroke; stroke: var(--bg); stroke-width: 0.12em; }
 
-#pen-dialog, #divide-dialog {
+#pen-dialog, #divide-dialog, #node-dialog {
   position: absolute; z-index: 10;
   background: var(--panel); border: 1px solid var(--accent); border-radius: 6px;
   padding: 8px 10px; box-shadow: 0 4px 16px #0008;
 }
-#pen-dialog .row, #divide-dialog .row { margin-bottom: 4px; }
-#pen-dialog label, #divide-dialog label { width: 46px; color: var(--dim); }
-#pen-dialog input, #divide-dialog input { width: 70px; }
-#pen-dialog .hint, #divide-dialog .hint { color: var(--dim); font-size: 11px; margin-bottom: 0; }
-#divide-dialog button { font-size: 11.5px; padding: 3px 8px; }
+#pen-dialog .row, #divide-dialog .row, #node-dialog .row { margin-bottom: 4px; }
+#pen-dialog label, #divide-dialog label, #node-dialog label { width: 46px; color: var(--dim); }
+#pen-dialog input, #divide-dialog input, #node-dialog input { width: 70px; }
+#pen-dialog .hint, #divide-dialog .hint, #node-dialog .hint { color: var(--dim); font-size: 11px; margin-bottom: 0; }
+#divide-dialog button, #node-dialog button { font-size: 11.5px; padding: 3px 8px; }
 
 #statusbar {
   position: absolute; left: 0; right: 0; bottom: 0;
