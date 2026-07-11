@@ -36,7 +36,7 @@ can be saved/opened as `.pattern.json` files.
 | **Fold-line pieces** | draft half a symmetric piece, mark a straight edge as the fold — the mirrored half renders live and every edit updates it; exports unfold to the full cutting outline with the fold on the `MARK` layer |
 | **Mirror copy** | mirrored duplicate for left/right pieces — handles, notches and holes are remapped correctly |
 | **Measure** | drag to measure any distance; edge lengths and piece perimeters shown live (for walking seams) |
-| **Snap** | to grid (0.1–1 cm) and to existing points · dragging a whole piece magnets its points onto other pieces' points for exact placement |
+| **Snap** | to grid (0.1–1 cm), to existing points, and to **any point along another outline** (projected onto the curve) — for the pen, shapes, node drags and the knife · dragging a whole piece magnets its points onto other pieces' points or edges for exact placement |
 | **Undo/redo** | Ctrl+Z / Ctrl+Y, 100 steps |
 | **Cloud save (GitHub)** | connect with your own fine-grained token (Contents read/write on one repo you own) — patterns save as versioned files in that repo, load from any device; the token stays in your browser |
 

@@ -167,7 +167,7 @@
   function snapStep() { return parseFloat($('sel-grid').value) || 0.5; }
   function snapOn() { return $('chk-snap').checked; }
   function snap(p, skipPieceId, skipNodeIdx) {
-    // point snap to existing nodes first, then grid
+    // priority: existing nodes, then points anywhere along other outlines, then grid
     const tol = px(9);
     let best = null, bd = tol;
     for (const piece of doc.pieces) {
@@ -179,6 +179,14 @@
       });
     }
     if (best) return best;
+    // on-curve snap: project onto the nearest outline (never the edited piece's own)
+    let bestE = null, be = px(7);
+    for (const piece of doc.pieces) {
+      if (piece.visible === false || piece.id === skipPieceId || piece.path.nodes.length < 2) continue;
+      const hit = Geo.nearestOnPath(piece.path.nodes, piece.path.closed, p);
+      if (hit && hit.dist < be) { be = hit.dist; bestE = hit.point; }
+    }
+    if (bestE) return { x: bestE.x, y: bestE.y };
     if (!snapOn()) return { x: p.x, y: p.y };
     const s = snapStep();
     return { x: Math.round(p.x / s) * s, y: Math.round(p.y / s) * s };
@@ -742,7 +750,7 @@
       const s = snapOn() ? snapStep() : 0.0001;
       let sdx = Math.round(dx / s) * s, sdy = Math.round(dy / s) * s;
       // placement magnet: pull the nearest node of the dragged group exactly
-      // onto a nearby node of an unmoved piece (grid on or off)
+      // onto a nearby node — or any point on the outline — of an unmoved piece
       let magnet = null;
       {
         let best = px(9);
@@ -754,6 +762,22 @@
               for (const qn of q.path.nodes) {
                 const d = Math.hypot(qn.x - tx2, qn.y - ty2);
                 if (d < best) { best = d; magnet = { dx: qn.x - tx2, dy: qn.y - ty2, x: qn.x, y: qn.y }; }
+              }
+            }
+          }
+        }
+        if (!magnet) { // no vertex pair in range: try landing on an edge
+          let bestE = px(7);
+          for (const gp of group) {
+            for (const nd of gp.path.nodes) {
+              const tp = { x: nd.x - drag.applied.x + sdx, y: nd.y - drag.applied.y + sdy };
+              for (const q of doc.pieces) {
+                if (drag.ids.includes(q.id) || q.visible === false || q.path.nodes.length < 2) continue;
+                const hit = Geo.nearestOnPath(q.path.nodes, q.path.closed, tp);
+                if (hit && hit.dist < bestE) {
+                  bestE = hit.dist;
+                  magnet = { dx: hit.point.x - tp.x, dy: hit.point.y - tp.y, x: hit.point.x, y: hit.point.y };
+                }
               }
             }
           }
@@ -1713,7 +1737,8 @@
     return seg + 1;
   }
 
-  // knife precision: endpoints snap to existing nodes only (never the grid)
+  // knife precision: endpoints snap to existing nodes, then to points anywhere
+  // along an outline (never the grid)
   function knifeSnap(w) {
     let best = null, bd = px(9);
     for (const p of doc.pieces) {
@@ -1722,6 +1747,13 @@
         const d = Geo.dist(nd, w);
         if (d < bd) { bd = d; best = { x: nd.x, y: nd.y, snapped: true }; }
       }
+    }
+    if (best) return best;
+    let be = px(7);
+    for (const p of doc.pieces) {
+      if (p.visible === false || p.guide || p.path.nodes.length < 2) continue;
+      const hit = Geo.nearestOnPath(p.path.nodes, p.path.closed, w);
+      if (hit && hit.dist < be) { be = hit.dist; best = { x: hit.point.x, y: hit.point.y, snapped: true }; }
     }
     return best || { x: w.x, y: w.y, snapped: false };
   }
