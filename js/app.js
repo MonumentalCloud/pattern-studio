@@ -474,7 +474,6 @@
     $('sel-handle-row').hidden = true;
     $('sel-seg-row').hidden = !showSeg;
     $('sel-seg-anchor-row').hidden = !showSeg;
-    $('sel-offset-row').hidden = !(showSeg || showSegs);
     $('sel-move-row').hidden = !showMove;
     $('sel-fold-row').hidden = !showSeg;
     $('sel-clear-slits-row').hidden = true;
@@ -504,10 +503,10 @@
       if (slitCount) $('sp-clear-slits').textContent = `Remove ${slitCount} stitch hole${slitCount > 1 ? 's' : ''}`;
       $('sel-hint').textContent = piece.foldSeg === sel.idx
         ? 'This edge is the fold — the piece unfolds across it on export.'
-        : 'Drag the edge to slide it outward/inward · Alt-drag protrudes it into a tab · Shift-click more edges to outset several at once · type a length to resize (● = start) · double-click inserts a point · right-click divides.';
+        : 'Drag the edge to move it · type a length to resize (● = start) · double-click inserts a point · right-click divides · the Offset tool (O) slides/protrudes it along its normal.';
     } else if (showSegs) {
       $('sel-hint').textContent =
-        `${sel.segs.length} edges selected — drag one (or Offset ▸ Slide) to outset/inset them together, mitred at shared corners · Protrude tabs each edge · Shift-click adds/removes edges.`;
+        `${sel.segs.length} edges selected — with the Offset tool, drag one to apply the mode live, or type a distance and Apply.`;
     } else if (sel.kind === 'nodes') {
       $('sel-hint').textContent =
         `${sel.nodes.length} points selected — drag or arrows move them · type Δx/Δy for an exact move.`;
@@ -528,7 +527,7 @@
     hole: 'Click inside a piece to add a drill hole',
     grain: 'Drag inside a piece to set the grainline · click (no drag) removes it',
     weld: 'Click an edge, then the matching edge on another piece — the second piece moves; both seam edges disappear',
-    inset: 'Click edges to select them for a guide line (any order, click again to remove) · drag a box to add many edges at once · click inside a piece for a full-outline ring',
+    offset: 'Click edges to select them (click again to deselect, drag a box for several) · drag a selected edge to apply the mode live · Apply uses the exact distance · in Guide mode click inside a piece for a full ring · Esc clears',
     knife: 'Click two points to cut a piece in two (they snap to existing points) · or click an open path to cut along it · Esc cancels',
     round: 'Drag outward from a corner point — the drag distance sets the fillet radius, live preview shows the arc',
     bool: 'Click the base piece (A), then the other (B) — combined with the op from the panel · outlines must cross exactly twice',
@@ -540,11 +539,11 @@
     if (t !== 'pen') finishDraft(false);
     if (t !== 'weld') weldFirst = null;
     if (t !== 'stitch') stitchFirst = null;
-    if (t !== 'inset') insetChain = null;
+    if (t !== 'offset') insetChain = null;
     if (t !== 'knife') knifeFirst = null;
     if (t !== 'bool') boolFirst = null;
     $('stitch-props').hidden = t !== 'stitch';
-    $('inset-props').hidden = t !== 'inset';
+    $('offset-props').hidden = t !== 'offset';
     $('bool-props').hidden = t !== 'bool';
     $('shape-props').hidden = t !== 'shape';
     document.querySelectorAll('#toolbar .tool').forEach((b) =>
@@ -653,7 +652,7 @@
     if (tool === 'hole') return holeDown(w);
     if (tool === 'grain') return grainDown(w);
     if (tool === 'weld') return weldDown(w);
-    if (tool === 'inset') return insetDown(w);
+    if (tool === 'offset') return offsetDown(w);
     if (tool === 'knife') return knifeDown(w);
     if (tool === 'round') return roundDown(w);
     if (tool === 'bool') return boolDown(w);
@@ -738,51 +737,58 @@
       }
       return;
     }
-    if (drag.type === 'seg') {
+    if (drag.type === 'seg') { // select tool: move the edge freely
+      const piece = pieceById(drag.pieceId);
+      const n = piece.path.nodes.length;
+      const a = piece.path.nodes[drag.idx], b = piece.path.nodes[(drag.idx + 1) % n];
+      const dx = w.x - drag.start.x, dy = w.y - drag.start.y;
+      const s = snapOn() ? snapStep() : 0.0001;
+      const sdx = Math.round(dx / s) * s, sdy = Math.round(dy / s) * s;
+      const ddx = sdx - drag.applied.x, ddy = sdy - drag.applied.y;
+      if (ddx || ddy) {
+        a.x += ddx; a.y += ddy;
+        if (b !== a) { b.x += ddx; b.y += ddy; }
+        drag.applied = { x: sdx, y: sdy };
+        renderAll(true);
+      }
+      return;
+    }
+    if (drag.type === 'seg-extrude') { // offset tool: protrude the selected edges
       const piece = pieceById(drag.pieceId);
       const raw = Geo.dot(Geo.sub(w, drag.start), drag.n);
       const s = snapOn() ? snapStep() : 0.0001;
       const off = Math.round(raw / s) * s;
-      if (drag.mode === 'extrude') {
-        if (off && !drag.inserted) {
-          drag.idx = extrudeSeg(piece, drag.idx);
-          drag.inserted = true;
-          drag.applied = 0;
-          sel.idx = drag.idx;
+      if (off && !drag.inserted) {
+        // extrude every selected edge, highest index first so lower stay valid
+        const order = drag.segs.slice().sort((x, y) => y - x);
+        const entries = [];
+        for (const i of order) {
+          const nrm = segOffsetNormal(piece, i);
+          entries.push({ orig: i, mid: extrudeSeg(piece, i), nrm });
         }
-        if (drag.inserted) {
-          const n = piece.path.nodes.length;
-          const a = piece.path.nodes[drag.idx], b = piece.path.nodes[(drag.idx + 1) % n];
-          const d = off - drag.applied;
-          if (d) {
-            a.x += drag.n.x * d; a.y += drag.n.y * d;
-            b.x += drag.n.x * d; b.y += drag.n.y * d;
-            drag.applied = off;
-            renderAll(true);
-          }
-          if (!off) { // dragged back to flat — take the extra corners out again
-            drag.idx = collapseExtrude(piece, drag.idx);
-            drag.inserted = false;
-            sel.idx = drag.idx;
-            renderAll(true);
-          }
+        entries.forEach((e, j) => { e.mid += 2 * (order.length - 1 - j); });
+        for (const e of entries) {
+          e.ax = piece.path.nodes[e.mid].x; e.ay = piece.path.nodes[e.mid].y;
+          e.bx = piece.path.nodes[e.mid + 1].x; e.by = piece.path.nodes[e.mid + 1].y;
         }
-      } else {
-        const n = piece.path.nodes.length;
-        const a = piece.path.nodes[drag.idx], b = piece.path.nodes[(drag.idx + 1) % n];
-        const d = off - drag.applied;
-        if (d) {
-          a.x += drag.n.x * d; a.y += drag.n.y * d;
-          if (b !== a) { b.x += drag.n.x * d; b.y += drag.n.y * d; }
-          drag.applied = off;
-          renderAll(true);
+        drag.entries = entries;
+        drag.inserted = true;
+        setSegSelection(piece, entries.map((e) => e.mid).sort((x, y) => x - y));
+      }
+      if (drag.inserted && off !== drag.applied) {
+        for (const e of drag.entries) {
+          piece.path.nodes[e.mid].x = e.ax + e.nrm.x * off;
+          piece.path.nodes[e.mid].y = e.ay + e.nrm.y * off;
+          piece.path.nodes[e.mid + 1].x = e.bx + e.nrm.x * off;
+          piece.path.nodes[e.mid + 1].y = e.by + e.nrm.y * off;
         }
+        drag.applied = off;
+        renderAll(true);
       }
       clear(gPreview);
-      if (Math.abs(off) > 1e-9) {
-        const n = piece.path.nodes.length;
-        const a = piece.path.nodes[drag.idx], b = piece.path.nodes[(drag.idx + 1) % n];
-        const mid = Geo.segPoint(a, b, 0.5);
+      if (drag.inserted && Math.abs(off) > 1e-9) {
+        const e = drag.entries.find((en) => en.orig === drag.clickSeg) || drag.entries[0];
+        const mid = Geo.segPoint(piece.path.nodes[e.mid], piece.path.nodes[e.mid + 1], 0.5);
         el('text', {
           class: 'measure-text', x: mid.x, y: mid.y - px(12),
           'font-size': px(12), 'text-anchor': 'middle',
@@ -1004,10 +1010,18 @@
         const x0 = Math.min(drag.a.x, drag.b.x), x1 = Math.max(drag.a.x, drag.b.x);
         const y0 = Math.min(drag.a.y, drag.b.y), y1 = Math.max(drag.a.y, drag.b.y);
         if (drag.mode === 'inset') {
-          // inset tool: a drag adds every caught edge to the guide run,
-          // a plain click keeps the old toggle behaviour
+          // offset tool, guide mode: a drag adds every caught edge to the
+          // guide run, a plain click keeps the toggle behaviour
           if (x1 - x0 > 0.2 || y1 - y0 > 0.2) insetMarquee(x0, y0, x1, y1);
           else insetClick(drag.a);
+          drag = null;
+          return;
+        }
+        if (drag.mode === 'offset-add') {
+          // offset tool, slide/protrude: box-select edges into the set
+          if (x1 - x0 > 0.2 || y1 - y0 > 0.2) offsetBoxAdd(x0, y0, x1, y1);
+          else { clearSel(); } // click on empty space clears the edge set
+          renderAll(true); renderSidebar();
           drag = null;
           return;
         }
@@ -1015,32 +1029,7 @@
           // with a piece selected, the marquee grabs its POINTS first
           const prevPiece = drag.prevPieceId ? pieceById(drag.prevPieceId) : null;
           let done = false;
-          if (prevPiece && drag.shift) {
-            // Shift-marquee: grab the piece's EDGES (both endpoints inside),
-            // adding to any existing edge selection
-            const nodes = prevPiece.path.nodes;
-            const n = nodes.length;
-            const segCount = prevPiece.path.closed ? n : n - 1;
-            const inside = (nd) => nd.x >= x0 && nd.x <= x1 && nd.y >= y0 && nd.y <= y1;
-            const set = new Set(sel.pieceId === prevPiece.id
-              ? (sel.kind === 'segs' ? sel.segs : (sel.kind === 'seg' ? [sel.idx] : []))
-              : []);
-            for (let i = 0; i < segCount; i++) {
-              if (inside(nodes[i]) && inside(nodes[(i + 1) % n])) set.add(i);
-            }
-            if (set.size) {
-              const segs = [...set].sort((sa, sb) => sa - sb);
-              sel.pieceId = prevPiece.id;
-              sel.nodes = [];
-              multiSel = [];
-              if (segs.length === 1) { sel.kind = 'seg'; sel.idx = segs[0]; }
-              else { sel.kind = 'segs'; sel.segs = segs; sel.idx = -1; }
-              $('status-hint').textContent =
-                `${segs.length} edge${segs.length > 1 ? 's' : ''} selected — drag one (or Offset ▸ Slide) to outset/inset together`;
-              done = true;
-            }
-          }
-          if (!done && prevPiece) {
+          if (prevPiece) {
             const idxs = [];
             prevPiece.path.nodes.forEach((nd, i) => {
               if (nd.x >= x0 && nd.x <= x1 && nd.y >= y0 && nd.y <= y1) idxs.push(i);
@@ -1076,8 +1065,32 @@
         }
         renderAll(true); renderSidebar();
       }
-      if (drag.type === 'seg' || drag.type === 'segs') clear(gPreview);
-      if (['node', 'nodes', 'handle', 'piece', 'seg', 'segs'].includes(drag.type)) { endChange(); renderSidebar(); }
+      if (drag.type === 'segs' || drag.type === 'seg-extrude') {
+        // offset tool release: a zero-distance release is a click — deselect
+        // the clicked edge; an extrude released flat removes its extra corners
+        clear(gPreview);
+        const piece = pieceById(drag.pieceId);
+        if (piece && drag.type === 'seg-extrude' && drag.inserted && drag.applied === 0) {
+          for (const e of drag.entries.slice().sort((p, q) => q.mid - p.mid)) {
+            collapseExtrude(piece, e.mid);
+          }
+          setSegSelection(piece, drag.segs.slice().sort((x, y) => x - y));
+        }
+        const releasedFlat = drag.type === 'seg-extrude'
+          ? (!drag.inserted || drag.applied === 0)
+          : drag.applied === 0;
+        if (piece && releasedFlat && drag.clickSeg != null) {
+          const cur = new Set(sel.pieceId === piece.id
+            ? (sel.kind === 'segs' ? sel.segs : (sel.kind === 'seg' ? [sel.idx] : [])) : []);
+          cur.delete(drag.clickSeg);
+          setSegSelection(piece, [...cur].sort((x, y) => x - y));
+        }
+        endChange();
+        renderAll(true); renderSidebar();
+        drag = null;
+        return;
+      }
+      if (['node', 'nodes', 'handle', 'piece', 'seg'].includes(drag.type)) { endChange(); renderSidebar(); }
       if (drag.type === 'pen-handle') renderPenPreview();
       drag = null;
       return;
@@ -1322,50 +1335,13 @@
       if (sli >= 0) { sel.kind = 'slit'; sel.idx = sli; renderAll(true); renderSidebar(); return; }
       const hi = (piece.holes || []).findIndex((h) => Geo.dist(h, w) < px(8));
       if (hi >= 0) { sel.kind = 'hole'; sel.idx = hi; renderAll(true); renderSidebar(); return; }
-      // 3. segment of the selected piece — dragging it slides the edge along
-      // its normal (outward / inward), stretching the neighbouring edges;
-      // Alt-drag protrudes it instead (a tab / recess with straight walls)
+      // 3. segment of the selected piece — dragging moves the edge freely
+      // (the Offset tool handles slide-along-normal / protrude / guides)
       const hit = Geo.nearestOnPath(piece.path.nodes, piece.path.closed, w);
       if (hit && hit.dist < px(6)) {
-        const nn = piece.path.nodes.length;
-        if (ev.shiftKey) {
-          // Shift-click: toggle the edge in a multi-edge selection
-          const set = new Set(sel.kind === 'segs' ? sel.segs
-            : (sel.kind === 'seg' ? [sel.idx] : []));
-          if (set.has(hit.seg)) set.delete(hit.seg); else set.add(hit.seg);
-          const segs = [...set].sort((x, y) => x - y);
-          if (!segs.length) { sel.kind = null; sel.idx = -1; }
-          else if (segs.length === 1) { sel.kind = 'seg'; sel.idx = segs[0]; }
-          else { sel.kind = 'segs'; sel.segs = segs; sel.idx = -1; }
-          sel.nodes = [];
-          renderAll(true); renderSidebar();
-          return;
-        }
-        if (sel.kind === 'segs' && sel.segs.includes(hit.seg)) {
-          // drag any edge of the set: outset / inset them all together
-          const tan = Geo.segTangent(piece.path.nodes[hit.seg], piece.path.nodes[(hit.seg + 1) % nn], 0.5);
-          const os = piece.path.closed ? Geo.outwardSign(Geo.pathPolyline(piece.path.nodes, true, 0.1)) : 1;
-          const vecs = segsOffsetVectors(piece, sel.segs);
-          const orig = {};
-          for (const k of vecs.keys()) orig[k] = { x: piece.path.nodes[k].x, y: piece.path.nodes[k].y };
-          beginChange();
-          drag = {
-            type: 'segs', pieceId: piece.id, idx: hit.seg, start: w, applied: 0,
-            n: { x: os * tan.y, y: -os * tan.x }, vecs, orig,
-          };
-          renderAll(true); renderSidebar();
-          return;
-        }
         sel.kind = 'seg'; sel.idx = hit.seg; sel.nodes = [];
-        const sa2 = piece.path.nodes[hit.seg], sb2 = piece.path.nodes[(hit.seg + 1) % nn];
-        const tan = Geo.segTangent(sa2, sb2, 0.5);
-        const os = piece.path.closed ? Geo.outwardSign(Geo.pathPolyline(piece.path.nodes, true, 0.1)) : 1;
         beginChange();
-        drag = {
-          type: 'seg', pieceId: piece.id, idx: hit.seg,
-          mode: ev.altKey ? 'extrude' : 'slide', inserted: false,
-          start: w, applied: 0, n: { x: os * tan.y, y: -os * tan.x },
-        };
+        drag = { type: 'seg', pieceId: piece.id, idx: hit.seg, start: w, applied: { x: 0, y: 0 } };
         renderAll(true); renderSidebar();
         return;
       }
@@ -1392,9 +1368,8 @@
         return;
       }
     }
-    // 5. empty space: marquee — points of the already-selected piece (Shift:
-    // its edges), else pieces
-    drag = { type: 'marquee', a: w, b: w, prevPieceId: sel.pieceId, shift: ev.shiftKey };
+    // 5. empty space: marquee — points of the already-selected piece, else pieces
+    drag = { type: 'marquee', a: w, b: w, prevPieceId: sel.pieceId };
     renderAll(true); renderSidebar();
   }
 
@@ -1834,15 +1809,99 @@
   // guides regenerate from the contiguous runs, mitered around corners.
   let insetChain = null; // { pieceId, d, segs: Set, guideIds: [] }
 
-  function insetDown(w) {
-    // click = toggle one edge (or full outline); drag = box-select many edges.
-    // decided on pointerup by how far the pointer moved
-    drag = { type: 'marquee', mode: 'inset', a: w, b: w };
+  // ---- offset tool: slide / protrude / guide, over a set of selected edges ----
+  function setSegSelection(piece, segs) {
+    sel.pieceId = piece.id;
+    sel.nodes = [];
+    multiSel = [];
+    if (!segs.length) { sel.kind = null; sel.idx = -1; }
+    else if (segs.length === 1) { sel.kind = 'seg'; sel.idx = segs[0]; }
+    else { sel.kind = 'segs'; sel.segs = segs; sel.idx = -1; }
+  }
+  function selectedSegsOf(piece) {
+    if (sel.pieceId !== piece.id) return [];
+    if (sel.kind === 'segs') return sel.segs.slice();
+    if (sel.kind === 'seg') return [sel.idx];
+    return [];
+  }
+
+  function offsetDown(w) {
+    if ($('of-mode').value === 'guide') {
+      // guide mode: click toggles an edge in the run / inside = full ring;
+      // drag box-adds — resolved on pointerup
+      drag = { type: 'marquee', mode: 'inset', a: w, b: w };
+      return;
+    }
+    // slide / protrude: build an edge selection, drag a selected edge to apply
+    let best = null;
+    for (const p of doc.pieces) {
+      if (p.visible === false || p.guide || p.path.nodes.length < 2) continue;
+      const hit = Geo.nearestOnPath(p.path.nodes, p.path.closed, w);
+      if (hit && hit.dist < px(8) && (!best || hit.dist < best.hit.dist)) best = { piece: p, hit };
+    }
+    if (!best) {
+      drag = { type: 'marquee', mode: 'offset-add', a: w, b: w };
+      return;
+    }
+    const piece = best.piece, seg = best.hit.seg;
+    const cur = selectedSegsOf(piece);
+    if (cur.includes(seg)) {
+      // drag applies the mode to the whole set; a plain click deselects (on up)
+      startOffsetDrag(piece, seg, w, cur);
+      return;
+    }
+    cur.push(seg);
+    setSegSelection(piece, cur.sort((x, y) => x - y));
+    renderAll(true); renderSidebar();
+  }
+
+  function startOffsetDrag(piece, seg, w, segs) {
+    const nn = piece.path.nodes.length;
+    const tan = Geo.segTangent(piece.path.nodes[seg], piece.path.nodes[(seg + 1) % nn], 0.5);
+    const os = piece.path.closed ? Geo.outwardSign(Geo.pathPolyline(piece.path.nodes, true, 0.1)) : 1;
+    const n = { x: os * tan.y, y: -os * tan.x };
+    beginChange();
+    if ($('of-mode').value === 'extrude') {
+      drag = {
+        type: 'seg-extrude', pieceId: piece.id, segs, clickSeg: seg,
+        start: w, applied: 0, n, inserted: false, entries: null,
+      };
+    } else {
+      const vecs = segsOffsetVectors(piece, segs);
+      const orig = {};
+      for (const k of vecs.keys()) orig[k] = { x: piece.path.nodes[k].x, y: piece.path.nodes[k].y };
+      drag = {
+        type: 'segs', pieceId: piece.id, idx: seg, clickSeg: seg,
+        start: w, applied: 0, n, vecs, orig,
+      };
+    }
+  }
+
+  function offsetBoxAdd(x0, y0, x1, y1) {
+    const inside = (nd) => nd.x >= x0 && nd.x <= x1 && nd.y >= y0 && nd.y <= y1;
+    let best = null; // the already-selected piece wins, then most edges caught
+    for (const p of doc.pieces) {
+      if (p.visible === false || p.guide || p.path.nodes.length < 2) continue;
+      const nodes = p.path.nodes;
+      const n = nodes.length;
+      const segCount = p.path.closed ? n : n - 1;
+      const segs = [];
+      for (let i = 0; i < segCount; i++) {
+        if (inside(nodes[i]) && inside(nodes[(i + 1) % n])) segs.push(i);
+      }
+      if (!segs.length) continue;
+      const score = segs.length + (sel.pieceId === p.id ? 1000 : 0);
+      if (!best || score > best.score) best = { piece: p, segs, score };
+    }
+    if (!best) return;
+    const cur = new Set(selectedSegsOf(best.piece));
+    for (const s of best.segs) cur.add(s);
+    setSegSelection(best.piece, [...cur].sort((x, y) => x - y));
   }
 
   // marquee for the inset tool: add every edge fully inside the box to the run
   function insetMarquee(x0, y0, x1, y1) {
-    const d = Math.max(0.05, parseFloat($('in-dist').value) || 0.3);
+    const d = Math.max(0.05, Math.abs(parseFloat($('of-dist').value)) || 0.3);
     const inside = (nd) => nd.x >= x0 && nd.x <= x1 && nd.y >= y0 && nd.y <= y1;
     let best = null; // the current chain's piece wins, then most edges caught
     for (const p of doc.pieces) {
@@ -1867,7 +1926,7 @@
   }
 
   function insetClick(w) {
-    const d = Math.max(0.05, parseFloat($('in-dist').value) || 0.3);
+    const d = Math.max(0.05, Math.abs(parseFloat($('of-dist').value)) || 0.3);
     // an edge of a real (non-guide) closed piece → toggle it in the selection
     let bestEdge = null;
     for (const p of doc.pieces) {
@@ -2473,9 +2532,11 @@
         stitchFirst = null;
         $('status-hint').textContent = HINTS.stitch;
         renderAll(true);
-      } else if (tool === 'inset' && insetChain) {
+      } else if (tool === 'offset' && (insetChain || sel.kind === 'seg' || sel.kind === 'segs')) {
         insetChain = null;
-        $('status-hint').textContent = HINTS.inset;
+        sel.kind = null; sel.idx = -1;
+        $('status-hint').textContent = HINTS.offset;
+        renderAll(true); renderSidebar();
       } else if (tool === 'knife' && knifeFirst) {
         knifeFirst = null;
         clear(gPreview);
@@ -2505,10 +2566,10 @@
     else if (k === 'h') setTool('hole');
     else if (k === 'g') setTool('grain');
     else if (k === 'w') setTool('weld');
-    else if (k === 'i') setTool('inset');
+    else if (k === 'i' || k === 'o') setTool('offset');
     else if (k === 'k') setTool('knife');
     else if (k === 'b') setTool('bool');
-    else if (k === 'o') setTool('round');
+    else if (k === 'f') setTool('round');
     else if (k === 's') setTool('stitch');
     else if (k === 'm') setTool('measure');
     else if (k === '0') zoomFit();
@@ -3199,14 +3260,31 @@
     const os = p.path.closed ? Geo.outwardSign(Geo.pathPolyline(p.path.nodes, true, 0.1)) : 1;
     return { x: os * tan.y, y: -os * tan.x };
   }
-  $('sp-seg-off-btn').addEventListener('click', () => {
+  // offset tool: apply the exact distance to the selected edges by mode
+  $('of-apply').addEventListener('click', () => {
+    const mode = $('of-mode').value;
+    const val = parseFloat($('of-dist').value) || 0;
+    if (!val) return;
+    if (mode === 'guide') {
+      // guide scribing applies live; Apply re-scribes the run at the new distance
+      if (insetChain) {
+        const piece = pieceById(insetChain.pieceId);
+        if (piece) {
+          insetChain.d = Math.max(0.05, Math.abs(val));
+          regenChainGuides(piece);
+          $('status-hint').textContent = `Guide re-scribed at ${fmt(Math.abs(val))} cm`;
+        }
+      }
+      return;
+    }
     const p = selPiece();
-    const val = parseFloat($('sp-seg-off').value) || 0;
-    if (!p || !val) return;
-    if (sel.kind === 'segs' && sel.segs.length) {
+    if (!p) return;
+    const segs = selectedSegsOf(p);
+    if (!segs.length) return;
+    if (mode === 'extrude') {
       // extrude each selected edge; descending order keeps lower indices valid
       beginChange();
-      const order = sel.segs.slice().sort((x, y) => y - x);
+      const order = segs.slice().sort((x, y) => y - x);
       const mids = [];
       for (const i of order) {
         const nrm = segOffsetNormal(p, i);
@@ -3218,49 +3296,37 @@
       }
       endChange();
       // every later (lower-index) extrusion shifted the earlier mids by +2
-      sel.segs = mids.map((m, j) => m + 2 * (order.length - 1 - j)).sort((x, y) => x - y);
-      renderAll(); renderSidebar();
-      $('status-hint').textContent = `${order.length} edges protruded ${val > 0 ? 'outward' : 'inward'} by ${fmt(Math.abs(val))} cm`;
-      return;
-    }
-    if (sel.kind !== 'seg' || sel.idx >= p.path.nodes.length) return;
-    const nrm = segOffsetNormal(p, sel.idx);
-    beginChange();
-    const mid = extrudeSeg(p, sel.idx);
-    const a = p.path.nodes[mid], b = p.path.nodes[mid + 1];
-    a.x += nrm.x * val; a.y += nrm.y * val;
-    b.x += nrm.x * val; b.y += nrm.y * val;
-    sel.idx = mid;
-    endChange();
-    renderAll(); renderSidebar();
-    $('status-hint').textContent = `Edge protruded ${val > 0 ? 'outward' : 'inward'} by ${fmt(Math.abs(val))} cm`;
-  });
-  $('sp-seg-slide-btn').addEventListener('click', () => {
-    const p = selPiece();
-    const val = parseFloat($('sp-seg-off').value) || 0;
-    if (!p || !val) return;
-    if (sel.kind === 'segs' && sel.segs.length) {
-      const vecs = segsOffsetVectors(p, sel.segs);
+      setSegSelection(p, mids.map((m, j) => m + 2 * (order.length - 1 - j)).sort((x, y) => x - y));
+      $('status-hint').textContent =
+        `${order.length} edge${order.length > 1 ? 's' : ''} protruded ${val > 0 ? 'outward' : 'inward'} by ${fmt(Math.abs(val))} cm`;
+    } else {
+      const vecs = segsOffsetVectors(p, segs);
       beginChange();
       for (const [k, v] of vecs) {
         const nd = p.path.nodes[k];
         nd.x += v.x * val; nd.y += v.y * val;
       }
       endChange();
-      renderAll();
-      $('status-hint').textContent = `${sel.segs.length} edges slid ${val > 0 ? 'outward' : 'inward'} by ${fmt(Math.abs(val))} cm`;
-      return;
+      $('status-hint').textContent =
+        `${segs.length} edge${segs.length > 1 ? 's' : ''} slid ${val > 0 ? 'outward' : 'inward'} by ${fmt(Math.abs(val))} cm`;
     }
-    if (sel.kind !== 'seg' || sel.idx >= p.path.nodes.length) return;
-    const nrm = segOffsetNormal(p, sel.idx);
-    const n = p.path.nodes.length;
-    const a = p.path.nodes[sel.idx], b = p.path.nodes[(sel.idx + 1) % n];
-    beginChange();
-    a.x += nrm.x * val; a.y += nrm.y * val;
-    if (b !== a) { b.x += nrm.x * val; b.y += nrm.y * val; }
-    endChange();
-    renderAll();
-    $('status-hint').textContent = `Edge slid ${val > 0 ? 'outward' : 'inward'} by ${fmt(Math.abs(val))} cm`;
+    renderAll(); renderSidebar();
+  });
+  $('of-mode').addEventListener('change', () => {
+    const m = $('of-mode').value;
+    if (m !== 'guide') insetChain = null;
+    if (m === 'guide') { sel.kind = null; sel.idx = -1; }
+    $('of-hint').textContent = m === 'slide'
+      ? 'Moves the selected edges along their normals (+ out, − in), mitred where two share a corner; neighbouring edges stretch to follow.'
+      : m === 'extrude'
+        ? 'Extrudes each selected edge into a tab (+ out) or recess (− in) — its corners stay put and straight side walls form.'
+        : 'Scribes a dashed guide line inset from the picked edges (mitred runs; click inside a piece for a full ring). Exports to MARK — use the Stitch tool on it for holes.';
+    renderAll(true);
+    $('status-hint').textContent = HINTS.offset;
+  });
+  $('of-dist').addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter') { $('of-apply').click(); ev.preventDefault(); }
+    ev.stopPropagation();
   });
   // typing exact coordinates for the selected point
   for (const key of ['x', 'y']) {
