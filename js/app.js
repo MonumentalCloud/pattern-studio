@@ -492,7 +492,7 @@
       if (slitCount) $('sp-clear-slits').textContent = `Remove ${slitCount} stitch hole${slitCount > 1 ? 's' : ''}`;
       $('sel-hint').textContent = piece.foldSeg === sel.idx
         ? 'This edge is the fold — the piece unfolds across it on export.'
-        : 'Drag the edge to push it outward/inward · type a length to resize (● = start) · double-click inserts a point · right-click divides.';
+        : 'Drag the edge to protrude it into a tab (Alt-drag slides the edge instead) · type a length to resize (● = start) · double-click inserts a point · right-click divides.';
     }
   }
 
@@ -694,20 +694,48 @@
     }
     if (drag.type === 'seg') {
       const piece = pieceById(drag.pieceId);
-      const n = piece.path.nodes.length;
-      const a = piece.path.nodes[drag.idx], b = piece.path.nodes[(drag.idx + 1) % n];
       const raw = Geo.dot(Geo.sub(w, drag.start), drag.n);
       const s = snapOn() ? snapStep() : 0.0001;
       const off = Math.round(raw / s) * s;
-      const d = off - drag.applied;
-      if (d) {
-        a.x += drag.n.x * d; a.y += drag.n.y * d;
-        if (b !== a) { b.x += drag.n.x * d; b.y += drag.n.y * d; }
-        drag.applied = off;
-        renderAll(true);
+      if (drag.mode === 'extrude') {
+        if (off && !drag.inserted) {
+          drag.idx = extrudeSeg(piece, drag.idx);
+          drag.inserted = true;
+          drag.applied = 0;
+          sel.idx = drag.idx;
+        }
+        if (drag.inserted) {
+          const n = piece.path.nodes.length;
+          const a = piece.path.nodes[drag.idx], b = piece.path.nodes[(drag.idx + 1) % n];
+          const d = off - drag.applied;
+          if (d) {
+            a.x += drag.n.x * d; a.y += drag.n.y * d;
+            b.x += drag.n.x * d; b.y += drag.n.y * d;
+            drag.applied = off;
+            renderAll(true);
+          }
+          if (!off) { // dragged back to flat — take the extra corners out again
+            drag.idx = collapseExtrude(piece, drag.idx);
+            drag.inserted = false;
+            sel.idx = drag.idx;
+            renderAll(true);
+          }
+        }
+      } else {
+        const n = piece.path.nodes.length;
+        const a = piece.path.nodes[drag.idx], b = piece.path.nodes[(drag.idx + 1) % n];
+        const d = off - drag.applied;
+        if (d) {
+          a.x += drag.n.x * d; a.y += drag.n.y * d;
+          if (b !== a) { b.x += drag.n.x * d; b.y += drag.n.y * d; }
+          drag.applied = off;
+          renderAll(true);
+        }
       }
       clear(gPreview);
       if (Math.abs(off) > 1e-9) {
+        const n = piece.path.nodes.length;
+        const a = piece.path.nodes[drag.idx], b = piece.path.nodes[(drag.idx + 1) % n];
         const mid = Geo.segPoint(a, b, 0.5);
         el('text', {
           class: 'measure-text', x: mid.x, y: mid.y - px(12),
@@ -1091,6 +1119,35 @@
     }
   }
 
+  // extrude an edge: its endpoints stay as corners, a duplicated pair carries
+  // the edge (curve included) outward — straight side walls form a tab/recess
+  function extrudeSeg(piece, i) {
+    const nodes = piece.path.nodes;
+    const a = nodes[i], b = nodes[(i + 1) % nodes.length];
+    const a2 = { x: a.x, y: a.y, hin: null, hout: a.hout ? { ...a.hout } : null };
+    const b2 = { x: b.x, y: b.y, hin: b.hin ? { ...b.hin } : null, hout: null };
+    a.hout = null; b.hin = null;
+    nodes.splice(i + 1, 0, a2, b2);
+    const remap = (m) => { if (m.seg === i) m.seg = i + 1; else if (m.seg > i) m.seg += 2; };
+    for (const nt of piece.notches || []) remap(nt);
+    for (const sl of piece.stitchSlits || []) remap(sl);
+    if (piece.foldSeg != null) { const m = { seg: piece.foldSeg }; remap(m); piece.foldSeg = m.seg; }
+    return i + 1; // index of the protruding edge
+  }
+  function collapseExtrude(piece, mid) { // inverse, only while the offset is back at 0
+    const nodes = piece.path.nodes;
+    const a2 = nodes[mid], b2 = nodes[mid + 1];
+    const a = nodes[mid - 1], b = nodes[(mid + 2) % nodes.length];
+    a.hout = a2.hout; b.hin = b2.hin;
+    nodes.splice(mid, 2);
+    const i = mid - 1;
+    const remap = (m) => { if (m.seg === mid) m.seg = i; else if (m.seg > mid) m.seg -= 2; };
+    for (const nt of piece.notches || []) remap(nt);
+    for (const sl of piece.stitchSlits || []) remap(sl);
+    if (piece.foldSeg != null) { const m = { seg: piece.foldSeg }; remap(m); piece.foldSeg = m.seg; }
+    return i;
+  }
+
   function movePiece(piece, dx, dy) {
     for (const nd of piece.path.nodes) { nd.x += dx; nd.y += dy; }
     for (const h of piece.holes || []) { h.x += dx; h.y += dy; }
@@ -1151,8 +1208,9 @@
       if (sli >= 0) { sel.kind = 'slit'; sel.idx = sli; renderAll(true); renderSidebar(); return; }
       const hi = (piece.holes || []).findIndex((h) => Geo.dist(h, w) < px(8));
       if (hi >= 0) { sel.kind = 'hole'; sel.idx = hi; renderAll(true); renderSidebar(); return; }
-      // 3. segment of the selected piece — dragging it pushes the edge along
-      // its normal (outward / inward), stretching the neighbouring edges
+      // 3. segment of the selected piece — dragging it protrudes the edge
+      // along its normal (a tab / recess with straight side walls);
+      // Alt-drag slides the edge instead, stretching the neighbouring edges
       const hit = Geo.nearestOnPath(piece.path.nodes, piece.path.closed, w);
       if (hit && hit.dist < px(6)) {
         sel.kind = 'seg'; sel.idx = hit.seg; sel.nodes = [];
@@ -1163,6 +1221,7 @@
         beginChange();
         drag = {
           type: 'seg', pieceId: piece.id, idx: hit.seg,
+          mode: ev.altKey ? 'slide' : 'extrude', inserted: false,
           start: w, applied: 0, n: { x: os * tan.y, y: -os * tan.x },
         };
         renderAll(true); renderSidebar();
@@ -2943,22 +3002,43 @@
     endChange();
     renderAll();
   });
+  function segOffsetNormal(p, i) {
+    const n = p.path.nodes.length;
+    const a = p.path.nodes[i], b = p.path.nodes[(i + 1) % n];
+    const tan = Geo.segTangent(a, b, 0.5);
+    const os = p.path.closed ? Geo.outwardSign(Geo.pathPolyline(p.path.nodes, true, 0.1)) : 1;
+    return { x: os * tan.y, y: -os * tan.x };
+  }
   $('sp-seg-off-btn').addEventListener('click', () => {
     const p = selPiece();
     if (!p || sel.kind !== 'seg' || sel.idx >= p.path.nodes.length) return;
     const val = parseFloat($('sp-seg-off').value) || 0;
     if (!val) return;
+    const nrm = segOffsetNormal(p, sel.idx);
+    beginChange();
+    const mid = extrudeSeg(p, sel.idx);
+    const a = p.path.nodes[mid], b = p.path.nodes[mid + 1];
+    a.x += nrm.x * val; a.y += nrm.y * val;
+    b.x += nrm.x * val; b.y += nrm.y * val;
+    sel.idx = mid;
+    endChange();
+    renderAll(); renderSidebar();
+    $('status-hint').textContent = `Edge protruded ${val > 0 ? 'outward' : 'inward'} by ${fmt(Math.abs(val))} cm`;
+  });
+  $('sp-seg-slide-btn').addEventListener('click', () => {
+    const p = selPiece();
+    if (!p || sel.kind !== 'seg' || sel.idx >= p.path.nodes.length) return;
+    const val = parseFloat($('sp-seg-off').value) || 0;
+    if (!val) return;
+    const nrm = segOffsetNormal(p, sel.idx);
     const n = p.path.nodes.length;
     const a = p.path.nodes[sel.idx], b = p.path.nodes[(sel.idx + 1) % n];
-    const tan = Geo.segTangent(a, b, 0.5);
-    const os = p.path.closed ? Geo.outwardSign(Geo.pathPolyline(p.path.nodes, true, 0.1)) : 1;
-    const nx = os * tan.y, ny = -os * tan.x;
     beginChange();
-    a.x += nx * val; a.y += ny * val;
-    if (b !== a) { b.x += nx * val; b.y += ny * val; }
+    a.x += nrm.x * val; a.y += nrm.y * val;
+    if (b !== a) { b.x += nrm.x * val; b.y += nrm.y * val; }
     endChange();
     renderAll();
-    $('status-hint').textContent = `Edge offset ${val > 0 ? 'outward' : 'inward'} by ${fmt(Math.abs(val))} cm`;
+    $('status-hint').textContent = `Edge slid ${val > 0 ? 'outward' : 'inward'} by ${fmt(Math.abs(val))} cm`;
   });
   $('sp-fold').addEventListener('click', () => {
     const p = selPiece();
