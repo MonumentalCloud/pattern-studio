@@ -463,6 +463,7 @@
     $('sel-handle-row').hidden = true;
     $('sel-seg-row').hidden = !showSeg;
     $('sel-seg-anchor-row').hidden = !showSeg;
+    $('sel-offset-row').hidden = !showSeg;
     $('sel-fold-row').hidden = !showSeg;
     $('sel-clear-slits-row').hidden = true;
     if (showNode) {
@@ -491,7 +492,7 @@
       if (slitCount) $('sp-clear-slits').textContent = `Remove ${slitCount} stitch hole${slitCount > 1 ? 's' : ''}`;
       $('sel-hint').textContent = piece.foldSeg === sel.idx
         ? 'This edge is the fold — the piece unfolds across it on export.'
-        : 'Type a length to resize the edge — ● marks its start. Double-click inserts a point · right-click divides by measurement.';
+        : 'Drag the edge to push it outward/inward · type a length to resize (● = start) · double-click inserts a point · right-click divides.';
     }
   }
 
@@ -689,6 +690,30 @@
       const nd = pieceById(drag.pieceId).path.nodes[drag.idx];
       nd.x = p.x; nd.y = p.y;
       renderAll(true); renderSidebar();
+      return;
+    }
+    if (drag.type === 'seg') {
+      const piece = pieceById(drag.pieceId);
+      const n = piece.path.nodes.length;
+      const a = piece.path.nodes[drag.idx], b = piece.path.nodes[(drag.idx + 1) % n];
+      const raw = Geo.dot(Geo.sub(w, drag.start), drag.n);
+      const s = snapOn() ? snapStep() : 0.0001;
+      const off = Math.round(raw / s) * s;
+      const d = off - drag.applied;
+      if (d) {
+        a.x += drag.n.x * d; a.y += drag.n.y * d;
+        if (b !== a) { b.x += drag.n.x * d; b.y += drag.n.y * d; }
+        drag.applied = off;
+        renderAll(true);
+      }
+      clear(gPreview);
+      if (Math.abs(off) > 1e-9) {
+        const mid = Geo.segPoint(a, b, 0.5);
+        el('text', {
+          class: 'measure-text', x: mid.x, y: mid.y - px(12),
+          'font-size': px(12), 'text-anchor': 'middle',
+        }, gPreview).textContent = (off > 0 ? '+' : '') + fmt(off) + ' cm';
+      }
       return;
     }
     if (drag.type === 'nodes') {
@@ -944,7 +969,8 @@
         }
         renderAll(true); renderSidebar();
       }
-      if (['node', 'nodes', 'handle', 'piece'].includes(drag.type)) { endChange(); renderSidebar(); }
+      if (drag.type === 'seg') clear(gPreview);
+      if (['node', 'nodes', 'handle', 'piece', 'seg'].includes(drag.type)) { endChange(); renderSidebar(); }
       if (drag.type === 'pen-handle') renderPenPreview();
       drag = null;
       return;
@@ -1125,10 +1151,20 @@
       if (sli >= 0) { sel.kind = 'slit'; sel.idx = sli; renderAll(true); renderSidebar(); return; }
       const hi = (piece.holes || []).findIndex((h) => Geo.dist(h, w) < px(8));
       if (hi >= 0) { sel.kind = 'hole'; sel.idx = hi; renderAll(true); renderSidebar(); return; }
-      // 3. segment of the selected piece
+      // 3. segment of the selected piece — dragging it pushes the edge along
+      // its normal (outward / inward), stretching the neighbouring edges
       const hit = Geo.nearestOnPath(piece.path.nodes, piece.path.closed, w);
       if (hit && hit.dist < px(6)) {
-        sel.kind = 'seg'; sel.idx = hit.seg;
+        sel.kind = 'seg'; sel.idx = hit.seg; sel.nodes = [];
+        const nn = piece.path.nodes.length;
+        const sa2 = piece.path.nodes[hit.seg], sb2 = piece.path.nodes[(hit.seg + 1) % nn];
+        const tan = Geo.segTangent(sa2, sb2, 0.5);
+        const os = piece.path.closed ? Geo.outwardSign(Geo.pathPolyline(piece.path.nodes, true, 0.1)) : 1;
+        beginChange();
+        drag = {
+          type: 'seg', pieceId: piece.id, idx: hit.seg,
+          start: w, applied: 0, n: { x: os * tan.y, y: -os * tan.x },
+        };
         renderAll(true); renderSidebar();
         return;
       }
@@ -2906,6 +2942,23 @@
     p.stitchSlits = p.guide ? [] : (p.stitchSlits || []).filter((sl) => sl.seg !== sel.idx);
     endChange();
     renderAll();
+  });
+  $('sp-seg-off-btn').addEventListener('click', () => {
+    const p = selPiece();
+    if (!p || sel.kind !== 'seg' || sel.idx >= p.path.nodes.length) return;
+    const val = parseFloat($('sp-seg-off').value) || 0;
+    if (!val) return;
+    const n = p.path.nodes.length;
+    const a = p.path.nodes[sel.idx], b = p.path.nodes[(sel.idx + 1) % n];
+    const tan = Geo.segTangent(a, b, 0.5);
+    const os = p.path.closed ? Geo.outwardSign(Geo.pathPolyline(p.path.nodes, true, 0.1)) : 1;
+    const nx = os * tan.y, ny = -os * tan.x;
+    beginChange();
+    a.x += nx * val; a.y += ny * val;
+    if (b !== a) { b.x += nx * val; b.y += ny * val; }
+    endChange();
+    renderAll();
+    $('status-hint').textContent = `Edge offset ${val > 0 ? 'outward' : 'inward'} by ${fmt(Math.abs(val))} cm`;
   });
   $('sp-fold').addEventListener('click', () => {
     const p = selPiece();
