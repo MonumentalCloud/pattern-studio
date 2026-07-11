@@ -358,6 +358,14 @@
     const n = nodes.length;
     const r = px(4);
 
+    // multi-edge selection highlight
+    if (sel.kind === 'segs') {
+      for (const i of sel.segs) {
+        if (i >= (piece.path.closed ? n : n - 1)) continue;
+        el('path', { class: 'seg-highlight', d: segD(nodes[i], nodes[(i + 1) % n]) }, gOverlay);
+      }
+    }
+
     // selected segment highlight + length
     if (sel.kind === 'seg' && sel.idx < (piece.path.closed ? n : n - 1)) {
       const a = nodes[sel.idx], b = nodes[(sel.idx + 1) % n];
@@ -457,13 +465,14 @@
     // selection props
     const showNode = piece && sel.kind === 'node' && piece.path.nodes[sel.idx];
     const showSeg = piece && sel.kind === 'seg';
-    $('sel-props').hidden = !(showNode || showSeg);
+    const showSegs = piece && sel.kind === 'segs' && sel.segs && sel.segs.length > 0;
+    $('sel-props').hidden = !(showNode || showSeg || showSegs);
     $('sel-node-row').hidden = !showNode;
     $('sel-round-row').hidden = !showNode;
     $('sel-handle-row').hidden = true;
     $('sel-seg-row').hidden = !showSeg;
     $('sel-seg-anchor-row').hidden = !showSeg;
-    $('sel-offset-row').hidden = !showSeg;
+    $('sel-offset-row').hidden = !(showSeg || showSegs);
     $('sel-fold-row').hidden = !showSeg;
     $('sel-clear-slits-row').hidden = true;
     if (showNode) {
@@ -492,7 +501,10 @@
       if (slitCount) $('sp-clear-slits').textContent = `Remove ${slitCount} stitch hole${slitCount > 1 ? 's' : ''}`;
       $('sel-hint').textContent = piece.foldSeg === sel.idx
         ? 'This edge is the fold — the piece unfolds across it on export.'
-        : 'Drag the edge to slide it outward/inward · Alt-drag protrudes it into a tab · type a length to resize (● = start) · double-click inserts a point · right-click divides.';
+        : 'Drag the edge to slide it outward/inward · Alt-drag protrudes it into a tab · Shift-click more edges to outset several at once · type a length to resize (● = start) · double-click inserts a point · right-click divides.';
+    } else if (showSegs) {
+      $('sel-hint').textContent =
+        `${sel.segs.length} edges selected — drag one (or Offset ▸ Slide) to outset/inset them together, mitred at shared corners · Protrude tabs each edge · Shift-click adds/removes edges.`;
     }
   }
 
@@ -690,6 +702,32 @@
       const nd = pieceById(drag.pieceId).path.nodes[drag.idx];
       nd.x = p.x; nd.y = p.y;
       renderAll(true); renderSidebar();
+      return;
+    }
+    if (drag.type === 'segs') {
+      const piece = pieceById(drag.pieceId);
+      const raw = Geo.dot(Geo.sub(w, drag.start), drag.n);
+      const s = snapOn() ? snapStep() : 0.0001;
+      const off = Math.round(raw / s) * s;
+      if (off !== drag.applied) {
+        for (const [k, v] of drag.vecs) {
+          const nd = piece.path.nodes[k];
+          nd.x = drag.orig[k].x + v.x * off;
+          nd.y = drag.orig[k].y + v.y * off;
+        }
+        drag.applied = off;
+        renderAll(true);
+      }
+      clear(gPreview);
+      if (Math.abs(off) > 1e-9) {
+        const n = piece.path.nodes.length;
+        const a = piece.path.nodes[drag.idx], b = piece.path.nodes[(drag.idx + 1) % n];
+        const mid = Geo.segPoint(a, b, 0.5);
+        el('text', {
+          class: 'measure-text', x: mid.x, y: mid.y - px(12),
+          'font-size': px(12), 'text-anchor': 'middle',
+        }, gPreview).textContent = (off > 0 ? '+' : '') + fmt(off) + ' cm';
+      }
       return;
     }
     if (drag.type === 'seg') {
@@ -997,8 +1035,8 @@
         }
         renderAll(true); renderSidebar();
       }
-      if (drag.type === 'seg') clear(gPreview);
-      if (['node', 'nodes', 'handle', 'piece', 'seg'].includes(drag.type)) { endChange(); renderSidebar(); }
+      if (drag.type === 'seg' || drag.type === 'segs') clear(gPreview);
+      if (['node', 'nodes', 'handle', 'piece', 'seg', 'segs'].includes(drag.type)) { endChange(); renderSidebar(); }
       if (drag.type === 'pen-handle') renderPenPreview();
       drag = null;
       return;
@@ -1148,6 +1186,41 @@
     return i;
   }
 
+  // per-node displacement (per unit of outward offset) for sliding a set of
+  // edges together — mitred where two selected edges share a corner, so a
+  // contiguous run outsets like a true offset instead of tearing apart
+  function segsOffsetVectors(piece, segs) {
+    const nodes = piece.path.nodes;
+    const n = nodes.length;
+    const closed = piece.path.closed;
+    const os = closed ? Geo.outwardSign(Geo.pathPolyline(nodes, closed, 0.1)) : 1;
+    const segNormal = (i) => {
+      const t = Geo.segTangent(nodes[i], nodes[(i + 1) % n], 0.5);
+      return { x: os * t.y, y: -os * t.x };
+    };
+    const set = new Set(segs);
+    const vecs = new Map(); // node index -> unit-offset displacement
+    for (const i of set) {
+      for (const k of [i, (i + 1) % n]) {
+        if (vecs.has(k)) continue;
+        const inS = k > 0 ? k - 1 : (closed ? n - 1 : -1);
+        const outS = (closed || k < n - 1) ? k : -1;
+        const hasIn = inS >= 0 && set.has(inS);
+        const hasOut = outS >= 0 && set.has(outS);
+        let v;
+        if (hasIn && hasOut) {
+          const a = segNormal(inS), b = segNormal(outS);
+          const dot = Math.max(-0.99, a.x * b.x + a.y * b.y); // clamp hairpin corners
+          v = { x: (a.x + b.x) / (1 + dot), y: (a.y + b.y) / (1 + dot) };
+        } else {
+          v = segNormal(hasIn ? inS : outS);
+        }
+        vecs.set(k, v);
+      }
+    }
+    return vecs;
+  }
+
   function movePiece(piece, dx, dy) {
     for (const nd of piece.path.nodes) { nd.x += dx; nd.y += dy; }
     for (const h of piece.holes || []) { h.x += dx; h.y += dy; }
@@ -1213,8 +1286,36 @@
       // Alt-drag protrudes it instead (a tab / recess with straight walls)
       const hit = Geo.nearestOnPath(piece.path.nodes, piece.path.closed, w);
       if (hit && hit.dist < px(6)) {
-        sel.kind = 'seg'; sel.idx = hit.seg; sel.nodes = [];
         const nn = piece.path.nodes.length;
+        if (ev.shiftKey) {
+          // Shift-click: toggle the edge in a multi-edge selection
+          const set = new Set(sel.kind === 'segs' ? sel.segs
+            : (sel.kind === 'seg' ? [sel.idx] : []));
+          if (set.has(hit.seg)) set.delete(hit.seg); else set.add(hit.seg);
+          const segs = [...set].sort((x, y) => x - y);
+          if (!segs.length) { sel.kind = null; sel.idx = -1; }
+          else if (segs.length === 1) { sel.kind = 'seg'; sel.idx = segs[0]; }
+          else { sel.kind = 'segs'; sel.segs = segs; sel.idx = -1; }
+          sel.nodes = [];
+          renderAll(true); renderSidebar();
+          return;
+        }
+        if (sel.kind === 'segs' && sel.segs.includes(hit.seg)) {
+          // drag any edge of the set: outset / inset them all together
+          const tan = Geo.segTangent(piece.path.nodes[hit.seg], piece.path.nodes[(hit.seg + 1) % nn], 0.5);
+          const os = piece.path.closed ? Geo.outwardSign(Geo.pathPolyline(piece.path.nodes, true, 0.1)) : 1;
+          const vecs = segsOffsetVectors(piece, sel.segs);
+          const orig = {};
+          for (const k of vecs.keys()) orig[k] = { x: piece.path.nodes[k].x, y: piece.path.nodes[k].y };
+          beginChange();
+          drag = {
+            type: 'segs', pieceId: piece.id, idx: hit.seg, start: w, applied: 0,
+            n: { x: os * tan.y, y: -os * tan.x }, vecs, orig,
+          };
+          renderAll(true); renderSidebar();
+          return;
+        }
+        sel.kind = 'seg'; sel.idx = hit.seg; sel.nodes = [];
         const sa2 = piece.path.nodes[hit.seg], sb2 = piece.path.nodes[(hit.seg + 1) % nn];
         const tan = Geo.segTangent(sa2, sb2, 0.5);
         const os = piece.path.closed ? Geo.outwardSign(Geo.pathPolyline(piece.path.nodes, true, 0.1)) : 1;
@@ -2366,6 +2467,14 @@
       const a = piece.path.nodes[sel.idx], b = piece.path.nodes[(sel.idx + 1) % n];
       a.x += dx; a.y += dy;
       if (b !== a) { b.x += dx; b.y += dy; }
+    } else if (sel.kind === 'segs' && sel.segs && sel.segs.length) {
+      const n = piece.path.nodes.length;
+      const ks = new Set();
+      for (const i of sel.segs) { ks.add(i); ks.add((i + 1) % n); }
+      for (const k of ks) {
+        const nd = piece.path.nodes[k];
+        if (nd) { nd.x += dx; nd.y += dy; }
+      }
     } else if (sel.kind === 'hole' && piece.holes && piece.holes[sel.idx]) {
       piece.holes[sel.idx].x += dx;
       piece.holes[sel.idx].y += dy;
@@ -3011,9 +3120,29 @@
   }
   $('sp-seg-off-btn').addEventListener('click', () => {
     const p = selPiece();
-    if (!p || sel.kind !== 'seg' || sel.idx >= p.path.nodes.length) return;
     const val = parseFloat($('sp-seg-off').value) || 0;
-    if (!val) return;
+    if (!p || !val) return;
+    if (sel.kind === 'segs' && sel.segs.length) {
+      // extrude each selected edge; descending order keeps lower indices valid
+      beginChange();
+      const order = sel.segs.slice().sort((x, y) => y - x);
+      const mids = [];
+      for (const i of order) {
+        const nrm = segOffsetNormal(p, i);
+        const mid = extrudeSeg(p, i);
+        const a = p.path.nodes[mid], b = p.path.nodes[mid + 1];
+        a.x += nrm.x * val; a.y += nrm.y * val;
+        b.x += nrm.x * val; b.y += nrm.y * val;
+        mids.push(mid);
+      }
+      endChange();
+      // every later (lower-index) extrusion shifted the earlier mids by +2
+      sel.segs = mids.map((m, j) => m + 2 * (order.length - 1 - j)).sort((x, y) => x - y);
+      renderAll(); renderSidebar();
+      $('status-hint').textContent = `${order.length} edges protruded ${val > 0 ? 'outward' : 'inward'} by ${fmt(Math.abs(val))} cm`;
+      return;
+    }
+    if (sel.kind !== 'seg' || sel.idx >= p.path.nodes.length) return;
     const nrm = segOffsetNormal(p, sel.idx);
     beginChange();
     const mid = extrudeSeg(p, sel.idx);
@@ -3027,9 +3156,21 @@
   });
   $('sp-seg-slide-btn').addEventListener('click', () => {
     const p = selPiece();
-    if (!p || sel.kind !== 'seg' || sel.idx >= p.path.nodes.length) return;
     const val = parseFloat($('sp-seg-off').value) || 0;
-    if (!val) return;
+    if (!p || !val) return;
+    if (sel.kind === 'segs' && sel.segs.length) {
+      const vecs = segsOffsetVectors(p, sel.segs);
+      beginChange();
+      for (const [k, v] of vecs) {
+        const nd = p.path.nodes[k];
+        nd.x += v.x * val; nd.y += v.y * val;
+      }
+      endChange();
+      renderAll();
+      $('status-hint').textContent = `${sel.segs.length} edges slid ${val > 0 ? 'outward' : 'inward'} by ${fmt(Math.abs(val))} cm`;
+      return;
+    }
+    if (sel.kind !== 'seg' || sel.idx >= p.path.nodes.length) return;
     const nrm = segOffsetNormal(p, sel.idx);
     const n = p.path.nodes.length;
     const a = p.path.nodes[sel.idx], b = p.path.nodes[(sel.idx + 1) % n];
