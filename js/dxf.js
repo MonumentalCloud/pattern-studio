@@ -121,6 +121,7 @@
     }
     const stitchSlits = [];
     for (const sl of piece.stitchSlits || []) {
+      if (sl.cut != null) { stitchSlits.push(sl); continue; } // rides its cutout as-is
       const s1 = res.segMapA[sl.seg];
       if (s1 != null) stitchSlits.push(Object.assign({}, sl, { seg: s1 }));
       const s2 = res.segMapB[sl.seg];
@@ -217,11 +218,23 @@
       out.polylines.push({ layer: 'CUT', pts: Geo.dedupe(Geo.pathPolyline(c.nodes, true, FLATTEN_TOL_CM)), closed: true });
     }
 
-    // stitching slits: diagonal cuts on (or inset from) the stitch line
+    // stitching slits: diagonal cuts on (or inset from) the stitch line —
+    // outline-anchored, or around an internal cutout (sign flips so a
+    // positive inset lands in the material, away from the hole)
     const outS = closed ? Geo.outwardSign(seamPts) : 1;
+    const cutSign = {};
     for (const sl of piece.stitchSlits || []) {
-      if (sl.seg >= nodes.length) continue;
-      const line = Geo.slitLine(nodes[sl.seg], nodes[(sl.seg + 1) % nodes.length], sl, outS);
+      let nds = nodes, oS = outS;
+      if (sl.cut != null) {
+        const c = (piece.cutouts || [])[sl.cut];
+        if (!c || sl.seg >= c.nodes.length) continue;
+        nds = c.nodes;
+        if (cutSign[sl.cut] === undefined) {
+          cutSign[sl.cut] = -Geo.outwardSign(Geo.pathPolyline(c.nodes, true, 0.1));
+        }
+        oS = cutSign[sl.cut];
+      } else if (sl.seg >= nodes.length) continue;
+      const line = Geo.slitLine(nds[sl.seg], nds[(sl.seg + 1) % nds.length], sl, oS);
       out.lines.push({ layer: 'CUT', a: line.a, b: line.b });
     }
 

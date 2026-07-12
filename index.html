@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pattern Studio</title>
-<link rel="stylesheet" href="style.css?v=46">
+<link rel="stylesheet" href="style.css?v=47">
 </head>
 <body>
 <div id="app">
   <header id="topbar">
-    <span id="logo" title="build 46">✂ Pattern Studio</span>
+    <span id="logo" title="build 47">✂ Pattern Studio</span>
     <input id="doc-name" type="text" value="Untitled pattern" spellcheck="false" title="Pattern name">
     <span class="sep"></span>
     <button id="btn-new" title="New document">New</button>
@@ -139,6 +139,11 @@
           <label>Scale</label>
           <input id="pp-scale" type="number" step="1" min="1" value="100" title="Resize the piece — or every marquee-selected piece — about their shared centre"> <em>%</em>
           <button id="pp-scale-btn" title="Scales the outline, curves, holes and cutouts; stitch slit sizes stay as set (Enter applies)">Apply</button>
+        </div>
+        <div class="row">
+          <label>Rotate</label>
+          <input id="pp-rot" type="number" step="1" value="0" title="Degrees — positive turns counter-clockwise, like the pen angles"> <em>°</em>
+          <button id="pp-rot-btn" title="Rotate the piece (or every marquee-selected piece) about their shared centre (Enter applies); or drag the round handle above the selection">Apply</button>
         </div>
         <div class="row">
           <label>Inset copy</label>
@@ -289,9 +294,9 @@
   </div>
 </div>
 <input id="file-input" type="file" accept=".json,.dxf,application/json" hidden>
-<script src="js/geometry.js?v=46"></script>
-<script src="js/dxf.js?v=46"></script>
-<script src="js/dxfimport.js?v=46"></script>
-<script src="js/app.js?v=46"></script>
+<script src="js/geometry.js?v=47"></script>
+<script src="js/dxf.js?v=47"></script>
+<script src="js/dxfimport.js?v=47"></script>
+<script src="js/app.js?v=47"></script>
 </body>
 </html>

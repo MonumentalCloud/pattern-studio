@@ -215,6 +215,27 @@
     return out;
   }
 
+  // where a slit lives: the piece outline, or one of its internal cutouts
+  // (sl.cut). For cutouts the outward sign flips, so a positive Inset pushes
+  // the hole INTO the material — away from the hole's edge.
+  function slitContext(piece, sl) {
+    if (sl.cut != null) {
+      const c = (piece.cutouts || [])[sl.cut];
+      if (!c || !c.nodes || sl.seg >= c.nodes.length) return null;
+      return { nodes: c.nodes, outS: -Geo.outwardSign(Geo.pathPolyline(c.nodes, true, 0.1)) };
+    }
+    if (sl.seg >= piece.path.nodes.length) return null;
+    return {
+      nodes: piece.path.nodes,
+      outS: piece.path.closed ? Geo.outwardSign(Geo.pathPolyline(piece.path.nodes, true, 0.1)) : 1,
+    };
+  }
+  function slitLineFor(piece, sl) {
+    const ctx = slitContext(piece, sl);
+    if (!ctx) return null;
+    return Geo.slitLine(ctx.nodes[sl.seg], ctx.nodes[(sl.seg + 1) % ctx.nodes.length], sl, ctx.outS);
+  }
+
   function drawAlignGuides(group) {
     for (const g2 of alignGuides) {
       el('line', { class: 'align-guide', x1: g2.x1, y1: g2.y1, x2: g2.x2, y2: g2.y2 }, group);
@@ -320,12 +341,23 @@
         }
       }
 
-      // stitching slits
+      // stitching slits (outline runs and internal-cutout runs)
       if ((rp.stitchSlits || []).length) {
         const outS = closed && seamPts && seamPts.length > 2 ? Geo.outwardSign(seamPts) : 1;
+        const cutS = {}; // outward sign per cutout, cached
         for (const sl of rp.stitchSlits) {
-          if (sl.seg >= nodes.length) continue;
-          const ln = Geo.slitLine(nodes[sl.seg], nodes[(sl.seg + 1) % nodes.length], sl, outS);
+          let ln;
+          if (sl.cut != null) {
+            const c = (rp.cutouts || [])[sl.cut];
+            if (!c || sl.seg >= c.nodes.length) continue;
+            if (cutS[sl.cut] === undefined) {
+              cutS[sl.cut] = -Geo.outwardSign(Geo.pathPolyline(c.nodes, true, 0.1));
+            }
+            ln = Geo.slitLine(c.nodes[sl.seg], c.nodes[(sl.seg + 1) % c.nodes.length], sl, cutS[sl.cut]);
+          } else {
+            if (sl.seg >= nodes.length) continue;
+            ln = Geo.slitLine(nodes[sl.seg], nodes[(sl.seg + 1) % nodes.length], sl, outS);
+          }
           el('line', { class: 'piece-slit', x1: ln.a.x, y1: ln.a.y, x2: ln.b.x, y2: ln.b.y }, g);
         }
       }
@@ -375,27 +407,27 @@
     clear(gOverlay);
     drawAlignGuides(gOverlay);
     // first edge picked with the weld / stitch tool
+    const stitchTargetD = (tp, tg) => {
+      if (tg.cut != null) {
+        const c = (tp.cutouts || [])[tg.cut];
+        return c && c.nodes.length > 2 ? pathD(c.nodes, true) : null;
+      }
+      if (tp.guide) return pathD(tp.path.nodes, tp.path.closed);
+      if (tg.seg >= tp.path.nodes.length) return null;
+      const tn = tp.path.nodes;
+      return segD(tn[tg.seg], tn[(tg.seg + 1) % tn.length]);
+    };
     const firstPick = (tool === 'weld' && weldFirst) || (tool === 'stitch' && stitchFirst);
     if (firstPick) {
       const wp = pieceById(firstPick.pieceId);
-      if (wp && firstPick.seg < wp.path.nodes.length) {
-        const wn = wp.path.nodes;
-        el('path', {
-          class: 'seg-highlight weld',
-          // a guide gets stitched along its whole length — highlight all of it
-          d: wp.guide ? pathD(wn, wp.path.closed) : segD(wn[firstPick.seg], wn[(firstPick.seg + 1) % wn.length]),
-        }, gOverlay);
-      }
+      const d = wp && stitchTargetD(wp, firstPick);
+      if (d) el('path', { class: 'seg-highlight weld', d }, gOverlay);
     }
     if (tool === 'stitch' && stitchMulti.length) {
       for (const tg of stitchMulti) {
         const tp = pieceById(tg.pieceId);
-        if (!tp || (!tp.guide && tg.seg >= tp.path.nodes.length)) continue;
-        const tn = tp.path.nodes;
-        el('path', {
-          class: 'seg-highlight weld',
-          d: tp.guide ? pathD(tn, tp.path.closed) : segD(tn[tg.seg], tn[(tg.seg + 1) % tn.length]),
-        }, gOverlay);
+        const d = tp && stitchTargetD(tp, tg);
+        if (d) el('path', { class: 'seg-highlight weld', d }, gOverlay);
       }
     }
     // scale handles around the selected piece / marquee group
@@ -416,6 +448,11 @@
               x: c.x - r2, y: c.y - r2, width: 2 * r2, height: 2 * r2,
             }, gOverlay);
           }
+          el('line', {
+            class: 'scale-box',
+            x1: sh.rot.x, y1: sh.bb.minY, x2: sh.rot.x, y2: sh.rot.y,
+          }, gOverlay);
+          el('circle', { class: 'rotate-handle', cx: sh.rot.x, cy: sh.rot.y, r: px(5) }, gOverlay);
         }
       }
     }
@@ -464,12 +501,11 @@
 
     // selected stitch holes (single or set)
     if (sel.kind === 'slit' || (sel.kind === 'slits' && sel.slits)) {
-      const outS = piece.path.closed ? Geo.outwardSign(Geo.pathPolyline(nodes, true, 0.1)) : 1;
       const picked = sel.kind === 'slit' ? [sel.idx] : sel.slits;
       for (const i of picked) {
         const sl2 = (piece.stitchSlits || [])[i];
-        if (!sl2 || sl2.seg >= n) continue;
-        const ln = Geo.slitLine(nodes[sl2.seg], nodes[(sl2.seg + 1) % n], sl2, outS);
+        const ln = sl2 && slitLineFor(piece, sl2);
+        if (!ln) continue;
         const c = Geo.lerp(ln.a, ln.b, 0.5);
         el('circle', { class: 'snap-dot', cx: c.x, cy: c.y, r: px(5) }, gOverlay);
       }
@@ -554,7 +590,7 @@
     $('sel-props').hidden = !(showNode || showSeg || showSegs || showMove || slitSel || slitsSel);
     $('sel-del-run-row').hidden = !(slitSel || slitsSel);
     if (slitSel) {
-      const runOf = (sl) => (slitSel.run != null ? sl.run === slitSel.run : sl.seg === slitSel.seg);
+      const runOf = (sl) => (slitSel.run != null ? sl.run === slitSel.run : (sl.seg === slitSel.seg && sl.cut === slitSel.cut));
       const count = piece.stitchSlits.filter(runOf).length;
       $('sp-del-run').textContent = `Delete stitch line (${count} hole${count > 1 ? 's' : ''})`;
       $('sel-hint').textContent =
@@ -593,12 +629,12 @@
       // guides carry one run over the whole path — the button clears all of it
       const slitCount = piece.guide
         ? (piece.stitchSlits || []).length
-        : (piece.stitchSlits || []).filter((sl) => sl.seg === sel.idx).length;
+        : (piece.stitchSlits || []).filter((sl) => sl.cut == null && sl.seg === sel.idx).length;
       $('sel-clear-slits-row').hidden = !slitCount;
       if (slitCount) $('sp-clear-slits').textContent = `Remove ${slitCount} stitch hole${slitCount > 1 ? 's' : ''}`;
       // ...and the whole stitch line(s) touching this edge, corners included
       if (slitCount) {
-        const onEdge = (s2) => piece.guide || s2.seg === sel.idx;
+        const onEdge = (s2) => piece.guide || (s2.cut == null && s2.seg === sel.idx);
         const runsHere = new Set((piece.stitchSlits || []).filter(onEdge).map((s2) => s2.run).filter((r) => r != null));
         const runTotal = (piece.stitchSlits || []).filter((s2) =>
           (s2.run != null ? runsHere.has(s2.run) : onEdge(s2))).length;
@@ -613,7 +649,7 @@
         ? `${sel.segs.length} edges selected — drag one to apply the mode live, or type a distance and Apply.`
         : `${sel.segs.length} edges selected — drag one (or arrows / Move by) to move them together · Shift-click adds/removes · the Offset tool (O) slides/protrudes the set.`;
       // stitch holes across ALL selected edges delete together
-      const inSel = (s2) => piece.guide || sel.segs.includes(s2.seg);
+      const inSel = (s2) => piece.guide || (s2.cut == null && sel.segs.includes(s2.seg));
       const slitCount = (piece.stitchSlits || []).filter(inSel).length;
       $('sel-clear-slits-row').hidden = !slitCount;
       if (slitCount) {
@@ -650,7 +686,7 @@
     knife: 'Click two points to cut a piece in two (they snap to existing points) · or click an open path to cut along it · Esc cancels',
     round: 'Drag outward from a corner point — the drag distance sets the fillet radius, live preview shows the arc',
     bool: 'Click the base piece (A), then the other (B) — combined with the op from the panel · overlapping outlines must cross exactly twice · Subtract with B fully inside A punches it through as a hole',
-    stitch: 'Click an edge or guide line, then its match — both get the same number of stitching slits · same target twice = single run · Shift-click or drag a box to select MANY targets, then Enter runs holes along each',
+    stitch: 'Click an edge, guide line or internal cutout, then its match — both get the same number of stitching slits · same target twice = single run · Shift-click or drag a box to select MANY targets, then Enter runs holes along each',
     measure: 'Drag to measure a distance',
   };
   function setTool(t) {
@@ -855,6 +891,26 @@
           'font-size': px(12), 'text-anchor': 'middle',
         }, gPreview).textContent = (off > 0 ? '+' : '') + fmt(off) + ' cm';
       }
+      return;
+    }
+    if (drag.type === 'rotate') { // ring handle: rotate about the selection centre
+      const raw = Math.atan2(w.y - drag.c.y, w.x - drag.c.x) - drag.a0;
+      const stepDeg = ev.shiftKey ? 15 : 1;
+      const step = stepDeg * Math.PI / 180;
+      const ang = Math.round(raw / step) * step;
+      if (Math.abs(ang - drag.applied) > 1e-12) {
+        rotatePieces(drag.ids, drag.c.x, drag.c.y, ang - drag.applied);
+        drag.applied = ang;
+        renderAll(true);
+      }
+      clear(gPreview);
+      let deg = Math.round(-drag.applied * 180 / Math.PI); // show CCW-positive
+      if (deg > 180) deg -= 360;
+      if (deg < -180) deg += 360;
+      el('text', {
+        class: 'measure-text', x: w.x, y: w.y - px(16),
+        'font-size': px(12), 'text-anchor': 'middle',
+      }, gPreview).textContent = deg + '\u00b0';
       return;
     }
     if (drag.type === 'scale') { // corner handle: uniform scale about the opposite corner
@@ -1203,12 +1259,9 @@
             // used to make hole sections unselectable)
             const slitIdxs = [];
             if ((prevPiece.stitchSlits || []).length) {
-              const pn = prevPiece.path.nodes;
-              const nn = pn.length;
-              const outS = prevPiece.path.closed ? Geo.outwardSign(Geo.pathPolyline(pn, true, 0.1)) : 1;
               prevPiece.stitchSlits.forEach((sl2, i) => {
-                if (sl2.seg >= nn) return;
-                const ln = Geo.slitLine(pn[sl2.seg], pn[(sl2.seg + 1) % nn], sl2, outS);
+                const ln = slitLineFor(prevPiece, sl2);
+                if (!ln) return;
                 const c = Geo.lerp(ln.a, ln.b, 0.5);
                 if (c.x >= x0 && c.x <= x1 && c.y >= y0 && c.y <= y1) slitIdxs.push(i);
               });
@@ -1281,8 +1334,8 @@
         drag = null;
         return;
       }
-      if (drag.type === 'scale') clear(gPreview);
-      if (['node', 'nodes', 'handle', 'piece', 'seg', 'scale'].includes(drag.type)) { endChange(); renderSidebar(); }
+      if (drag.type === 'scale' || drag.type === 'rotate') clear(gPreview);
+      if (['node', 'nodes', 'handle', 'piece', 'seg', 'scale', 'rotate'].includes(drag.type)) { endChange(); renderSidebar(); }
       if (drag.type === 'pen-handle') renderPenPreview();
       drag = null;
       return;
@@ -1394,6 +1447,7 @@
   function remapAfterInsert(piece, seg, t) {
     for (const arr of [piece.notches || [], piece.stitchSlits || []]) {
       for (const nt of arr) {
+        if (nt.cut != null) continue; // cutout-anchored: outline splits don't touch it
         if (nt.seg > seg) nt.seg += 1;
         else if (nt.seg === seg) {
           if (nt.t <= t) nt.t = t > 0 ? nt.t / t : 0;
@@ -1414,7 +1468,7 @@
     nodes.splice(i + 1, 0, a2, b2);
     const remap = (m) => { if (m.seg === i) m.seg = i + 1; else if (m.seg > i) m.seg += 2; };
     for (const nt of piece.notches || []) remap(nt);
-    for (const sl of piece.stitchSlits || []) remap(sl);
+    for (const sl of piece.stitchSlits || []) { if (sl.cut == null) remap(sl); }
     if (piece.foldSeg != null) { const m = { seg: piece.foldSeg }; remap(m); piece.foldSeg = m.seg; }
     return i + 1; // index of the protruding edge
   }
@@ -1427,7 +1481,7 @@
     const i = mid - 1;
     const remap = (m) => { if (m.seg === mid) m.seg = i; else if (m.seg > mid) m.seg -= 2; };
     for (const nt of piece.notches || []) remap(nt);
-    for (const sl of piece.stitchSlits || []) remap(sl);
+    for (const sl of piece.stitchSlits || []) { if (sl.cut == null) remap(sl); }
     if (piece.foldSeg != null) { const m = { seg: piece.foldSeg }; remap(m); piece.foldSeg = m.seg; }
     return i;
   }
@@ -1505,6 +1559,7 @@
     const off = px(14) / Math.SQRT2;
     return {
       bb,
+      rot: { x: (bb.minX + bb.maxX) / 2, y: bb.minY - px(24) },
       corners: [
         { x: bb.minX - off, y: bb.minY - off, ax: bb.maxX, ay: bb.maxY },
         { x: bb.maxX + off, y: bb.minY - off, ax: bb.minX, ay: bb.maxY },
@@ -1526,6 +1581,15 @@
     if (scIds.length) {
       const sh = scaleHandles(scIds);
       if (sh) {
+        if (Geo.dist(sh.rot, w) < px(9)) {
+          const c = { x: (sh.bb.minX + sh.bb.maxX) / 2, y: (sh.bb.minY + sh.bb.maxY) / 2 };
+          beginChange();
+          drag = {
+            type: 'rotate', ids: scIds, c,
+            a0: Math.atan2(w.y - c.y, w.x - c.x), applied: 0,
+          };
+          return;
+        }
         for (const c of sh.corners) {
           if (Geo.dist(c, w) < px(9)) {
             beginChange();
@@ -1676,15 +1740,13 @@
   }
 
   function hitSlit(piece, w) {
-    const nodes = piece.path.nodes;
     const slits = piece.stitchSlits || [];
     if (!slits.length) return -1;
-    const outS = piece.path.closed ? Geo.outwardSign(Geo.pathPolyline(nodes, true, 0.1)) : 1;
     let best = -1, bd = px(6);
     const centers = [];
     slits.forEach((sl, i) => {
-      if (sl.seg >= nodes.length) { centers.push(null); return; }
-      const ln = Geo.slitLine(nodes[sl.seg], nodes[(sl.seg + 1) % nodes.length], sl, outS);
+      const ln = slitLineFor(piece, sl);
+      if (!ln) { centers.push(null); return; }
       const p = Geo.lerp(ln.a, ln.b, 0.5);
       centers.push(p);
       const d = Geo.dist(p, w);
@@ -2059,13 +2121,18 @@
       const s = res.segMapB[nt.seg];
       if (s != null) notches.push({ seg: s, t: res.flipT ? 1 - nt.t : nt.t });
     }
-    // stitch slits ride along the same way; those on the welded seam vanish with it
+    // stitch slits ride along the same way; those on the welded seam vanish
+    // with it. Cutout-anchored slits follow their cutout (B's indices shift
+    // past A's cutout list).
+    const cutBase = (pA.cutouts || []).length;
     const stitchSlits = [];
     for (const sl of pA.stitchSlits || []) {
+      if (sl.cut != null) { stitchSlits.push(Object.assign({}, sl)); continue; }
       const s = res.segMapA[sl.seg];
       if (s != null) stitchSlits.push(Object.assign({}, sl, { seg: s }));
     }
     for (const sl of pB.stitchSlits || []) {
+      if (sl.cut != null) { stitchSlits.push(Object.assign({}, sl, { cut: sl.cut + cutBase })); continue; }
       const s = res.segMapB[sl.seg];
       if (s != null) stitchSlits.push(Object.assign({}, sl, { seg: s, t: res.flipT ? 1 - sl.t : sl.t }));
     }
@@ -2100,6 +2167,7 @@
       outline = sew.outline;
       for (const c of sew.cutouts) cutouts.push({ nodes: c });
       const remap = (arr) => arr.filter((m) => {
+        if (m.cut != null) return true; // cutout-anchored: outline sewing is irrelevant
         const to = sew.segMap[m.seg];
         if (!to || to.loop !== -1) return false; // died with the slit / on a cutout
         m.seg = to.seg;
@@ -2557,22 +2625,29 @@
       const rel = (seg - ia + n2) % n2;
       return rel < lenA ? { side: 'A', seg: rel } : { side: 'B', seg: (seg - ib + n2) % n2 };
     };
-    const nA = [], nB = [], sA = [], sB = [];
+    const nA = [], nB = [];
     for (const nt of clone.notches || []) {
       const m = sideOf(nt.seg);
       (m.side === 'A' ? nA : nB).push(Object.assign({}, nt, { seg: m.seg }));
     }
-    for (const sl of clone.stitchSlits || []) {
-      const m = sideOf(sl.seg);
-      (m.side === 'A' ? sA : sB).push(Object.assign({}, sl, { seg: m.seg }));
-    }
     const polyA = Geo.pathPolyline(nodesA, true, 0.05);
     const hA = [], hB = [];
     for (const h of clone.holes || []) (Geo.pointInPolygon(polyA, h) ? hA : hB).push(h);
-    const cA = [], cB = [];
+    const cA = [], cB = [], cutMap = [];
     for (const c of clone.cutouts || []) {
       const cen = Geo.centroid(Geo.pathPolyline(c.nodes, true, 0.1));
-      (Geo.pointInPolygon(polyA, cen) ? cA : cB).push(c);
+      if (Geo.pointInPolygon(polyA, cen)) { cutMap.push({ side: 'A', idx: cA.length }); cA.push(c); }
+      else { cutMap.push({ side: 'B', idx: cB.length }); cB.push(c); }
+    }
+    const sA = [], sB = [];
+    for (const sl of clone.stitchSlits || []) {
+      if (sl.cut != null) { // cutout slits follow their cutout to its half
+        const m = cutMap[sl.cut];
+        if (m) (m.side === 'A' ? sA : sB).push(Object.assign({}, sl, { cut: m.idx }));
+        continue;
+      }
+      const m = sideOf(sl.seg);
+      (m.side === 'A' ? sA : sB).push(Object.assign({}, sl, { seg: m.seg }));
     }
     let gA = null, gB = null;
     if (clone.grain) {
@@ -2773,6 +2848,7 @@
       if (s != null) notches.push(Object.assign({}, nt, { seg: s }));
     }
     for (const sl of cA.stitchSlits || []) {
+      if (sl.cut != null) continue; // cutout indices reshuffle — re-stitch after
       const s = keepSeg(sl.seg);
       if (s != null) slits.push(Object.assign({}, sl, { seg: s }));
     }
@@ -2810,7 +2886,23 @@
 
   function stitchTargetKey(tg) {
     const p = pieceById(tg.pieceId);
-    return tg.pieceId + '/' + (p && p.guide ? 'guide' : tg.seg);
+    return tg.pieceId + '/' + (p && p.guide ? 'guide' : (tg.cut != null ? 'cut' + tg.cut : tg.seg));
+  }
+
+  // nearest internal cutout edge under the cursor, across all pieces
+  function cutoutAt(w) {
+    let best = null;
+    for (const p of doc.pieces) {
+      if (p.visible === false || p.guide) continue;
+      (p.cutouts || []).forEach((c, k) => {
+        if (!c.nodes || c.nodes.length < 3) return;
+        const hit = Geo.nearestOnPath(c.nodes, true, w);
+        if (hit && hit.dist < px(10) && (!best || hit.dist < best.dist)) {
+          best = { piece: p, cut: k, dist: hit.dist };
+        }
+      });
+    }
+    return best;
   }
   function stitchMultiHint() {
     $('status-hint').textContent = stitchMulti.length
@@ -2820,14 +2912,19 @@
 
   function stitchDown(ev, w) {
     const res = nearestEdgeAt(w, true);
-    if (!res) {
+    const co = cutoutAt(w);
+    if (!res && !co) {
       // empty space: drag a box to gather many targets; a plain click clears
       drag = { type: 'marquee', mode: 'stitch-add', a: w, b: w };
       return;
     }
+    // an internal cutout counts as a target too — whoever is closer wins
+    const useCut = co && (!res || co.dist < res.hit.dist);
+    const tg = useCut
+      ? { pieceId: co.piece.id, cut: co.cut, seg: 0 }
+      : { pieceId: res.piece.id, seg: res.hit.seg };
     if (ev.shiftKey || stitchMulti.length) {
       // multi mode: every click toggles the target in the set
-      const tg = { pieceId: res.piece.id, seg: res.hit.seg };
       const k = stitchTargetKey(tg);
       const idx = stitchMulti.findIndex((t) => stitchTargetKey(t) === k);
       if (idx >= 0) stitchMulti.splice(idx, 1); else stitchMulti.push(tg);
@@ -2837,14 +2934,14 @@
       return;
     }
     if (!stitchFirst || !pieceById(stitchFirst.pieceId)) {
-      stitchFirst = { pieceId: res.piece.id, seg: res.hit.seg };
-      selectPiece(res.piece.id);
-      $('status-hint').textContent = 'Now click the matching edge (same edge again = single run) · Shift-click selects many at once · Esc cancels';
+      stitchFirst = tg;
+      selectPiece(tg.pieceId);
+      $('status-hint').textContent = 'Now click the matching edge (same target again = single run) · Shift-click selects many at once · Esc cancels';
       renderAll(true); renderSidebar();
       return;
     }
     const pA = pieceById(stitchFirst.pieceId);
-    stitchEdges(pA, stitchFirst.seg, res.piece, res.hit.seg);
+    stitchEdges(pA, stitchFirst, pieceById(tg.pieceId), tg);
   }
 
   // box-select stitch targets: edges with both endpoints inside; guide lines
@@ -2867,6 +2964,9 @@
       for (let i = 0; i < segCount; i++) {
         if (inside(p.path.nodes[i]) && inside(p.path.nodes[(i + 1) % n])) add({ pieceId: p.id, seg: i });
       }
+      (p.cutouts || []).forEach((c, k) => {
+        if (c.nodes && c.nodes.length > 2 && c.nodes.every(inside)) add({ pieceId: p.id, cut: k, seg: 0 });
+      });
     }
     stitchFirst = null;
     stitchMultiHint();
@@ -2894,6 +2994,21 @@
       const piece = pieceById(tg.pieceId);
       if (!piece) continue;
       if (piece.guide) { guideIds.add(piece.id); continue; }
+      if (tg.cut != null) {
+        // an internal cutout: one loop of holes around it, inset into material
+        const c = (piece.cutouts || [])[tg.cut];
+        if (!c || c.nodes.length < 3) continue;
+        const t = stitchTarget(piece, 0, tg.cut);
+        if (t.len < 1e-6) continue;
+        piece.stitchSlits = piece.stitchSlits || [];
+        const run = nextStitchRun(piece);
+        for (const pos of t.place(fracs(t.len, true))) {
+          piece.stitchSlits.push({ seg: pos.seg, t: pos.t, cut: tg.cut, len: slitLen, ang: 45, off, run });
+          total++;
+        }
+        runs++;
+        continue;
+      }
       if (tg.seg >= piece.path.nodes.length) continue;
       if (!piece.path.closed) {
         // open paths: plain per-edge run (no corner chaining to worry about)
@@ -2985,7 +3100,20 @@
   // fractions, so hole i on side A always pairs with hole i on side B when
   // sewing. A target is one edge of a normal piece, or the WHOLE path of a
   // guide line (inset stitch lines get holes along their full length).
-  function stitchTarget(piece, seg) {
+  function stitchTarget(piece, seg, cut) {
+    if (cut != null) {
+      // an internal cutout: one run around the whole hole; the Inset field
+      // pushes the holes into the material (slitContext flips the sign)
+      const c = piece.cutouts[cut];
+      return {
+        whole: true,
+        loop: true,
+        useOff: true,
+        cut,
+        len: Geo.pathLength(c.nodes, true),
+        place: (fractions) => Geo.pathArcParams(c.nodes, true, fractions).map((pos) => ({ seg: pos.seg, t: pos.t, cut })),
+      };
+    }
     if (piece.guide) {
       return {
         whole: true,
@@ -2999,20 +3127,23 @@
     return {
       whole: false,
       loop: false,
+      useOff: true,
       len: Geo.segLength(a, b),
       place: (fractions) => Geo.segArcParams(a, b, fractions).map((t) => ({ seg, t })),
     };
   }
 
-  function stitchEdges(pA, segA, pB, segB) {
+  function stitchEdges(pA, tgA, pB, tgB) {
     const spacing = Math.max(0.1, parseFloat($('st-spacing').value) || 0.3);
     const slitLen = Math.max(0.05, parseFloat($('st-len').value) || 0.15);
     const off = parseFloat($('st-off').value) || 0;
-    const tA = stitchTarget(pA, segA);
-    const same = pA.id === pB.id && (tA.whole || segA === segB);
-    const tB = same ? tA : stitchTarget(pB, segB);
+    const tA = stitchTarget(pA, tgA.seg, tgA.cut);
+    const same = pA.id === pB.id && (
+      tgA.cut != null || tgB.cut != null ? tgA.cut === tgB.cut : (tA.whole || tgA.seg === tgB.seg));
+    const tB = same ? tA : stitchTarget(pB, tgB.seg, tgB.cut);
     const count = Math.max(2, Math.round(tA.len / spacing));
-    // closed guide rings loop evenly; open runs inset half a step from the ends
+    // closed guide rings / cutout loops go evenly around; open runs inset
+    // half a step from the ends
     const frFor = (t) => {
       const fr = [];
       for (let i = 0; i < count; i++) fr.push(t.loop ? i / count : (i + 0.5) / count);
@@ -3023,8 +3154,10 @@
       piece.stitchSlits = piece.stitchSlits || [];
       const run = nextStitchRun(piece);
       for (const pos of target.place(frFor(target))) {
-        // holes sit ON a guide line; the Inset field only applies to raw edges
-        piece.stitchSlits.push({ seg: pos.seg, t: pos.t, len: slitLen, ang: 45, off: target.whole ? 0 : off, run });
+        // holes sit ON a guide line; the Inset applies to edges and cutouts
+        const slit = { seg: pos.seg, t: pos.t, len: slitLen, ang: 45, off: target.useOff ? off : 0, run };
+        if (pos.cut != null) slit.cut = pos.cut;
+        piece.stitchSlits.push(slit);
       }
     };
     put(pA, tA);
@@ -3172,9 +3305,12 @@
     } else if (sel.kind === 'notch' || sel.kind === 'slit') {
       const arr = sel.kind === 'notch' ? piece.notches : piece.stitchSlits;
       const it = arr && arr[sel.idx];
-      if (it && it.seg < piece.path.nodes.length) {
-        const n = piece.path.nodes.length;
-        const len = Geo.segLength(piece.path.nodes[it.seg], piece.path.nodes[(it.seg + 1) % n]);
+      const ctx = it && (sel.kind === 'slit'
+        ? slitContext(piece, it)
+        : (it.seg < piece.path.nodes.length ? { nodes: piece.path.nodes } : null));
+      if (ctx) {
+        const n = ctx.nodes.length;
+        const len = Geo.segLength(ctx.nodes[it.seg], ctx.nodes[(it.seg + 1) % n]);
         const dir = dx !== 0 ? Math.sign(dx) : -Math.sign(dy);
         if (len > 1e-6) it.t = Math.min(0.99, Math.max(0.01, it.t + dir * Math.hypot(dx, dy) / len));
       }
@@ -3239,8 +3375,8 @@
     const segA2 = (ci - 1 + n2) % n2, segB2 = ci;
     piece.notches = (piece.notches || []).filter((nt) => nt.seg !== segA2 && nt.seg !== segB2);
     for (const nt of piece.notches) if (nt.seg > ci) nt.seg -= 1;
-    piece.stitchSlits = (piece.stitchSlits || []).filter((sl) => sl.seg !== segA2 && sl.seg !== segB2);
-    for (const sl of piece.stitchSlits) if (sl.seg > ci) sl.seg -= 1;
+    piece.stitchSlits = (piece.stitchSlits || []).filter((sl) => sl.cut != null || (sl.seg !== segA2 && sl.seg !== segB2));
+    for (const sl of piece.stitchSlits) if (sl.cut == null && sl.seg > ci) sl.seg -= 1;
     if (piece.foldSeg != null && piece.foldSeg > ci) piece.foldSeg -= 1;
     piece.path.nodes.splice(ci, 1);
     A.hout = { x: ta.x * k, y: ta.y * k };
@@ -3258,8 +3394,8 @@
     const segA = (idx - 1 + n) % n, segB = idx;
     piece.notches = (piece.notches || []).filter((nt) => nt.seg !== segA && nt.seg !== segB);
     for (const nt of piece.notches) if (nt.seg > idx) nt.seg -= 1;
-    piece.stitchSlits = (piece.stitchSlits || []).filter((sl) => sl.seg !== segA && sl.seg !== segB);
-    for (const sl of piece.stitchSlits) if (sl.seg > idx) sl.seg -= 1;
+    piece.stitchSlits = (piece.stitchSlits || []).filter((sl) => sl.cut != null || (sl.seg !== segA && sl.seg !== segB));
+    for (const sl of piece.stitchSlits) if (sl.cut == null && sl.seg > idx) sl.seg -= 1;
     if (piece.foldSeg != null) {
       // deleting a fold-edge endpoint destroys the fold
       if (idx === piece.foldSeg || idx === (piece.foldSeg + 1) % n) piece.foldSeg = null;
@@ -3402,7 +3538,12 @@
         nt.t = 1 - nt.t;
       }
       for (const sl of copy.stitchSlits || []) {
-        sl.seg = copy.path.closed ? (2 * n - 2 - sl.seg) % n : (n - 2 - sl.seg);
+        if (sl.cut != null) {
+          const cn = ((copy.cutouts || [])[sl.cut] || { nodes: [] }).nodes.length;
+          if (cn) sl.seg = (2 * cn - 2 - sl.seg) % cn; // cutouts reverse too
+        } else {
+          sl.seg = copy.path.closed ? (2 * n - 2 - sl.seg) % n : (n - 2 - sl.seg);
+        }
         sl.t = 1 - sl.t;
         sl.ang = -(sl.ang == null ? 45 : sl.ang); // keep the diagonal mirrored
         if (sl.toff) sl.toff = -sl.toff; // tangent reverses with the path
@@ -3915,6 +4056,67 @@
     }
   }
 
+  // rotate pieces about (cx, cy) by rad (screen coords, y-down) — slits,
+  // notches and their offsets are all tangent-relative, so they just follow
+  function rotatePieces(ids, cx, cy, rad) {
+    const cos = Math.cos(rad), sin = Math.sin(rad);
+    const rp = (pt) => {
+      const x = pt.x - cx, y = pt.y - cy;
+      pt.x = cx + x * cos - y * sin;
+      pt.y = cy + x * sin + y * cos;
+    };
+    const rh = (h) => {
+      if (!h) return;
+      const x = h.x, y = h.y;
+      h.x = x * cos - y * sin;
+      h.y = x * sin + y * cos;
+    };
+    for (const id of ids) {
+      const p = pieceById(id);
+      if (!p) continue;
+      for (const nd of p.path.nodes) { rp(nd); rh(nd.hin); rh(nd.hout); }
+      for (const h of p.holes || []) rp(h);
+      for (const c of p.cutouts || []) {
+        for (const nd of c.nodes) { rp(nd); rh(nd.hin); rh(nd.hout); }
+      }
+      if (p.grain) {
+        const a = { x: p.grain.x1, y: p.grain.y1 }, b = { x: p.grain.x2, y: p.grain.y2 };
+        rp(a); rp(b);
+        p.grain = { x1: a.x, y1: a.y, x2: b.x, y2: b.y };
+      }
+    }
+  }
+
+  function selectionCentre(ids) {
+    const pts = [];
+    for (const id of ids) {
+      const p = pieceById(id);
+      if (p) pts.push(...Geo.pathPolyline(p.path.nodes, p.path.closed, 0.2));
+    }
+    if (!pts.length) return null;
+    const bb = Geo.bbox(pts);
+    return { x: (bb.minX + bb.maxX) / 2, y: (bb.minY + bb.maxY) / 2 };
+  }
+
+  $('pp-rot-btn').addEventListener('click', () => {
+    const deg = parseFloat($('pp-rot').value) || 0;
+    if (!deg) return;
+    const ids = multiSel.length > 1 ? multiSel : (selPiece() ? [selPiece().id] : []);
+    const c = ids.length && selectionCentre(ids);
+    if (!c) return;
+    beginChange();
+    rotatePieces(ids, c.x, c.y, -deg * Math.PI / 180); // + = counter-clockwise, like pen angles
+    endChange();
+    renderAll(); renderSidebar();
+    $('pp-rot').value = 0;
+    $('status-hint').textContent =
+      `Rotated ${ids.length > 1 ? ids.length + ' pieces' : 'piece'} by ${deg}°`;
+  });
+  $('pp-rot').addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter') { $('pp-rot-btn').click(); ev.preventDefault(); }
+    ev.stopPropagation();
+  });
+
   $('pp-scale-btn').addEventListener('click', () => {
     const f = (parseFloat($('pp-scale').value) || 0) / 100;
     if (!(f > 0) || Math.abs(f - 1) < 1e-9) return;
@@ -3996,7 +4198,7 @@
     if (!p || (sel.kind !== 'seg' && sel.kind !== 'segs')) return;
     const segsSel = new Set(sel.kind === 'segs' ? sel.segs : [sel.idx]);
     beginChange();
-    p.stitchSlits = p.guide ? [] : (p.stitchSlits || []).filter((sl) => !segsSel.has(sl.seg));
+    p.stitchSlits = p.guide ? [] : (p.stitchSlits || []).filter((sl) => sl.cut != null || !segsSel.has(sl.seg));
     endChange();
     renderAll(); renderSidebar();
   });
@@ -4009,10 +4211,10 @@
       keep = (s, i) => !drop.has(i);
     } else if (sel.kind === 'slit' && (p.stitchSlits || [])[sel.idx]) {
       const sl = p.stitchSlits[sel.idx];
-      keep = (s) => (sl.run != null ? s.run !== sl.run : s.seg !== sl.seg);
+      keep = (s) => (sl.run != null ? s.run !== sl.run : !(s.seg === sl.seg && s.cut === sl.cut));
     } else if (sel.kind === 'seg' || sel.kind === 'segs') {
       const segsSel = new Set(sel.kind === 'segs' ? sel.segs : [sel.idx]);
-      const onEdge = (s2) => p.guide || segsSel.has(s2.seg);
+      const onEdge = (s2) => p.guide || (s2.cut == null && segsSel.has(s2.seg));
       const runsHere = new Set((p.stitchSlits || []).filter(onEdge).map((s2) => s2.run).filter((r) => r != null));
       keep = (s) => !(s.run != null ? runsHere.has(s.run) : onEdge(s));
     }
