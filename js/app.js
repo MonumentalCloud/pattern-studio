@@ -170,17 +170,31 @@
 
   function snap(p, skipPieceId, skipNodeIdx) {
     alignGuides = [];
-    // priority: existing nodes, then points anywhere along other outlines,
-    // then orthogonal alignment with other points, then grid
-    const tol = px(9);
-    let best = null, bd = tol;
+    // priority: existing points, then points anywhere along other outlines,
+    // then orthogonal alignment with other points, then grid.
+    // candidate points: outline nodes, cutout corners and — while the pen is
+    // drafting — the draft's own placed points (so a path can close square)
+    const pts = [];
     for (const piece of doc.pieces) {
       if (piece.visible === false) continue;
       piece.path.nodes.forEach((n, i) => {
         if (piece.id === skipPieceId && i === skipNodeIdx) return;
-        const d = Geo.dist(n, p);
-        if (d < bd) { bd = d; best = { x: n.x, y: n.y }; }
+        pts.push(n);
       });
+      for (const c of piece.cutouts || []) for (const n of c.nodes) pts.push(n);
+    }
+    const draftPts = draft && draft.nodes ? draft.nodes : [];
+    const tol = px(9);
+    let best = null, bd = tol;
+    for (const n of pts) {
+      const d = Geo.dist(n, p);
+      if (d < bd) { bd = d; best = { x: n.x, y: n.y }; }
+    }
+    // the draft's last point is the rubber-band anchor — snapping ONTO it
+    // would pin the preview, but aligning with it (below) is the useful part
+    for (const n of draftPts.slice(0, -1)) {
+      const d = Geo.dist(n, p);
+      if (d < bd) { bd = d; best = { x: n.x, y: n.y }; }
     }
     if (best) return best;
     // on-curve snap: project onto the nearest outline (never the edited piece's own)
@@ -189,20 +203,21 @@
       if (piece.visible === false || piece.id === skipPieceId || piece.path.nodes.length < 2) continue;
       const hit = Geo.nearestOnPath(piece.path.nodes, piece.path.closed, p);
       if (hit && hit.dist < be) { be = hit.dist; bestE = hit.point; }
+      for (const c of piece.cutouts || []) {
+        if (!c.nodes || c.nodes.length < 3) continue;
+        const h2 = Geo.nearestOnPath(c.nodes, true, p);
+        if (h2 && h2.dist < be) { be = h2.dist; bestE = h2.point; }
+      }
     }
     if (bestE) return { x: bestE.x, y: bestE.y };
     // orthogonal alignment: same x / same y as any point on the canvas,
     // each axis independently (a dashed guide shows the reference point)
     const at = px(6);
     let ax = null, adx = at, ay = null, ady = at;
-    for (const piece of doc.pieces) {
-      if (piece.visible === false) continue;
-      piece.path.nodes.forEach((n, i) => {
-        if (piece.id === skipPieceId && i === skipNodeIdx) return;
-        const dx = Math.abs(n.x - p.x), dy = Math.abs(n.y - p.y);
-        if (dx < adx) { adx = dx; ax = n; }
-        if (dy < ady) { ady = dy; ay = n; }
-      });
+    for (const n of pts.concat(draftPts)) {
+      const dx = Math.abs(n.x - p.x), dy = Math.abs(n.y - p.y);
+      if (dx < adx) { adx = dx; ax = n; }
+      if (dy < ady) { ady = dy; ay = n; }
     }
     const out = { x: ax ? ax.x : p.x, y: ay ? ay.y : p.y };
     if ((!ax || !ay) && snapOn()) {
@@ -820,7 +835,7 @@
     if (tool === 'round') return roundDown(w);
     if (tool === 'bool') return boolDown(w);
     if (tool === 'stitch') return stitchDown(ev, w);
-    if (tool === 'measure') { drag = { type: 'measure', a: w, b: w }; return; }
+    if (tool === 'measure') { const a = snap(w); drag = { type: 'measure', a, b: a }; return; }
   });
 
   svg.addEventListener('pointermove', (ev) => {
@@ -1154,8 +1169,9 @@
       return;
     }
     if (drag.type === 'measure') {
-      drag.b = w;
+      drag.b = snap(w);
       clear(gPreview);
+      drawAlignGuides(gPreview);
       el('line', { class: 'measure-line', x1: drag.a.x, y1: drag.a.y, x2: drag.b.x, y2: drag.b.y }, gPreview);
       const mid = Geo.lerp(drag.a, drag.b, 0.5);
       el('text', {
@@ -2517,7 +2533,10 @@
       const hit = Geo.nearestOnPath(p.path.nodes, p.path.closed, w);
       if (hit && hit.dist < be) { be = hit.dist; best = { x: hit.point.x, y: hit.point.y, snapped: true }; }
     }
-    return best || { x: w.x, y: w.y, snapped: false };
+    if (best) return best;
+    // away from geometry: still respect alignment + grid (no ghost dot)
+    const s = snap(w);
+    return { x: s.x, y: s.y, snapped: false };
   }
 
   let knifeFirst = null; // first of the two cut points
