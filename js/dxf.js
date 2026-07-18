@@ -185,29 +185,19 @@
       return out;
     }
 
-    const sa = closed ? (piece.seamAllowance || 0) : 0;
+    // the drawn outline IS the cutting line — no seam allowance
+    out.polylines.push({ layer: 'CUT', pts: seamPts, closed });
 
-    if (sa > 0) {
-      const cutPts = Geo.offsetClosed(seamPts, sa);
-      out.polylines.push({ layer: 'CUT', pts: cutPts, closed: true });
-      out.polylines.push({ layer: 'SEAM', pts: seamPts, closed: true });
-    } else {
-      out.polylines.push({ layer: 'CUT', pts: seamPts, closed });
-    }
-
-    // notches: slit from the cutting line inward, perpendicular to the edge
+    // notches: real cuts from the outline into the piece (slit or V chip)
     const notchLen = piece.notchLength || 0.4; // cm
     if (closed && (piece.notches || []).length) {
       const s = Geo.outwardSign(seamPts);
       for (const nt of piece.notches) {
-        const a = nodes[nt.seg % nodes.length];
-        const b = nodes[(nt.seg + 1) % nodes.length];
-        const p = Geo.segPoint(a, b, nt.t);
-        const tan = Geo.segTangent(a, b, nt.t);
-        const nrm = { x: s * tan.y, y: -s * tan.x }; // outward
-        const start = Geo.add(p, Geo.scale(nrm, sa));          // on cutting line
-        const end = Geo.add(p, Geo.scale(nrm, sa - notchLen)); // inward
-        out.lines.push({ layer: 'CUT', a: start, b: end });
+        if (nt.seg >= nodes.length) continue;
+        const a = nodes[nt.seg], b = nodes[(nt.seg + 1) % nodes.length];
+        for (const ln of Geo.notchLines(a, b, nt, s, notchLen, piece.notchStyle)) {
+          out.lines.push({ layer: 'CUT', a: ln.a, b: ln.b });
+        }
       }
     }
 

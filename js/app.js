@@ -36,7 +36,7 @@
       id: uid(),
       name: 'Piece ' + (doc.pieces.length + 1),
       visible: true,
-      seamAllowance: 1.0,
+      seamAllowance: 0, // the drawn outline IS the cutting line
       notchLength: 0.4,
       path: { closed: !!closed, nodes },
       notches: [],
@@ -298,13 +298,8 @@
       const closed = rp.path.closed;
       if (nodes.length < 2) continue;
 
-      // cutting line (seam allowance)
-      const sa = closed ? (piece.seamAllowance || 0) : 0;
       let seamPts = null;
       if (closed) seamPts = Geo.dedupe(Geo.pathPolyline(nodes, closed, 0.05));
-      if (sa > 0 && seamPts && seamPts.length > 2) {
-        el('path', { class: 'piece-cut', d: polyD(Geo.offsetClosed(seamPts, sa), true) }, g);
-      }
 
       // main outline
       if (folded) {
@@ -325,19 +320,16 @@
         el('path', { class: 'piece-fill' + (closed ? '' : ' open'), d: pathD(nodes, closed) }, g);
       }
 
-      // notches
+      // notches: real cuts from the outline into the piece (slit or V)
       if (closed && seamPts && (rp.notches || []).length) {
         const s = Geo.outwardSign(seamPts);
         const nl = piece.notchLength || 0.4;
         for (const nt of rp.notches) {
           if (nt.seg >= nodes.length) continue;
           const a = nodes[nt.seg], b = nodes[(nt.seg + 1) % nodes.length];
-          const p = Geo.segPoint(a, b, nt.t);
-          const tan = Geo.segTangent(a, b, nt.t);
-          const nrm = { x: s * tan.y, y: -s * tan.x };
-          const p1 = Geo.add(p, Geo.scale(nrm, sa));
-          const p2 = Geo.add(p, Geo.scale(nrm, sa - nl));
-          el('line', { class: 'piece-notch', x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y }, g);
+          for (const ln of Geo.notchLines(a, b, nt, s, nl, piece.notchStyle)) {
+            el('line', { class: 'piece-notch', x1: ln.a.x, y1: ln.a.y, x2: ln.b.x, y2: ln.b.y }, g);
+          }
         }
       }
 
@@ -417,17 +409,22 @@
       const tn = tp.path.nodes;
       return segD(tn[tg.seg], tn[(tg.seg + 1) % tn.length]);
     };
-    const firstPick = (tool === 'weld' && weldFirst) || (tool === 'stitch' && stitchFirst);
-    if (firstPick) {
-      const wp = pieceById(firstPick.pieceId);
-      const d = wp && stitchTargetD(wp, firstPick);
+    if (tool === 'weld' && weldFirst) {
+      const wp = pieceById(weldFirst.pieceId);
+      const d = wp && stitchTargetD(wp, weldFirst);
       if (d) el('path', { class: 'seg-highlight weld', d }, gOverlay);
     }
-    if (tool === 'stitch' && stitchMulti.length) {
-      for (const tg of stitchMulti) {
+    if (tool === 'stitch') {
+      // confirmed side A in dashed orange, the in-progress selection solid
+      for (const tg of stitchSideA || []) {
         const tp = pieceById(tg.pieceId);
         const d = tp && stitchTargetD(tp, tg);
         if (d) el('path', { class: 'seg-highlight weld', d }, gOverlay);
+      }
+      for (const tg of stitchMulti) {
+        const tp = pieceById(tg.pieceId);
+        const d = tp && stitchTargetD(tp, tg);
+        if (d) el('path', { class: 'seg-highlight', d }, gOverlay);
       }
     }
     // scale handles around the selected piece / marquee group
@@ -571,8 +568,8 @@
     $('piece-props').hidden = !piece;
     if (piece) {
       $('pp-name').value = piece.name;
-      $('pp-sa').value = piece.seamAllowance;
       $('pp-notch').value = piece.notchLength || 0.4;
+      $('pp-notch-style').value = piece.notchStyle || 'slit';
       const ep = effPiece(piece);
       $('pp-perim').textContent = fmt(Geo.pathLength(ep.path.nodes, ep.path.closed)) + ' cm' +
         (isFolded(piece) ? ' (unfolded)' : '');
@@ -672,8 +669,8 @@
   // ---------- tools ----------
   let tool = 'select';
   let weldFirst = null; // weld tool: { pieceId, seg } of the first picked edge
-  let stitchFirst = null; // stitch tool: same, for the first edge of a matched pair
-  let stitchMulti = []; // stitch tool: [{pieceId, seg}] targets for a bulk run
+  let stitchMulti = []; // stitch tool: [{pieceId, seg|cut}] targets being gathered
+  let stitchSideA = null; // matched mode: the confirmed side-A target set
   const HINTS = {
     select: 'Click a piece or point to select · drag to move · Shift-click pieces or edges to gather several · drag empty space to box-select pieces (piece selected: its points · +Shift: its edges) · Del deletes',
     pen: 'Click = corner, drag = curve · right-click = type exact length/angle · click the first point to close · Esc finishes open',
@@ -686,14 +683,14 @@
     knife: 'Click two points to cut a piece in two (they snap to existing points) · or click an open path to cut along it · Esc cancels',
     round: 'Drag outward from a corner point — the drag distance sets the fillet radius, live preview shows the arc',
     bool: 'Click the base piece (A), then the other (B) — combined with the op from the panel · overlapping outlines must cross exactly twice · Subtract with B fully inside A punches it through as a hole',
-    stitch: 'Click an edge, guide line or internal cutout, then its match — both get the same number of stitching slits · same target twice = single run · Shift-click or drag a box to select MANY targets, then Enter runs holes along each',
+    stitch: 'Select edges, guide lines or cutouts (click / Shift-click / drag a box) · Single mode: Enter runs holes along each · Matched mode: pick side A, Enter, pick side B, Enter — both sides get the same holes · Esc cancels',
     measure: 'Drag to measure a distance',
   };
   function setTool(t) {
     tool = t;
     if (t !== 'pen') finishDraft(false);
     if (t !== 'weld') weldFirst = null;
-    if (t !== 'stitch') { stitchFirst = null; stitchMulti = []; }
+    if (t !== 'stitch') { stitchMulti = []; stitchSideA = null; }
     if (t !== 'offset') insetChain = null;
     if (t !== 'knife') knifeFirst = null;
     if (t !== 'bool') boolFirst = null;
@@ -1222,7 +1219,7 @@
         if (drag.mode === 'stitch-add') {
           // stitch tool: box-select targets; a plain empty click clears them
           if (x1 - x0 > 0.2 || y1 - y0 > 0.2) stitchBoxAdd(x0, y0, x1, y1);
-          else { stitchMulti = []; stitchFirst = null; $('status-hint').textContent = HINTS.stitch; }
+          else { stitchMulti = []; updateStitchUi(); }
           renderAll(true);
           drag = null;
           return;
@@ -2904,10 +2901,31 @@
     }
     return best;
   }
-  function stitchMultiHint() {
-    $('status-hint').textContent = stitchMulti.length
-      ? `${stitchMulti.length} stitch target${stitchMulti.length > 1 ? 's' : ''} selected — Enter (or "Stitch selected") runs holes along each · click toggles · drag a box adds more · Esc cancels`
-      : HINTS.stitch;
+  // ---- stitch tool state machine ----
+  // Two explicit modes (st-mode): "single" runs holes along every selected
+  // target independently; "matched" gathers side A, confirms, gathers side B,
+  // then gives BOTH sides the same number of holes at matching fractions.
+  function updateStitchUi() {
+    const matched = $('st-mode').value === 'matched';
+    const btn = $('st-apply');
+    const nSel = stitchMulti.length;
+    const s2 = nSel > 1 ? 's' : '';
+    if (!matched) {
+      btn.textContent = 'Stitch selected';
+      $('status-hint').textContent = nSel
+        ? `${nSel} stitch target${s2} selected — Enter (or "Stitch selected") runs holes along each · click toggles · drag a box adds more · Esc cancels`
+        : HINTS.stitch;
+    } else if (!stitchSideA) {
+      btn.textContent = 'Set side A \u25b8';
+      $('status-hint').textContent = nSel
+        ? `Side A: ${nSel} target${s2} — Enter (or "Set side A") confirms it, then pick side B`
+        : 'Matched mode: select side A (click, Shift-click or drag a box), then Enter to confirm';
+    } else {
+      btn.textContent = 'Stitch matched';
+      $('status-hint').textContent = nSel
+        ? `Side B: ${nSel} target${s2} — Enter (or "Stitch matched") gives both sides the same holes`
+        : `Side A set (${stitchSideA.length} target${stitchSideA.length > 1 ? 's' : ''}) — now select side B · Esc restarts`;
+    }
   }
 
   function stitchDown(ev, w) {
@@ -2923,29 +2941,15 @@
     const tg = useCut
       ? { pieceId: co.piece.id, cut: co.cut, seg: 0 }
       : { pieceId: res.piece.id, seg: res.hit.seg };
-    if (ev.shiftKey || stitchMulti.length) {
-      // multi mode: every click toggles the target in the set
-      const k = stitchTargetKey(tg);
-      const idx = stitchMulti.findIndex((t) => stitchTargetKey(t) === k);
-      if (idx >= 0) stitchMulti.splice(idx, 1); else stitchMulti.push(tg);
-      stitchFirst = null;
-      stitchMultiHint();
-      renderAll(true);
-      return;
-    }
-    if (!stitchFirst || !pieceById(stitchFirst.pieceId)) {
-      stitchFirst = tg;
-      selectPiece(tg.pieceId);
-      $('status-hint').textContent = 'Now click the matching edge (same target again = single run) · Shift-click selects many at once · Esc cancels';
-      renderAll(true); renderSidebar();
-      return;
-    }
-    const pA = pieceById(stitchFirst.pieceId);
-    stitchEdges(pA, stitchFirst, pieceById(tg.pieceId), tg);
+    const k = stitchTargetKey(tg);
+    const idx = stitchMulti.findIndex((t) => stitchTargetKey(t) === k);
+    if (idx >= 0) stitchMulti.splice(idx, 1); else stitchMulti.push(tg);
+    updateStitchUi();
+    renderAll(true);
   }
 
   // box-select stitch targets: edges with both endpoints inside; guide lines
-  // that fit entirely inside come in as whole-path targets
+  // and cutouts that fit entirely inside come in as whole-path targets
   function stitchBoxAdd(x0, y0, x1, y1) {
     const inside = (nd) => nd.x >= x0 && nd.x <= x1 && nd.y >= y0 && nd.y <= y1;
     const have = new Set(stitchMulti.map(stitchTargetKey));
@@ -2968,206 +2972,212 @@
         if (c.nodes && c.nodes.length > 2 && c.nodes.every(inside)) add({ pieceId: p.id, cut: k, seg: 0 });
       });
     }
-    stitchFirst = null;
-    stitchMultiHint();
+    updateStitchUi();
   }
 
-  // run holes along every selected target. Contiguous edges of a closed piece
-  // stitch as ONE run along the mitred inset line (like a guide), so spacing
-  // stays even around corners and inset runs never overshoot them.
-  function stitchApplyMulti() {
+  // Turn a target set into continuous CHAINS, each with the actual path the
+  // holes run along (mitred inset for outline edges, offset ring for a full
+  // outline or a cutout, the line itself for a guide) plus how to anchor the
+  // holes back into the document.
+  function stitchChains(targets, off) {
+    const chains = [];
+    const guideSeen = new Set();
+    const segsByPiece = new Map();
+    const mkNodes = (pts) => pts.map((q) => ({ x: q.x, y: q.y, hin: null, hout: null }));
+    for (const tg of targets) {
+      const p = pieceById(tg.pieceId);
+      if (!p) continue;
+      if (p.guide) {
+        if (!guideSeen.has(p.id)) {
+          guideSeen.add(p.id);
+          chains.push({ piece: p, path: p.path.nodes, loop: p.path.closed, anchor: { kind: 'guide' } });
+        }
+        continue;
+      }
+      if (tg.cut != null) {
+        const c = (p.cutouts || [])[tg.cut];
+        if (!c || c.nodes.length < 3) continue;
+        const base = Geo.dedupe(Geo.pathPolyline(c.nodes, true, 0.02));
+        const pts = off ? Geo.offsetClosed(base, off) : base; // outward = into material
+        if (pts.length < 3) continue;
+        chains.push({
+          piece: p, loop: true, anchor: { kind: 'cut', cut: tg.cut },
+          path: mkNodes(Geo.simplifyPoly(pts, 0.005, true)),
+        });
+        continue;
+      }
+      if (tg.seg >= p.path.nodes.length) continue;
+      if (!segsByPiece.has(p.id)) segsByPiece.set(p.id, new Set());
+      segsByPiece.get(p.id).add(tg.seg);
+    }
+    for (const [pid, set] of segsByPiece) {
+      const p = pieceById(pid);
+      const n = p.path.nodes.length;
+      const closed = p.path.closed;
+      const segCount = closed ? n : n - 1;
+      if (closed && set.size === segCount) {
+        // full outline: one closed loop, inset (or on the line when off = 0)
+        const base = Geo.dedupe(Geo.pathPolyline(p.path.nodes, true, 0.02));
+        const pts = off ? Geo.offsetClosed(base, -off) : base;
+        if (pts.length >= 3) {
+          chains.push({
+            piece: p, loop: true, anchor: { kind: 'outline' },
+            path: mkNodes(Geo.simplifyPoly(pts, 0.005, true)),
+          });
+        }
+        continue;
+      }
+      for (let s0 = 0; s0 < segCount; s0++) {
+        if (!set.has(s0)) continue;
+        const prev = closed ? (s0 - 1 + n) % n : s0 - 1;
+        if (prev >= 0 && set.has(prev)) continue; // not the start of its arc
+        const arc = [s0];
+        let cur = s0;
+        for (;;) {
+          const nxt = closed ? (cur + 1) % n : cur + 1;
+          if ((!closed && nxt >= segCount) || !set.has(nxt) || arc.length >= set.size) break;
+          arc.push(nxt);
+          cur = nxt;
+        }
+        chains.push({ piece: p, loop: false, anchor: { kind: 'outline' }, path: edgeGuideNodes(p, arc, off) });
+      }
+    }
+    return chains;
+  }
+
+  // place holes at the given arc-length fractions of a chain's path, anchoring
+  // each back into the document (per-hole off/toff keep corner miters exact)
+  function stitchPlaceRun(chain, fractions, slitLen) {
+    const piece = chain.piece;
+    piece.stitchSlits = piece.stitchSlits || [];
+    const run = nextStitchRun(piece);
+    let placed = 0;
+    if (chain.anchor.kind === 'guide') {
+      for (const pos of Geo.pathArcParams(chain.path, chain.loop, fractions)) {
+        piece.stitchSlits.push({ seg: pos.seg, t: pos.t, len: slitLen, ang: 45, off: 0, run });
+        placed++;
+      }
+      return placed;
+    }
+    const isCut = chain.anchor.kind === 'cut';
+    const anchorNodes = isCut ? piece.cutouts[chain.anchor.cut].nodes : piece.path.nodes;
+    const anchorClosed = isCut ? true : piece.path.closed;
+    const nA = anchorNodes.length;
+    const os = isCut
+      ? -Geo.outwardSign(Geo.pathPolyline(anchorNodes, true, 0.05))
+      : (piece.path.closed ? Geo.outwardSign(Geo.pathPolyline(anchorNodes, true, 0.05)) : 1);
+    const piecePoly = !isCut && piece.path.closed ? Geo.pathPolyline(piece.path.nodes, true, 0.05) : null;
+    for (const pos of Geo.pathArcParams(chain.path, chain.loop, fractions)) {
+      const P = Geo.segPoint(chain.path[pos.seg], chain.path[(pos.seg + 1) % chain.path.length], pos.t);
+      if (piecePoly && !Geo.pointInPolygon(piecePoly, P)) {
+        // holes on the outline itself sit exactly on the boundary — only
+        // reject when a real inset would land outside
+        const bhit = Geo.nearestOnPath(piece.path.nodes, piece.path.closed, P);
+        if (!bhit || bhit.dist > 0.05) continue;
+      }
+      const hit = Geo.nearestOnPath(anchorNodes, anchorClosed, P);
+      if (!hit) continue;
+      const a = anchorNodes[hit.seg], b = anchorNodes[(hit.seg + 1) % nA];
+      const q = Geo.segPoint(a, b, hit.t);
+      const tan = Geo.segTangent(a, b, hit.t);
+      const nrm = { x: os * tan.y, y: -os * tan.x };
+      const offI = (q.x - P.x) * nrm.x + (q.y - P.y) * nrm.y;
+      const tofI = (P.x - q.x) * tan.x + (P.y - q.y) * tan.y;
+      const slit = { seg: hit.seg, t: hit.t, len: slitLen, ang: 45, off: offI, run };
+      if (isCut) slit.cut = chain.anchor.cut;
+      if (Math.abs(tofI) > 1e-6) slit.toff = tofI;
+      piece.stitchSlits.push(slit);
+      placed++;
+    }
+    return placed;
+  }
+
+  function stitchFractions(count, loop) {
+    const fr = [];
+    for (let i = 0; i < count; i++) fr.push(loop ? i / count : (i + 0.5) / count);
+    return fr;
+  }
+
+  // single mode: every chain gets its own run, spaced from its own length
+  function stitchApplySingle() {
     if (!stitchMulti.length) return;
     const spacing = Math.max(0.1, parseFloat($('st-spacing').value) || 0.3);
     const slitLen = Math.max(0.05, parseFloat($('st-len').value) || 0.15);
     const off = parseFloat($('st-off').value) || 0;
+    const chains = stitchChains(stitchMulti, off);
+    if (!chains.length) return;
     beginChange();
     let total = 0, runs = 0;
-    const fracs = (len, loop) => {
-      const count = Math.max(2, Math.round(len / spacing));
-      const fr = [];
-      for (let i = 0; i < count; i++) fr.push(loop ? i / count : (i + 0.5) / count);
-      return fr;
-    };
-    const guideIds = new Set();
-    const byPiece = new Map(); // non-guide closed pieces: id -> Set(segs)
-    for (const tg of stitchMulti) {
-      const piece = pieceById(tg.pieceId);
-      if (!piece) continue;
-      if (piece.guide) { guideIds.add(piece.id); continue; }
-      if (tg.cut != null) {
-        // an internal cutout: one loop of holes around it, inset into material
-        const c = (piece.cutouts || [])[tg.cut];
-        if (!c || c.nodes.length < 3) continue;
-        const t = stitchTarget(piece, 0, tg.cut);
-        if (t.len < 1e-6) continue;
-        piece.stitchSlits = piece.stitchSlits || [];
-        const run = nextStitchRun(piece);
-        for (const pos of t.place(fracs(t.len, true))) {
-          piece.stitchSlits.push({ seg: pos.seg, t: pos.t, cut: tg.cut, len: slitLen, ang: 45, off, run });
-          total++;
-        }
-        runs++;
-        continue;
-      }
-      if (tg.seg >= piece.path.nodes.length) continue;
-      if (!piece.path.closed) {
-        // open paths: plain per-edge run (no corner chaining to worry about)
-        const t = stitchTarget(piece, tg.seg);
-        if (t.len < 1e-6) continue;
-        piece.stitchSlits = piece.stitchSlits || [];
-        const run = nextStitchRun(piece);
-        for (const pos of t.place(fracs(t.len, false))) {
-          piece.stitchSlits.push({ seg: pos.seg, t: pos.t, len: slitLen, ang: 45, off, run });
-          total++;
-        }
-        runs++;
-        continue;
-      }
-      if (!byPiece.has(piece.id)) byPiece.set(piece.id, new Set());
-      byPiece.get(piece.id).add(tg.seg);
-    }
-    // guides: holes along their whole length, on the line itself
-    for (const gid of guideIds) {
-      const piece = pieceById(gid);
-      const t = stitchTarget(piece, 0);
-      if (t.len < 1e-6) continue;
-      piece.stitchSlits = piece.stitchSlits || [];
-      const run = nextStitchRun(piece);
-      for (const pos of t.place(fracs(t.len, t.loop))) {
-        piece.stitchSlits.push({ seg: pos.seg, t: pos.t, len: slitLen, ang: 45, off: 0, run });
-        total++;
-      }
+    for (const ch of chains) {
+      const L = Geo.pathLength(ch.path, ch.loop);
+      if (L < 1e-6) continue;
+      const count = Math.max(2, Math.round(L / spacing));
+      total += stitchPlaceRun(ch, stitchFractions(count, ch.loop), slitLen);
       runs++;
-    }
-    // closed pieces: contiguous arcs become single mitred runs
-    for (const [pid, segsSet] of byPiece) {
-      const piece = pieceById(pid);
-      const nodes = piece.path.nodes;
-      const n = nodes.length;
-      const piecePoly = Geo.pathPolyline(nodes, true, 0.05);
-      const os = Geo.outwardSign(piecePoly);
-      piece.stitchSlits = piece.stitchSlits || [];
-      const stitchAlong = (pathNodes, loop) => {
-        const L = Geo.pathLength(pathNodes, loop);
-        if (L < 1e-6) return;
-        const run = nextStitchRun(piece);
-        for (const pos of Geo.pathArcParams(pathNodes, loop, fracs(L, loop))) {
-          const P = Geo.segPoint(pathNodes[pos.seg], pathNodes[(pos.seg + 1) % pathNodes.length], pos.t);
-          if (off > 0.05 && !Geo.pointInPolygon(piecePoly, P)) continue; // never outside
-          // anchor the hole back onto the piece's own edge, with the exact
-          // per-hole inset so it stays on the mitred line at corners
-          const hit = Geo.nearestOnPath(nodes, true, P);
-          if (!hit) continue;
-          const a = nodes[hit.seg], b = nodes[(hit.seg + 1) % n];
-          const q = Geo.segPoint(a, b, hit.t);
-          const tan = Geo.segTangent(a, b, hit.t);
-          const nrm = { x: os * tan.y, y: -os * tan.x };
-          const offI = (q.x - P.x) * nrm.x + (q.y - P.y) * nrm.y;
-          // near corners the anchor is the vertex, so P - q also has a
-          // tangential part — store it, or the slit drifts off the line
-          const tofI = (P.x - q.x) * tan.x + (P.y - q.y) * tan.y;
-          const slit = { seg: hit.seg, t: hit.t, len: slitLen, ang: 45, off: offI, run };
-          if (Math.abs(tofI) > 1e-6) slit.toff = tofI;
-          piece.stitchSlits.push(slit);
-          total++;
-        }
-        runs++;
-      };
-      if (segsSet.size === n) {
-        // full outline: one closed loop, inset (or on the line when off = 0)
-        const base = Geo.dedupe(Geo.pathPolyline(nodes, true, 0.02));
-        const pts = off ? Geo.offsetClosed(base, -off) : base;
-        if (pts.length >= 3) {
-          stitchAlong(Geo.simplifyPoly(pts, 0.005, true).map((p) => ({ x: p.x, y: p.y, hin: null, hout: null })), true);
-        }
-      } else {
-        for (let s0 = 0; s0 < n; s0++) {
-          if (!segsSet.has(s0) || segsSet.has((s0 - 1 + n) % n)) continue;
-          const arc = [s0];
-          let nx = (s0 + 1) % n;
-          while (segsSet.has(nx)) { arc.push(nx); nx = (nx + 1) % n; }
-          stitchAlong(edgeGuideNodes(piece, arc, off), false);
-        }
-      }
     }
     endChange();
     stitchMulti = [];
+    updateStitchUi();
     $('status-hint').textContent = `${total} stitching slits over ${runs} run${runs > 1 ? 's' : ''}`;
     renderAll();
   }
 
-  // Put the SAME number of slits on both targets, at equal arc-length
-  // fractions, so hole i on side A always pairs with hole i on side B when
-  // sewing. A target is one edge of a normal piece, or the WHOLE path of a
-  // guide line (inset stitch lines get holes along their full length).
-  function stitchTarget(piece, seg, cut) {
-    if (cut != null) {
-      // an internal cutout: one run around the whole hole; the Inset field
-      // pushes the holes into the material (slitContext flips the sign)
-      const c = piece.cutouts[cut];
-      return {
-        whole: true,
-        loop: true,
-        useOff: true,
-        cut,
-        len: Geo.pathLength(c.nodes, true),
-        place: (fractions) => Geo.pathArcParams(c.nodes, true, fractions).map((pos) => ({ seg: pos.seg, t: pos.t, cut })),
-      };
-    }
-    if (piece.guide) {
-      return {
-        whole: true,
-        loop: piece.path.closed,
-        len: Geo.pathLength(piece.path.nodes, piece.path.closed),
-        place: (fractions) => Geo.pathArcParams(piece.path.nodes, piece.path.closed, fractions),
-      };
-    }
-    const n = piece.path.nodes.length;
-    const a = piece.path.nodes[seg], b = piece.path.nodes[(seg + 1) % n];
-    return {
-      whole: false,
-      loop: false,
-      useOff: true,
-      len: Geo.segLength(a, b),
-      place: (fractions) => Geo.segArcParams(a, b, fractions).map((t) => ({ seg, t })),
-    };
-  }
-
-  function stitchEdges(pA, tgA, pB, tgB) {
+  // matched mode: side A and side B each collapse to ONE chain; both get the
+  // same count so hole i on A pairs with hole i on B when sewing
+  function stitchMatched(aTargets, bTargets) {
     const spacing = Math.max(0.1, parseFloat($('st-spacing').value) || 0.3);
     const slitLen = Math.max(0.05, parseFloat($('st-len').value) || 0.15);
     const off = parseFloat($('st-off').value) || 0;
-    const tA = stitchTarget(pA, tgA.seg, tgA.cut);
-    const same = pA.id === pB.id && (
-      tgA.cut != null || tgB.cut != null ? tgA.cut === tgB.cut : (tA.whole || tgA.seg === tgB.seg));
-    const tB = same ? tA : stitchTarget(pB, tgB.seg, tgB.cut);
-    const count = Math.max(2, Math.round(tA.len / spacing));
-    // closed guide rings / cutout loops go evenly around; open runs inset
-    // half a step from the ends
-    const frFor = (t) => {
-      const fr = [];
-      for (let i = 0; i < count; i++) fr.push(t.loop ? i / count : (i + 0.5) / count);
-      return fr;
-    };
+    const chainsA = stitchChains(aTargets, off);
+    const chainsB = stitchChains(bTargets, off);
+    if (chainsA.length !== 1 || chainsB.length !== 1) {
+      $('status-hint').textContent =
+        'Each side must be ONE continuous run — pick connected edges (or a single guide / cutout) per side.';
+      return;
+    }
+    const A = chainsA[0], B = chainsB[0];
+    const lenA = Geo.pathLength(A.path, A.loop);
+    const lenB = Geo.pathLength(B.path, B.loop);
+    if (lenA < 1e-6 || lenB < 1e-6) return;
+    const count = Math.max(2, Math.round(lenA / spacing));
     beginChange();
-    const put = (piece, target) => {
-      piece.stitchSlits = piece.stitchSlits || [];
-      const run = nextStitchRun(piece);
-      for (const pos of target.place(frFor(target))) {
-        // holes sit ON a guide line; the Inset applies to edges and cutouts
-        const slit = { seg: pos.seg, t: pos.t, len: slitLen, ang: 45, off: target.useOff ? off : 0, run };
-        if (pos.cut != null) slit.cut = pos.cut;
-        piece.stitchSlits.push(slit);
-      }
-    };
-    put(pA, tA);
-    if (!same) put(pB, tB);
+    stitchPlaceRun(A, stitchFractions(count, A.loop), slitLen);
+    stitchPlaceRun(B, stitchFractions(count, B.loop), slitLen);
     endChange();
-    stitchFirst = null;
-    $('status-hint').textContent = same
-      ? `${count} stitching slits (${fmt(tA.len)} cm)`
-      : `${count} matched slits per side (${fmt(tA.len)} vs ${fmt(tB.len)} cm)`;
+    stitchSideA = null;
+    stitchMulti = [];
+    updateStitchUi();
+    $('status-hint').textContent =
+      `${count} matched slits per side (${fmt(lenA)} vs ${fmt(lenB)} cm)`;
     renderAll();
+  }
+
+  // the panel button / Enter: advance the current mode's flow
+  function stitchApply() {
+    if ($('st-mode').value === 'matched') {
+      if (!stitchSideA) {
+        if (!stitchMulti.length) {
+          $('status-hint').textContent = 'Select side A first — click, Shift-click or drag a box over edges/guides/cutouts.';
+          return;
+        }
+        stitchSideA = stitchMulti;
+        stitchMulti = [];
+        updateStitchUi();
+        renderAll(true);
+        return;
+      }
+      if (!stitchMulti.length) {
+        $('status-hint').textContent = 'Now select side B, then Enter (or "Stitch matched").';
+        return;
+      }
+      stitchMatched(stitchSideA, stitchMulti);
+      return;
+    }
+    if (!stitchMulti.length) {
+      $('status-hint').textContent = 'Nothing selected — click edges/guide lines/cutouts (or drag a box over them) first.';
+      return;
+    }
+    stitchApplySingle();
   }
 
   function grainDown(w) {
@@ -3197,8 +3207,8 @@
       return;
     }
     if ((ev.ctrlKey || ev.metaKey) && k === 'd') { duplicateSelection(); ev.preventDefault(); return; }
-    if (k === 'enter' && tool === 'stitch' && stitchMulti.length) {
-      stitchApplyMulti();
+    if (k === 'enter' && tool === 'stitch' && (stitchMulti.length || stitchSideA)) {
+      stitchApply();
       ev.preventDefault();
       return;
     }
@@ -3208,10 +3218,10 @@
         weldFirst = null;
         $('status-hint').textContent = HINTS.weld;
         renderAll(true);
-      } else if (tool === 'stitch' && (stitchFirst || stitchMulti.length)) {
-        stitchFirst = null;
+      } else if (tool === 'stitch' && (stitchSideA || stitchMulti.length)) {
         stitchMulti = [];
-        $('status-hint').textContent = HINTS.stitch;
+        stitchSideA = null;
+        updateStitchUi();
         renderAll(true);
       } else if (tool === 'offset' && (insetChain || sel.kind === 'seg' || sel.kind === 'segs')) {
         insetChain = null;
@@ -3982,9 +3992,9 @@
     const p = selPiece(); if (!p) return;
     beginChange(); p.name = e.target.value; endChange(); renderAll();
   });
-  $('pp-sa').addEventListener('change', (e) => {
+  $('pp-notch-style').addEventListener('change', (e) => {
     const p = selPiece(); if (!p) return;
-    beginChange(); p.seamAllowance = Math.max(0, parseFloat(e.target.value) || 0); endChange(); renderAll();
+    beginChange(); p.notchStyle = e.target.value === 'v' ? 'v' : 'slit'; endChange(); renderAll();
   });
   $('pp-notch').addEventListener('change', (e) => {
     const p = selPiece(); if (!p) return;
@@ -4301,9 +4311,12 @@
     if (ev.key === 'Enter') { $('of-apply').click(); ev.preventDefault(); }
     ev.stopPropagation();
   });
-  $('st-apply').addEventListener('click', () => {
-    if (stitchMulti.length) stitchApplyMulti();
-    else $('status-hint').textContent = 'Nothing selected — Shift-click edges/guide lines (or drag a box over them) first.';
+  $('st-apply').addEventListener('click', stitchApply);
+  $('st-mode').addEventListener('change', () => {
+    stitchMulti = [];
+    stitchSideA = null;
+    updateStitchUi();
+    renderAll(true);
   });
   // typing exact coordinates for the selected point
   for (const key of ['x', 'y']) {

@@ -509,6 +509,25 @@
   // sl.ang degrees (default 45) from the local tangent. sl.off (cm) shifts the
   // slit off the path along the normal — positive = inward, negative = outward;
   // outSign is the piece's outwardSign (+1 assumed when unknown/open).
+  // notch cut lines for a mark at t on edge a-b: a straight snip into the
+  // piece ('slit'), or two lines forming a V chip ('v') — real cuts from the
+  // outline inward, sized by depth
+  function notchLines(a, b, nt, outSign, depth, style) {
+    const p = segPoint(a, b, nt.t);
+    const tan = segTangent(a, b, nt.t);
+    const os = outSign == null ? 1 : outSign;
+    const n = { x: os * tan.y, y: -os * tan.x }; // outward normal
+    const apex = { x: p.x - n.x * depth, y: p.y - n.y * depth };
+    if (style === 'v') {
+      const L = segLength(a, b);
+      const dt = L > 1e-6 ? Math.min(0.45, (depth / 2) / L) : 0;
+      const p1 = segPoint(a, b, Math.max(0, nt.t - dt));
+      const p2 = segPoint(a, b, Math.min(1, nt.t + dt));
+      return [{ a: p1, b: apex }, { a: p2, b: apex }];
+    }
+    return [{ a: p, b: apex }];
+  }
+
   function slitLine(a, b, sl, outSign) {
     let p = segPoint(a, b, sl.t);
     const tan = segTangent(a, b, sl.t);
@@ -726,7 +745,7 @@
     cubicPoint, cubicTangent, flattenCubic,
     pathPolyline, pathLength, polyArea, bbox, centroid, dedupe,
     outwardSign, offsetClosed, nearestOnPath, pointInPolygon, splitSeg, setSegLength,
-    reverseNodes, weldClosedPaths, reflectPoint, reflectNodes, segArcParams, slitLine,
+    reverseNodes, weldClosedPaths, reflectPoint, reflectNodes, segArcParams, slitLine, notchLines,
     pathArcParams, simplifyPoly, offsetOpen, pathIntersections, sewSlits, clipLoops,
   };
 });

@@ -404,8 +404,8 @@ t('exportDXF produces a structurally valid R12 file', () => {
   // polylines terminated
   const polys = (out.match(/(^|\r\n)POLYLINE(\r\n|$)/g) || []).length;
   const seqends = (out.match(/(^|\r\n)SEQEND(\r\n|$)/g) || []).length;
-  assert(polys === seqends && polys === 2, `polylines=${polys} seqends=${seqends}`); // CUT + SEAM
-  for (const layer of ['CUT', 'SEAM', 'MARK']) assert(out.includes(layer), layer + ' layer present');
+  assert(polys === seqends && polys === 1, `polylines=${polys} seqends=${seqends}`); // the outline IS the cut
+  for (const layer of ['CUT', 'MARK']) assert(out.includes(layer), layer + ' layer present');
   assert(out.includes('CIRCLE'), 'drill hole circle');
   assert(!/e[+-]\d/i.test(out.replace(/SEQEND|ENDSEC|VERTEX|SECTION|ENTITIES|TABLES|HEADER|LAYER|LTYPE|ENDTAB|TABLE|CONTINUOUS|Solid line|EOF|POLYLINE|CIRCLE|LINE|CUT|SEAM|MARK|AC1009|\$\w+/g, '')), 'no exponent-notation numbers');
 });
@@ -420,29 +420,37 @@ t('exportDXF geometry lands in +x/+y quadrant, mm scale', () => {
   }
   assert(Math.min(...xs) >= -0.001, 'min x >= 0, got ' + Math.min(...xs));
   assert(Math.min(...ys) >= -0.001, 'min y >= 0, got ' + Math.min(...ys));
-  // piece is 20cm wide + 2x1cm allowance = 220mm
-  assert(Math.abs(Math.max(...xs) - 220) < 0.5, 'max x ≈ 220mm, got ' + Math.max(...xs));
-  // piece is 30cm tall + 2x1cm allowance = 320mm
-  assert(Math.abs(Math.max(...ys) - 320) < 0.5, 'max y ≈ 320mm, got ' + Math.max(...ys));
+  // the outline IS the cut line: 20cm wide = 200mm
+  assert(Math.abs(Math.max(...xs) - 200) < 0.5, 'max x ≈ 200mm, got ' + Math.max(...xs));
+  // 30cm tall = 300mm
+  assert(Math.abs(Math.max(...ys) - 300) < 0.5, 'max y ≈ 300mm, got ' + Math.max(...ys));
 });
 
-t('seam allowance of 0 exports single CUT outline', () => {
-  const d2 = JSON.parse(JSON.stringify(doc));
-  d2.pieces[0].seamAllowance = 0;
-  const out = DXF.exportDXF(d2);
-  const polys = (out.match(/(^|\r\n)POLYLINE(\r\n|$)/g) || []).length;
-  assert(polys === 1, 'one polyline, got ' + polys);
+t('legacy seamAllowance values are ignored — the outline is always the cut', () => {
+  const out = DXF.exportDXF(doc); // doc still carries seamAllowance: 1
   assert(!/(^|\r\n)8\r\nSEAM/.test(out), 'no SEAM layer entities');
 });
 
-t('notch slit sits on the cutting line and points inward', () => {
+t('notch slit cuts from the outline into the piece', () => {
   const shapes = DXF.pieceShapes(doc.pieces[0]);
   const notch = shapes.lines.find((l) => l.layer === 'CUT');
   assert(notch, 'notch line exists');
-  // notch on seg 1 (x=20 edge, midpoint y=15): cut line at x=21, slit to x=20.6
-  assert(Math.abs(notch.a.x - 21) < 0.01, 'starts at cut line, x=' + notch.a.x);
-  assert(Math.abs(notch.b.x - 20.6) < 0.01, 'ends inward, x=' + notch.b.x);
+  // notch on seg 1 (x=20 edge, midpoint y=15): starts ON the edge, cuts inward
+  assert(Math.abs(notch.a.x - 20) < 0.01, 'starts on the outline, x=' + notch.a.x);
+  assert(Math.abs(notch.b.x - 19.6) < 0.01, 'ends inward, x=' + notch.b.x);
   assert(Math.abs(notch.a.y - 15) < 0.01 && Math.abs(notch.b.y - 15) < 0.01);
+});
+
+t('V-style notch cuts a small chip: two arms meeting at the apex', () => {
+  const p2 = JSON.parse(JSON.stringify(doc.pieces[0]));
+  p2.notchStyle = 'v';
+  const shapes = DXF.pieceShapes(p2);
+  const vls = shapes.lines.filter((l) => l.layer === 'CUT');
+  assert(vls.length === 2, 'two V arms: ' + vls.length);
+  for (const l of vls) assert(Math.abs(l.a.x - 20) < 0.01, 'V arm starts on the edge');
+  assert(Math.abs(Math.abs(vls[0].a.y - vls[1].a.y) - 0.4) < 0.02, 'V mouth width');
+  assert(Geo.dist(vls[0].b, vls[1].b) < 1e-9, 'arms share the apex');
+  assert(Math.abs(vls[0].b.x - 19.6) < 0.01, 'apex 0.4cm inside');
 });
 
 // folded piece: right half of a 20x10 rect, fold on the x=10 edge (seg 1... no,
@@ -485,8 +493,8 @@ t('folded piece exports at full size with fold on MARK layer', () => {
   for (let i = 0; i < lines.length - 1; i++) {
     if (lines[i] === '10' && lines[i - 1] !== '$EXTMIN' && lines[i - 1] !== '$EXTMAX') xs.push(parseFloat(lines[i + 1]));
   }
-  // 20cm piece + 2x1cm allowance = 220mm wide
-  assert(Math.abs(Math.max(...xs) - 220) < 0.5, 'max x ≈ 220mm, got ' + Math.max(...xs));
+  // 20cm unfolded piece = 200mm wide (no allowance)
+  assert(Math.abs(Math.max(...xs) - 200) < 0.5, 'max x ≈ 200mm, got ' + Math.max(...xs));
   const shapes = DXF.pieceShapes(foldedPiece());
   const fold = shapes.lines.find((l) => l.layer === 'MARK');
   assert(fold && Math.abs(fold.a.x - 10) < 1e-9 && Math.abs(fold.b.x - 10) < 1e-9, 'fold marked at x=10');

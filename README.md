@@ -1,8 +1,9 @@
 # ✂ Pattern Studio
 
 A free, browser-based **2D pattern drafting tool** — think CLO3D's 2D pattern window
-without the 3D simulation. Draft pattern pieces, add seam allowance, notches, drill
-holes and grainlines, then **export DXF straight to your laser cutter**.
+without the 3D simulation. Draft pattern pieces, add notches, stitch holes, drill
+holes and grainlines, then **export DXF straight to your laser cutter**. What you
+draw is what gets cut — the outline IS the cutting line, no hidden allowances.
 
 No install, no server, no subscription. Open `index.html` in a browser and draft.
 
@@ -25,10 +26,9 @@ to a file on your computer** (it asks where once, then `Ctrl+S` saves in place;
 | **Shape tool** | drag rectangles and ellipses (circle = equal drag) with live dimensions, snapped to grid and points |
 | **Pen tool** | click = corner point, click-drag = curve (bezier handles), click the first point to close the piece · live length readout while drawing · **right-click to type an exact length + angle** for the next segment |
 | **Edit** | drag points, handles, edges (edges move freely) and pieces · **`Shift`-click edges (or `Shift`-drag a box)** to gather several — drag one to move them together, and the same set feeds the Offset tool · **exact moves**: type X/Y coordinates for a point, or a **Move by Δx/Δy** (cm) for any selection — point, point group, edge, hole, piece, or every marquee-selected piece · **arrow keys move the selection** (Shift = 5×, Alt = 0.1cm; notches/slits slide along their edge) · **drag on empty canvas to marquee-select** pieces — or, with a piece selected, its **points** (move/nudge/delete as a group) · **`Shift`-click pieces** (guide/stitch lines included) to gather several into a group, `Shift`-marquee adds to it · **Ctrl+C/V/X/D** copy, paste (works across tabs), cut, duplicate · **right-click a point** to convert corner↔curve, round, or delete it · **round a corner**: select a point, type a radius, Round · double-click a point to toggle corner↔smooth · double-click an edge to insert a point · **right-click an edge to divide it** at a distance (cm), a percentage, or into N equal parts (arc-length accurate on curves) · Del removes · delete a single curve handle by dragging it onto its point, double-clicking it, or the ×&nbsp;in / ×&nbsp;out buttons |
-| **Seam allowance** | per-piece width (cm); the dashed line is the cutting line, computed as a true outward offset — also what goes on the DXF `CUT` layer |
-| **Notches** | click an edge; exported as short slits from the cutting line inward (so the laser cuts them) |
+| **Notches** | click an edge; a **real cut into the piece** from the outline inward, in two per-piece styles — **Slit** (one straight cut) or **V cut** (two arms meeting at an apex, so the laser drops the chip out) — depth per piece (cm), drawn live and exported on `CUT` |
 | **Offset tool** | one tool for everything that pushes edges parallel to themselves, in three modes · **Slide** — move the selected edges along their normals (out or in), mitred where two selected edges share a corner, neighbouring edges stretch · **Protrude** — extrude each selected edge into a tab (or a recess, inward): its corners stay and straight side walls form · **Guide line** — scribe a dashed guide inset from the picked edges (the stitch line; mitered runs, click inside a piece for a full ring; exports to `MARK`, never cut) · build the edge set by clicking edges (click again to remove) or **dragging a box**; then drag a selected edge for a live offset with a ± cm readout, or type a distance and Apply for exact values |
-| **Stitch holes** | diagonal slits for hand sewing (leather/felt) — click two edges, guide lines **or internal cutouts** and both get the **same number of holes at matching positions** (a cutout gets a ring of holes inset *into* the material); guides get holes along their whole length (including closed rings) · **bulk mode: `Shift`-click (or drag a box over) many edges/guide lines**, then Enter or "Stitch selected" runs holes along each in one step — contiguous edges of a piece stitch as **one continuous run along the mitred inset line** (Inset setting honoured around corners; the full outline becomes a single loop) · every run is **one object**: click a stitched edge (or any single hole) and "Delete stitch line" removes the whole run · **delete a section**: drag a box over some holes (or `Shift`-click them) and Del removes just those — holes stay separate marks until export, where they become cut slits · spacing/slit length configurable, exported on `CUT` |
+| **Stitch holes** | diagonal slits for hand sewing (leather/felt), in two modes · **Single** (default): click, `Shift`-click or **drag a box** over any mix of edges, guide lines and internal cutouts, then Enter or "Stitch selected" — each continuous run gets holes spaced along its own length; contiguous edges of a piece stitch as **one run along the mitred inset line** (Inset honoured around corners, the full outline becomes a single loop, a cutout gets a ring of holes inset *into* the material) · **Matched**: gather side A the same way (several connected edges chain into one seam), confirm with **"Set side A ▸"**, gather side B, then "Stitch matched" — both sides get the **same number of holes at matching positions** for pairing seams, hole count taken from side A's length · every run is **one object**: click a stitched edge (or any single hole) and "Delete stitch line" removes the whole run · **delete a section**: drag a box over some holes (or `Shift`-click them) and Del removes just those — holes stay separate marks until export, where they become cut slits · spacing/slit length configurable, exported on `CUT` |
 | **Drill holes** | marked circles on the `MARK` layer |
 | **Grainline** | drag inside a piece; double-ended arrow |
 | **Edge length** | select an edge and type a target length (cm); the edge rescales about a chosen anchor (both ends / start / end) and curves keep their shape — for walking seams |
@@ -53,9 +53,8 @@ to a file on your computer** (it asks where once, then `Ctrl+S` saves in place;
 - **Curves** are flattened to polylines at 0.1 mm tolerance (laser software prefers
   polylines over SPLINE entities — no interpolation surprises).
 - **Layers**:
-  - `CUT` (red) — the cutting line (= seam line + allowance, or the outline if allowance is 0) **plus notch slits**
-  - `SEAM` (green) — the stitch line, when allowance > 0 (set this layer to "no output" in your laser software, or engrave it)
-  - `MARK` (blue) — grainlines and drill-hole circles (engrave or ignore)
+  - `CUT` (red) — the piece outline (exactly as drawn) and internal cutouts, **plus notch cuts and stitch slits**
+  - `MARK` (blue) — grainlines, drill-hole circles, guide lines and fold lines (engrave or ignore)
 
 SVG export (true-size, mm) is also available for printing or Inkscape.
 
@@ -75,8 +74,8 @@ The **Open** button also accepts `.dxf` — patterns from Seamly2D/Valentina, CL
   size-based guess (mm/cm/in).
 - Straight runs are simplified (0.5 mm tolerance), so densely flattened exports don't
   arrive with hundreds of points; sub-centimetre debris (notch/stitch slits) is filtered.
-- Imported pieces default to seam allowance 0, since an exported outline is usually
-  already the cutting line.
+- The imported outline is used as-is — it becomes the cutting line, same as
+  pieces drafted here.
 
 ## Keyboard
 
@@ -90,7 +89,7 @@ The **Open** button also accepts `.dxf` — patterns from Seamly2D/Valentina, CL
 node test/core.test.js
 ```
 
-Covers bezier flattening/lengths, seam-allowance offsetting (both windings),
+Covers bezier flattening/lengths, outline offsetting (both windings),
 outward-normal orientation, curve splitting, and DXF structure/scale/notch geometry.
 
 ## Roadmap
