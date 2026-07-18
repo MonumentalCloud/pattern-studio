@@ -453,6 +453,46 @@ t('V-style notch cuts a small chip: two arms meeting at the apex', () => {
   assert(Math.abs(vls[0].b.x - 19.6) < 0.01, 'apex 0.4cm inside');
 });
 
+t('notch ON a corner point: slit bisects the corner', () => {
+  // 10x10 square (10,10)-(20,20), CW in y-down screen coords
+  const N = (x, y) => ({ x, y, hin: null, hout: null });
+  const nodes = [N(10, 10), N(20, 10), N(20, 20), N(10, 20)];
+  const s = Geo.outwardSign(Geo.pathPolyline(nodes, true, 0.05));
+  const [ln] = Geo.notchLinesPath(nodes, true, { seg: 1, t: 0 }, s, 0.4, 'slit');
+  // anchored exactly on the corner (20,10), cutting inward along the bisector
+  assert(Math.abs(ln.a.x - 20) < 1e-9 && Math.abs(ln.a.y - 10) < 1e-9, 'starts on the point');
+  const d = 0.4 / Math.SQRT2;
+  assert(Math.abs(ln.b.x - (20 - d)) < 0.01 && Math.abs(ln.b.y - (10 + d)) < 0.01,
+    'apex on the 45-degree bisector: ' + JSON.stringify(ln.b));
+});
+
+t('V notch ON a corner: arms spread across BOTH adjacent edges', () => {
+  const N = (x, y) => ({ x, y, hin: null, hout: null });
+  const nodes = [N(10, 10), N(20, 10), N(20, 20), N(10, 20)];
+  const s = Geo.outwardSign(Geo.pathPolyline(nodes, true, 0.05));
+  const arms = Geo.notchLinesPath(nodes, true, { seg: 1, t: 0 }, s, 0.4, 'v');
+  assert(arms.length === 2, 'two arms');
+  // one mouth point 0.2 back along the top edge, the other 0.2 down the right edge
+  const mouths = arms.map((l) => l.a).sort((a, b) => a.y - b.y);
+  assert(Math.abs(mouths[0].x - 19.8) < 0.01 && Math.abs(mouths[0].y - 10) < 0.01,
+    'arm on the top edge: ' + JSON.stringify(mouths[0]));
+  assert(Math.abs(mouths[1].x - 20) < 0.01 && Math.abs(mouths[1].y - 10.2) < 0.01,
+    'arm on the right edge: ' + JSON.stringify(mouths[1]));
+  assert(Geo.dist(arms[0].b, arms[1].b) < 1e-9, 'arms share the apex');
+});
+
+t('notchLinesPath mid-edge matches the plain notchLines result', () => {
+  const N = (x, y) => ({ x, y, hin: null, hout: null });
+  const nodes = [N(10, 10), N(20, 10), N(20, 20), N(10, 20)];
+  const s = Geo.outwardSign(Geo.pathPolyline(nodes, true, 0.05));
+  const nt = { seg: 2, t: 0.5 };
+  const a = Geo.notchLines(nodes[2], nodes[3], nt, s, 0.4, 'v');
+  const b = Geo.notchLinesPath(nodes, true, nt, s, 0.4, 'v');
+  for (let i = 0; i < 2; i++) {
+    assert(Geo.dist(a[i].a, b[i].a) < 1e-9 && Geo.dist(a[i].b, b[i].b) < 1e-9, 'arm ' + i);
+  }
+});
+
 // folded piece: right half of a 20x10 rect, fold on the x=10 edge (seg 1... no,
 // half is 10x10 with fold on its right edge) — unfolds to the full 20x10
 const foldedPiece = () => ({

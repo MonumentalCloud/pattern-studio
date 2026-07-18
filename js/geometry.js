@@ -528,6 +528,56 @@
     return [{ a: p, b: apex }];
   }
 
+  // vertex-aware notch: like notchLines, but with the whole path in hand —
+  // at a node the cut bisects the corner, and a V spreads its arms by arc
+  // length across the adjacent edges instead of clamping inside one segment
+  function notchLinesPath(nodes, closed, nt, outSign, depth, style) {
+    const n = nodes.length;
+    const segCount = closed ? n : n - 1;
+    const A = nodes[nt.seg], B = nodes[(nt.seg + 1) % n];
+    const p = segPoint(A, B, nt.t);
+    const os = outSign == null ? 1 : outSign;
+    let tan = segTangent(A, B, nt.t);
+    // sitting on a vertex: average the tangents of both edges (corner bisector)
+    let other = null;
+    if (nt.t < 1e-6) {
+      const ps = nt.seg > 0 ? nt.seg - 1 : (closed ? n - 1 : -1);
+      if (ps >= 0) other = segTangent(nodes[ps], nodes[(ps + 1) % n], 1);
+    } else if (nt.t > 1 - 1e-6) {
+      const ns = nt.seg < segCount - 1 ? nt.seg + 1 : (closed ? 0 : -1);
+      if (ns >= 0) other = segTangent(nodes[ns], nodes[(ns + 1) % n], 0);
+    }
+    if (other) {
+      const m = Math.hypot(tan.x + other.x, tan.y + other.y);
+      if (m > 1e-6) tan = { x: (tan.x + other.x) / m, y: (tan.y + other.y) / m };
+    }
+    const nrm = { x: os * tan.y, y: -os * tan.x }; // outward normal
+    const apex = { x: p.x - nrm.x * depth, y: p.y - nrm.y * depth };
+    if (style !== 'v') return [{ a: p, b: apex }];
+    const walk = (dir) => {
+      let seg = nt.seg, t = nt.t, rem = depth / 2;
+      for (let guard = 0; guard <= n; guard++) {
+        const a2 = nodes[seg], b2 = nodes[(seg + 1) % n];
+        const L = segLength(a2, b2);
+        const avail = dir > 0 ? (1 - t) * L : t * L;
+        if (rem <= avail || L < 1e-9) {
+          const dt = L > 1e-9 ? (rem / L) * dir : 0;
+          return segPoint(a2, b2, Math.max(0, Math.min(1, t + dt)));
+        }
+        rem -= avail;
+        if (dir > 0) {
+          if (seg + 1 >= segCount && !closed) return segPoint(a2, b2, 1);
+          seg = (seg + 1) % segCount; t = 0;
+        } else {
+          if (seg - 1 < 0 && !closed) return segPoint(a2, b2, 0);
+          seg = (seg - 1 + segCount) % segCount; t = 1;
+        }
+      }
+      return p;
+    };
+    return [{ a: walk(-1), b: apex }, { a: walk(1), b: apex }];
+  }
+
   function slitLine(a, b, sl, outSign) {
     let p = segPoint(a, b, sl.t);
     const tan = segTangent(a, b, sl.t);
@@ -745,7 +795,7 @@
     cubicPoint, cubicTangent, flattenCubic,
     pathPolyline, pathLength, polyArea, bbox, centroid, dedupe,
     outwardSign, offsetClosed, nearestOnPath, pointInPolygon, splitSeg, setSegLength,
-    reverseNodes, weldClosedPaths, reflectPoint, reflectNodes, segArcParams, slitLine, notchLines,
+    reverseNodes, weldClosedPaths, reflectPoint, reflectNodes, segArcParams, slitLine, notchLines, notchLinesPath,
     pathArcParams, simplifyPoly, offsetOpen, pathIntersections, sewSlits, clipLoops,
   };
 });

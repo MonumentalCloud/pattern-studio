@@ -194,8 +194,7 @@
       const s = Geo.outwardSign(seamPts);
       for (const nt of piece.notches) {
         if (nt.seg >= nodes.length) continue;
-        const a = nodes[nt.seg], b = nodes[(nt.seg + 1) % nodes.length];
-        for (const ln of Geo.notchLines(a, b, nt, s, notchLen, piece.notchStyle)) {
+        for (const ln of Geo.notchLinesPath(nodes, closed, nt, s, notchLen, piece.notchStyle)) {
           out.lines.push({ layer: 'CUT', a: ln.a, b: ln.b });
         }
       }

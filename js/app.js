@@ -326,8 +326,7 @@
         const nl = piece.notchLength || 0.4;
         for (const nt of rp.notches) {
           if (nt.seg >= nodes.length) continue;
-          const a = nodes[nt.seg], b = nodes[(nt.seg + 1) % nodes.length];
-          for (const ln of Geo.notchLines(a, b, nt, s, nl, piece.notchStyle)) {
+          for (const ln of Geo.notchLinesPath(nodes, closed, nt, s, nl, piece.notchStyle)) {
             el('line', { class: 'piece-notch', x1: ln.a.x, y1: ln.a.y, x2: ln.b.x, y2: ln.b.y }, g);
           }
         }
@@ -496,6 +495,12 @@
       }
     }
 
+    // selected internal cutout
+    if (sel.kind === 'cut') {
+      const c = (piece.cutouts || [])[sel.idx];
+      if (c && c.nodes.length > 2) el('path', { class: 'seg-highlight', d: pathD(c.nodes, true) }, gOverlay);
+    }
+
     // selected stitch holes (single or set)
     if (sel.kind === 'slit' || (sel.kind === 'slits' && sel.slits)) {
       const picked = sel.kind === 'slit' ? [sel.idx] : sel.slits;
@@ -580,7 +585,8 @@
     const showNode = piece && sel.kind === 'node' && piece.path.nodes[sel.idx];
     const showSeg = piece && sel.kind === 'seg';
     const showSegs = piece && sel.kind === 'segs' && sel.segs && sel.segs.length > 0;
-    const showMove = piece && (showNode || showSeg || showSegs || sel.kind === 'hole' ||
+    const cutSel = piece && sel.kind === 'cut' && (piece.cutouts || [])[sel.idx];
+    const showMove = piece && (showNode || showSeg || showSegs || sel.kind === 'hole' || cutSel ||
       (sel.kind === 'nodes' && sel.nodes.length > 0));
     const slitSel = piece && sel.kind === 'slit' && (piece.stitchSlits || [])[sel.idx];
     const slitsSel = piece && sel.kind === 'slits' && sel.slits && sel.slits.length > 0;
@@ -663,6 +669,10 @@
         `${sel.nodes.length} points selected — drag or arrows move them · type Δx/Δy for an exact move.`;
     } else if (sel.kind === 'hole') {
       $('sel-hint').textContent = 'Drill hole — drag or arrows move it · type Δx/Δy for an exact move.';
+    } else if (cutSel) {
+      const cSlits = (piece.stitchSlits || []).filter((sl) => sl.cut === sel.idx).length;
+      $('sel-hint').textContent = 'Internal cutout — drag / arrows / Move by reposition it · Del removes it' +
+        (cSlits ? ` (and its ${cSlits} stitch holes)` : '') + '.';
     }
   }
 
@@ -675,7 +685,7 @@
     select: 'Click a piece or point to select · drag to move · Shift-click pieces or edges to gather several · drag empty space to box-select pieces (piece selected: its points · +Shift: its edges) · Del deletes',
     pen: 'Click = corner, drag = curve · right-click = type exact length/angle · click the first point to close · Esc finishes open',
     shape: 'Drag corner to corner — the panel picks rectangle or ellipse · snaps to grid and existing points',
-    notch: 'Click near an edge to add a notch',
+    notch: 'Click near a point on an outline — the notch snaps to it · right-click an edge (Select tool) to divide it where you need a point',
     hole: 'Click inside a piece to add a drill hole',
     grain: 'Drag inside a piece to set the grainline · click (no drag) removes it',
     weld: 'Click an edge, then the matching edge on another piece — the second piece moves; both seam edges disappear',
@@ -998,6 +1008,22 @@
         }
         drag.applied = { x: sdx, y: sdy };
         renderAll(true);
+      }
+      return;
+    }
+    if (drag.type === 'cutout') {
+      const piece = pieceById(drag.pieceId);
+      const c = piece && (piece.cutouts || [])[drag.idx];
+      if (c) {
+        const dx = w.x - drag.start.x, dy = w.y - drag.start.y;
+        const s = snapOn() ? snapStep() : 0.0001;
+        const sdx = Math.round(dx / s) * s, sdy = Math.round(dy / s) * s;
+        const ddx = sdx - drag.applied.x, ddy = sdy - drag.applied.y;
+        if (ddx || ddy) {
+          for (const nd of c.nodes) { nd.x += ddx; nd.y += ddy; }
+          drag.applied = { x: sdx, y: sdy };
+          renderAll(true);
+        }
       }
       return;
     }
@@ -1332,7 +1358,7 @@
         return;
       }
       if (drag.type === 'scale' || drag.type === 'rotate') clear(gPreview);
-      if (['node', 'nodes', 'handle', 'piece', 'seg', 'scale', 'rotate'].includes(drag.type)) { endChange(); renderSidebar(); }
+      if (['node', 'nodes', 'handle', 'piece', 'seg', 'scale', 'rotate', 'cutout'].includes(drag.type)) { endChange(); renderSidebar(); }
       if (drag.type === 'pen-handle') renderPenPreview();
       drag = null;
       return;
@@ -1652,6 +1678,19 @@
       }
       const hi = (piece.holes || []).findIndex((h) => Geo.dist(h, w) < px(8));
       if (hi >= 0) { sel.kind = 'hole'; sel.idx = hi; renderAll(true); renderSidebar(); return; }
+      // 2c. internal cutout ring of the selected piece
+      const ci = (piece.cutouts || []).findIndex((c) => {
+        if (!c.nodes || c.nodes.length < 3) return false;
+        const h2 = Geo.nearestOnPath(c.nodes, true, w);
+        return h2 && h2.dist < px(6);
+      });
+      if (ci >= 0) {
+        sel.kind = 'cut'; sel.idx = ci; sel.nodes = [];
+        beginChange();
+        drag = { type: 'cutout', pieceId: piece.id, idx: ci, start: w, applied: { x: 0, y: 0 } };
+        renderAll(true); renderSidebar();
+        return;
+      }
       // 3. segment of the selected piece — dragging moves the edge freely;
       // Shift-click gathers several edges into a set (the Offset tool then
       // slides/protrudes the same set along its normals)
@@ -2051,11 +2090,21 @@
   function notchDown(w) {
     const res = pickPieceAt(w, false);
     if (!res || !res.piece.path.closed) return;
+    // notches anchor to POINTS only: snap to the outline node nearest the
+    // click — divide an edge first to put a point exactly where you need it
+    const nodes = res.piece.path.nodes;
+    let bi = 0, bd = Infinity;
+    nodes.forEach((nd, i) => {
+      const d = Math.hypot(nd.x - w.x, nd.y - w.y);
+      if (d < bd) { bd = d; bi = i; }
+    });
     beginChange();
     res.piece.notches = res.piece.notches || [];
-    res.piece.notches.push({ seg: res.hit.seg, t: res.hit.t });
+    res.piece.notches.push({ seg: bi, t: 0 });
     endChange();
     selectPiece(res.piece.id);
+    $('status-hint').textContent =
+      `Notch snapped to the point at ${fmt(nodes[bi].x)}, ${fmt(nodes[bi].y)} — divide an edge (right-click it) to add points`;
     renderAll();
   }
 
@@ -3312,6 +3361,8 @@
     } else if (sel.kind === 'hole' && piece.holes && piece.holes[sel.idx]) {
       piece.holes[sel.idx].x += dx;
       piece.holes[sel.idx].y += dy;
+    } else if (sel.kind === 'cut' && piece.cutouts && piece.cutouts[sel.idx]) {
+      for (const nd of piece.cutouts[sel.idx].nodes) { nd.x += dx; nd.y += dy; }
     } else if (sel.kind === 'notch' || sel.kind === 'slit') {
       const arr = sel.kind === 'notch' ? piece.notches : piece.stitchSlits;
       const it = arr && arr[sel.idx];
@@ -3519,6 +3570,12 @@
       sel.slits = [];
     } else if (sel.kind === 'hole') {
       piece.holes.splice(sel.idx, 1);
+      sel.kind = null;
+    } else if (sel.kind === 'cut' && piece.cutouts && piece.cutouts[sel.idx]) {
+      // internal cutout: remove it and any stitch run that rode on it
+      piece.cutouts.splice(sel.idx, 1);
+      piece.stitchSlits = (piece.stitchSlits || []).filter((sl) => sl.cut !== sel.idx);
+      for (const sl of piece.stitchSlits) if (sl.cut != null && sl.cut > sel.idx) sl.cut--;
       sel.kind = null;
     } else {
       doc.pieces = doc.pieces.filter((p) => p.id !== piece.id);
