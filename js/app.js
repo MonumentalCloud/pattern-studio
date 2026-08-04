@@ -3122,7 +3122,7 @@
     let placed = 0;
     if (chain.anchor.kind === 'guide') {
       for (const pos of Geo.pathArcParams(chain.path, chain.loop, fractions)) {
-        piece.stitchSlits.push({ seg: pos.seg, t: pos.t, len: slitLen, ang: 45, off: 0, run });
+        piece.stitchSlits.push({ seg: pos.seg, t: pos.t, len: slitLen, ang: 135, off: 0, run });
         placed++;
       }
       return placed;
@@ -3151,7 +3151,7 @@
       const nrm = { x: os * tan.y, y: -os * tan.x };
       const offI = (q.x - P.x) * nrm.x + (q.y - P.y) * nrm.y;
       const tofI = (P.x - q.x) * tan.x + (P.y - q.y) * tan.y;
-      const slit = { seg: hit.seg, t: hit.t, len: slitLen, ang: 45, off: offI, run };
+      const slit = { seg: hit.seg, t: hit.t, len: slitLen, ang: 135, off: offI, run };
       if (isCut) slit.cut = chain.anchor.cut;
       if (Math.abs(tofI) > 1e-6) slit.toff = tofI;
       piece.stitchSlits.push(slit);
@@ -3631,7 +3631,7 @@
           sl.seg = copy.path.closed ? (2 * n - 2 - sl.seg) % n : (n - 2 - sl.seg);
         }
         sl.t = 1 - sl.t;
-        sl.ang = -(sl.ang == null ? 45 : sl.ang); // keep the diagonal mirrored
+        sl.ang = -(sl.ang == null ? 135 : sl.ang); // keep the diagonal mirrored
         if (sl.toff) sl.toff = -sl.toff; // tangent reverses with the path
       }
       if (copy.foldSeg != null && copy.path.closed) copy.foldSeg = (2 * n - 2 - copy.foldSeg) % n;

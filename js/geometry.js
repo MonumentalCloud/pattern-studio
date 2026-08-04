@@ -506,7 +506,7 @@
   }
 
   // Endpoints of a stitching slit: a short line at parameter sl.t, rotated
-  // sl.ang degrees (default 45) from the local tangent. sl.off (cm) shifts the
+  // sl.ang degrees (default 135) from the local tangent. sl.off (cm) shifts the
   // slit off the path along the normal — positive = inward, negative = outward;
   // outSign is the piece's outwardSign (+1 assumed when unknown/open).
   // notch cut lines for a mark at t on edge a-b: a straight snip into the
@@ -591,7 +591,7 @@
       // mitred inset line (the pure-normal model can't express that)
       p = { x: p.x + tan.x * sl.toff, y: p.y + tan.y * sl.toff };
     }
-    const ang = (sl.ang == null ? 45 : sl.ang) * Math.PI / 180;
+    const ang = (sl.ang == null ? 135 : sl.ang) * Math.PI / 180;
     const c = Math.cos(ang), s = Math.sin(ang);
     const d = { x: c * tan.x - s * tan.y, y: s * tan.x + c * tan.y };
     const h = (sl.len || 0.15) / 2;
