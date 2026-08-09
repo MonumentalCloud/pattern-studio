@@ -9,7 +9,7 @@
 <body>
 <div id="app">
   <header id="topbar">
-    <span id="logo" title="build 57">✂ Pattern Studio</span>
+    <span id="logo" title="build 58">✂ Pattern Studio</span>
     <input id="doc-name" type="text" value="Untitled pattern" spellcheck="false" title="Pattern name">
     <span class="sep"></span>
     <button id="btn-new" title="New document">New</button>
@@ -200,10 +200,20 @@
         <div class="row" id="sel-clear-slits-row" hidden>
           <button id="sp-clear-slits" title="Delete every stitching slit on this edge (zoom in to pick single ones)">Remove stitch holes</button>
         </div>
+        <div class="row" id="sel-slit-ang-ref-row" hidden>
+          <label>Slant from</label>
+          <select id="sp-slit-ang-ref" title="From edge: measured off the edge the hole sits on, so slits follow the outline. From page: one fixed direction for every hole (0 = horizontal, 90 = vertical)">
+            <option value="edge">Edge — follows the outline</option>
+            <option value="page">Page — all parallel</option>
+          </select>
+        </div>
         <div class="row" id="sel-slit-ang-row" hidden>
           <label>Slant</label>
-          <input id="sp-slit-ang" type="number" min="-180" max="180" step="5" title="Angle of the slit measured from the edge it sits on — 45 and −45 are the two diagonals"> <em>°</em>
-          <button id="sp-slit-ang-sel" title="Set the slant on the selected hole(s)">Set</button>
+          <input id="sp-slit-ang" type="number" min="-180" max="180" step="5" title="From edge: ±45 are the two diagonals. From page: 0 = horizontal, 90 = vertical"> <em>°</em>
+          <span id="sp-slit-ang-eg" class="ang-eg"></span>
+        </div>
+        <div class="row btns" id="sel-slit-ang-btns" hidden>
+          <button id="sp-slit-ang-sel" title="Set the slant on the selected hole(s)">Set selected</button>
           <button id="sp-slit-ang-run" title="Set the slant on every hole of this stitch line">Whole line</button>
         </div>
         <div class="row" id="sel-del-run-row" hidden>
@@ -259,8 +269,14 @@
           <input id="st-len" type="number" min="0.05" max="1" step="0.05" value="0.15"> <em>cm</em></div>
         <div class="row"><label>Inset</label>
           <input id="st-off" type="number" min="-2" max="2" step="0.05" value="0" title="Distance from the edge: + moves the slits inside the piece, − outside, 0 centers them on the line"> <em>cm</em></div>
+        <div class="row"><label>Slant from</label>
+          <select id="st-ang-ref" title="From edge: the angle is measured off the edge each hole sits on, so the slits follow the outline round a curve (traditional saddle stitch). From page: one fixed direction for every hole, so they all stay parallel however the outline turns">
+            <option value="edge">Edge — follows the outline</option>
+            <option value="page">Page — all parallel</option>
+          </select></div>
         <div class="row"><label>Slant</label>
-          <input id="st-ang" type="number" min="-180" max="180" step="5" value="45" title="Angle of each slit measured from the edge it sits on (not from the page) — 45 and −45 are the two diagonals, 90 is square across the edge"> <em>°</em></div>
+          <input id="st-ang" type="number" min="-180" max="180" step="5" value="45" title="From edge: ±45 are the two diagonals, 90 is square across the edge. From page: 0 = horizontal, 90 = vertical, 45 = ＼, −45 = ／"> <em>°</em>
+          <span id="st-ang-eg" class="ang-eg"></span></div>
         <div class="row btns"><button id="st-apply" title="Advance the current mode (Enter): Single stitches the selection; Matched confirms side A, then stitches A + B together">Stitch selected</button></div>
         <div class="row hint">Diagonal slits for hand sewing. Select edges, guide lines or internal
           cutouts — click, Shift-click or drag a box; contiguous edges chain into one run.
@@ -302,7 +318,7 @@
           <li><b>Knife</b>: click two points (or an open path) to cut a piece in two</li>
           <li><b>Boolean</b>: overlap two pieces → union / subtract / intersect</li>
           <li><b>Shape</b>: drag rectangles/ellipses · dragging pieces magnets onto other points</li>
-          <li><b>Pieces list</b>: double-click a name to rename it in place (Enter saves, Esc cancels)</li>
+          <li><b>Pieces list</b>: double-click a name — or hit the ✎ — to rename it in place (Enter saves, Esc cancels)</li>
           <li><b>Del</b> removes point · scroll/two-finger pans · pinch or <b>Ctrl</b>+scroll zooms · <b>Space</b>+drag pans</li>
           <li>Dashed line = cutting line (seam allowance)</li>
         </ul>

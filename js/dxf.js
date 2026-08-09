@@ -119,6 +119,14 @@
       const m = res.xform(Geo.reflectPoint(h, a, b));
       if (Geo.dist(h, m) > 0.05) holes.push({ x: m.x, y: m.y, r: h.r });
     }
+    // reflecting the half mirrors each slit's diagonal. An edge-referenced
+    // angle just negates (the reflection reverses handedness against the
+    // tangent); a page-referenced one has to mirror about the fold axis itself.
+    const axisDeg = Math.atan2(b.y - a.y, b.x - a.x) * 180 / Math.PI;
+    const mirrorAng = (sl) => {
+      const v = sl.ang == null ? 45 : sl.ang;
+      return sl.abs ? 2 * axisDeg - v : -v;
+    };
     const stitchSlits = [];
     for (const sl of piece.stitchSlits || []) {
       if (sl.cut != null) { stitchSlits.push(sl); continue; } // rides its cutout as-is
@@ -129,7 +137,7 @@
         stitchSlits.push(Object.assign({}, sl, {
           seg: s2,
           t: res.flipT ? 1 - sl.t : sl.t,
-          ang: -(sl.ang == null ? 45 : sl.ang), // reflection mirrors the diagonal
+          ang: mirrorAng(sl),
           toff: sl.toff ? -sl.toff : undefined, // tangent reverses with the path
         }));
       }

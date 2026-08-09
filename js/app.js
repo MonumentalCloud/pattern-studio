@@ -592,6 +592,10 @@
 
   // ---------- sidebar ----------
   let renamingId = null; // piece whose name is being edited inline in the list
+  // Selecting a piece rebuilds the whole list, so the second click of a
+  // double-click lands on a freshly created node and the browser never fires
+  // dblclick. Pair the clicks ourselves instead — this survives the rebuild.
+  let lastRowClick = { id: null, t: 0 };
 
   // a typed name is taken as typed — uniqueName only tidies generated ones
   function commitRename(piece, raw) {
@@ -659,14 +663,25 @@
       const nm = document.createElement('span');
       nm.className = 'nm';
       nm.textContent = piece.name;
-      nm.title = piece.name + ' — double-click to rename';
-      nm.addEventListener('dblclick', (e) => {
+      nm.title = piece.name + ' — double-click (or the ✎) to rename';
+      const ren = document.createElement('span');
+      ren.className = 'ren';
+      ren.textContent = '✎';
+      ren.title = 'Rename this piece';
+      ren.addEventListener('click', (e) => {
         e.stopPropagation();
         renamingId = piece.id;
         renderSidebar();
       });
-      li.append(eye, nm, ln);
-      li.addEventListener('click', () => { selectPiece(piece.id); renderAll(); });
+      li.append(eye, nm, ren, ln);
+      li.addEventListener('click', () => {
+        const now = Date.now();
+        const again = lastRowClick.id === piece.id && now - lastRowClick.t < 500;
+        lastRowClick = again ? { id: null, t: 0 } : { id: piece.id, t: now };
+        if (again) renamingId = piece.id;
+        selectPiece(piece.id);
+        renderAll();
+      });
       list.appendChild(li);
     }
 
@@ -695,6 +710,18 @@
     $('sel-props').hidden = !(showNode || showSeg || showSegs || showMove || slitSel || slitsSel);
     $('sel-del-run-row').hidden = !(slitSel || slitsSel);
     $('sel-slit-ang-row').hidden = !(slitSel || slitsSel);
+    $('sel-slit-ang-ref-row').hidden = !(slitSel || slitsSel);
+    $('sel-slit-ang-btns').hidden = !(slitSel || slitsSel);
+    {
+      const shown = slitSel || (slitsSel ? piece.stitchSlits[sel.slits[0]] : null);
+      if (shown) {
+        if (document.activeElement !== $('sp-slit-ang-ref')) {
+          $('sp-slit-ang-ref').value = shown.abs ? 'page' : 'edge';
+        }
+        $('sp-slit-ang-eg').textContent =
+          angLabel(shown.ang == null ? 45 : shown.ang, !!shown.abs);
+      }
+    }
     if (slitSel) {
       const runOf = (sl) => (slitSel.run != null ? sl.run === slitSel.run : (sl.seg === slitSel.seg && sl.cut === slitSel.cut));
       const count = piece.stitchSlits.filter(runOf).length;
@@ -702,8 +729,10 @@
       if (document.activeElement !== $('sp-slit-ang')) {
         $('sp-slit-ang').value = slitSel.ang == null ? 45 : slitSel.ang;
       }
-      $('sel-hint').textContent =
-        'One hole of a stitch line — the slant is measured from the edge it sits on, so ±45 are the two diagonals · Del removes just this hole; the button removes the whole line. Shift-click or drag a box to gather several holes.';
+      $('sel-hint').textContent = 'One hole of a stitch line — ' + (slitSel.abs
+        ? 'its slant is measured from the page, so every hole set this way stays parallel (0 = horizontal, 90 = vertical)'
+        : 'its slant is measured from the edge it sits on, so ±45 are the two diagonals and the direction turns with the outline')
+        + ' · Del removes just this hole; the button removes the whole line. Shift-click or drag a box to gather several holes.';
     } else if (slitsSel) {
       $('sp-del-run').textContent = `Delete ${sel.slits.length} stitch holes`;
       if (document.activeElement !== $('sp-slit-ang')) {
@@ -3291,11 +3320,32 @@
     return chains;
   }
 
-  // Slant for holes about to be placed, off the edge they sit on. Kept as a
-  // per-hole value so a run can be re-angled later without touching the rest.
+  // Slant for holes about to be placed. Kept per hole so a run can be
+  // re-angled later without touching the rest. abs = measured off the page
+  // (all holes parallel) instead of off the edge (follows the outline).
+  const clampAng = (v, dflt) => (Number.isFinite(v) ? Math.max(-180, Math.min(180, v)) : dflt);
   function stitchAngle() {
-    const v = parseFloat($('st-ang').value);
-    return Number.isFinite(v) ? Math.max(-180, Math.min(180, v)) : 45;
+    return clampAng(parseFloat($('st-ang').value), 45);
+  }
+  function stitchAngleAbs() { return $('st-ang-ref').value === 'page'; }
+
+  // plain-language label for an angle, so the number isn't the only clue
+  function angLabel(ang, abs) {
+    if (!abs) {
+      const a = ((ang % 180) + 180) % 180;
+      if (a < 1 || a > 179) return '(along the edge)';
+      if (Math.abs(a - 90) < 1) return '(square across the edge)';
+      return '';
+    }
+    const a = ((ang % 180) + 180) % 180;
+    if (a < 1 || a > 179) return '(horizontal ―)';
+    if (Math.abs(a - 90) < 1) return '(vertical |)';
+    if (Math.abs(a - 45) < 1) return '(diagonal ＼)';
+    if (Math.abs(a - 135) < 1) return '(diagonal ／)';
+    return '';
+  }
+  function refreshAngEg() {
+    $('st-ang-eg').textContent = angLabel(stitchAngle(), stitchAngleAbs());
   }
 
   // place holes at the given arc-length fractions of a chain's path, anchoring
@@ -3307,7 +3357,9 @@
     let placed = 0;
     if (chain.anchor.kind === 'guide') {
       for (const pos of Geo.pathArcParams(chain.path, chain.loop, fractions)) {
-        piece.stitchSlits.push({ seg: pos.seg, t: pos.t, len: slitLen, ang: stitchAngle(), off: 0, run });
+        const gs = { seg: pos.seg, t: pos.t, len: slitLen, ang: stitchAngle(), off: 0, run };
+        if (stitchAngleAbs()) gs.abs = true;
+        piece.stitchSlits.push(gs);
         placed++;
       }
       return placed;
@@ -3337,6 +3389,7 @@
       const offI = (q.x - P.x) * nrm.x + (q.y - P.y) * nrm.y;
       const tofI = (P.x - q.x) * tan.x + (P.y - q.y) * tan.y;
       const slit = { seg: hit.seg, t: hit.t, len: slitLen, ang: stitchAngle(), off: offI, run };
+      if (stitchAngleAbs()) slit.abs = true;
       if (isCut) slit.cut = chain.anchor.cut;
       if (Math.abs(tofI) > 1e-6) slit.toff = tofI;
       piece.stitchSlits.push(slit);
@@ -4494,7 +4547,8 @@
     if (!p || !(p.stitchSlits || []).length) return;
     const v = parseFloat($('sp-slit-ang').value);
     if (!Number.isFinite(v)) { $('status-hint').textContent = 'Type a slant in degrees first.'; return; }
-    const ang = Math.max(-180, Math.min(180, v));
+    const ang = clampAng(v, 45);
+    const abs = $('sp-slit-ang-ref').value === 'page';
     let picked;
     if (sel.kind === 'slits' && sel.slits && sel.slits.length) picked = new Set(sel.slits);
     else if (sel.kind === 'slit' && p.stitchSlits[sel.idx]) picked = new Set([sel.idx]);
@@ -4509,13 +4563,31 @@
     }
     beginChange();
     let n = 0;
-    p.stitchSlits.forEach((s, i) => { if (hit(s, i)) { s.ang = ang; n++; } });
+    p.stitchSlits.forEach((s, i) => {
+      if (!hit(s, i)) return;
+      s.ang = ang;
+      if (abs) s.abs = true; else delete s.abs;
+      n++;
+    });
     endChange();
     renderAll(); renderSidebar();
-    $('status-hint').textContent = `Slant set to ${ang}° on ${n} hole${n === 1 ? '' : 's'}`;
+    $('status-hint').textContent =
+      `Slant set to ${ang}° from the ${abs ? 'page' : 'edge'} ${angLabel(ang, abs)} on ${n} hole${n === 1 ? '' : 's'}`;
   }
   $('sp-slit-ang-sel').addEventListener('click', () => applySlitAngle(false));
   $('sp-slit-ang-run').addEventListener('click', () => applySlitAngle(true));
+  for (const id of ['st-ang', 'st-ang-ref']) $(id).addEventListener('input', refreshAngEg);
+  $('sp-slit-ang-ref').addEventListener('change', () => {
+    const v = parseFloat($('sp-slit-ang').value);
+    $('sp-slit-ang-eg').textContent =
+      angLabel(clampAng(v, 45), $('sp-slit-ang-ref').value === 'page');
+  });
+  $('sp-slit-ang').addEventListener('input', () => {
+    const v = parseFloat($('sp-slit-ang').value);
+    $('sp-slit-ang-eg').textContent =
+      angLabel(clampAng(v, 45), $('sp-slit-ang-ref').value === 'page');
+  });
+  refreshAngEg();
   $('sp-slit-ang').addEventListener('keydown', (ev) => {
     if (ev.key === 'Enter') { ev.preventDefault(); applySlitAngle(false); }
   });

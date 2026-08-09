@@ -593,7 +593,12 @@
     }
     const ang = (sl.ang == null ? 45 : sl.ang) * Math.PI / 180;
     const c = Math.cos(ang), s = Math.sin(ang);
-    const d = { x: c * tan.x - s * tan.y, y: s * tan.x + c * tan.y };
+    // sl.abs: the angle is measured off the page instead of off the edge, so
+    // every hole stays parallel no matter which way its edge runs
+    // (0 = horizontal, 90 = vertical, 45 = "\", -45 = "/" in y-down coords)
+    const d = sl.abs
+      ? { x: c, y: s }
+      : { x: c * tan.x - s * tan.y, y: s * tan.x + c * tan.y };
     const h = (sl.len || 0.15) / 2;
     return {
       a: { x: p.x - d.x * h, y: p.y - d.y * h },

@@ -184,6 +184,9 @@ label.chk { display: flex; align-items: center; gap: 4px; color: var(--dim); cur
 #piece-list li .eye.off { opacity: 0.25; }
 #piece-list li .nm { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #piece-list li .len { color: var(--dim); font-size: 11px; }
+#piece-list li .ren { cursor: pointer; opacity: 0.35; font-size: 11px; flex-shrink: 0; }
+#piece-list li:hover .ren { opacity: 0.8; }
+#piece-list li .ren:hover { opacity: 1; color: var(--accent); }
 #piece-list li .nm-edit {
   flex: 1; min-width: 0; font: inherit; color: var(--text);
   background: var(--bg); border: 1px solid var(--accent); border-radius: 3px; padding: 1px 4px;
@@ -198,6 +201,7 @@ label.chk { display: flex; align-items: center; gap: 4px; color: var(--dim); cur
 .row input[type="number"] { width: 64px; }
 .row input[type="text"] { flex: 1; min-width: 0; }
 .row em { color: var(--dim); font-style: normal; }
+.ang-eg { color: var(--dim); font-size: 11px; white-space: nowrap; }
 .row.stats span { color: var(--dim); }
 .row.stats b { color: var(--text); font-weight: 600; }
 .row.btns { flex-wrap: wrap; }

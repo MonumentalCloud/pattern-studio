@@ -240,6 +240,47 @@ t('slitLine: diagonal slit centered on the path', () => {
     '45 degrees: ' + JSON.stringify(d));
 });
 
+t('slitLine abs: the angle is measured off the page, not the edge', () => {
+  // same absolute angle on edges running four different ways => identical direction
+  const dirs = [
+    [N(0, 0), N(10, 0)],   // right
+    [N(10, 0), N(0, 0)],   // left
+    [N(0, 0), N(0, 10)],   // down
+    [N(0, 10), N(0, 0)],   // up
+  ].map(([a, b]) => {
+    const ln = Geo.slitLine(a, b, { t: 0.5, len: 0.4, ang: 90, abs: true });
+    return Geo.norm(Geo.sub(ln.b, ln.a));
+  });
+  for (const d of dirs) {
+    assert(Math.abs(d.x) < 1e-9 && Math.abs(Math.abs(d.y) - 1) < 1e-9,
+      'abs 90 is vertical whatever the edge does: ' + JSON.stringify(d));
+  }
+  // without abs the same angle follows the edge instead
+  const rel = Geo.norm(Geo.sub(
+    ...(() => { const l = Geo.slitLine(N(0, 0), N(10, 0), { t: 0.5, len: 0.4, ang: 90 }); return [l.b, l.a]; })()));
+  assert(Math.abs(Math.abs(rel.y) - 1) < 1e-9, 'edge-relative 90 is square across a horizontal edge');
+  const rel2 = (() => {
+    const l = Geo.slitLine(N(0, 0), N(0, 10), { t: 0.5, len: 0.4, ang: 90 });
+    return Geo.norm(Geo.sub(l.b, l.a));
+  })();
+  assert(Math.abs(Math.abs(rel2.x) - 1) < 1e-9, 'and square across a vertical edge means horizontal');
+});
+
+t('abs slits mirror about the fold axis, not by negation', () => {
+  const piece = {
+    id: 'p', name: 'x', visible: true, seamAllowance: 0, notchLength: 0.4,
+    path: { closed: true, nodes: [N(0, 0), N(10, 0), N(10, 10), N(0, 10)] },
+    notches: [], holes: [], grain: null, foldSeg: 1, cutouts: [],
+    stitchSlits: [{ seg: 0, t: 0.5, len: 0.4, ang: 45, abs: true, off: 0.3 }],
+  };
+  const un = DXF.unfoldPiece(piece);
+  const mirrored = un.stitchSlits.filter((s) => s.ang !== 45);
+  assert(mirrored.length === 1, 'the mirrored half gets its own slit: ' + un.stitchSlits.length);
+  // fold edge 1 runs (10,0)->(10,10): a vertical axis, so 45 mirrors to 135
+  const m = ((mirrored[0].ang % 180) + 180) % 180;
+  assert(Math.abs(m - 135) < 1e-6, 'abs 45 mirrors to 135 across a vertical fold: ' + mirrored[0].ang);
+});
+
 t('slitLine inset: positive moves inward, negative outward', () => {
   // top edge of a CW (y-down) square: outward normal points up (-y)
   const a = N(0, 0), b = N(10, 0);
