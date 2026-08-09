@@ -81,7 +81,7 @@
     doc = JSON.parse(json);
     // selection may point at removed things
     if (sel.pieceId && !pieceById(sel.pieceId)) clearSel();
-    else sel.kind = null;
+    else { sel.kind = null; sel.handle = null; }
     autosave();
     renderAll();
   }
@@ -157,10 +157,13 @@
   }
 
   // ---------- selection ----------
-  const sel = { pieceId: null, kind: null, idx: -1, nodes: [] };
+  // sel.handle: the curve handle last picked up, as { idx, key }. A handle is
+  // not a selection of its own — sel.kind stays 'node' — so without this Del
+  // would fall through to the point and delete the whole thing.
+  const sel = { pieceId: null, kind: null, idx: -1, nodes: [], handle: null };
   let multiSel = []; // piece ids from a marquee selection (moves/deletes as a group)
-  function clearSel() { sel.pieceId = null; sel.kind = null; sel.idx = -1; sel.nodes = []; multiSel = []; }
-  function selectPiece(id) { sel.pieceId = id; sel.kind = null; sel.idx = -1; sel.nodes = []; multiSel = []; }
+  function clearSel() { sel.pieceId = null; sel.kind = null; sel.idx = -1; sel.nodes = []; sel.handle = null; multiSel = []; }
+  function selectPiece(id) { sel.pieceId = id; sel.kind = null; sel.idx = -1; sel.nodes = []; sel.handle = null; multiSel = []; }
   const selPiece = () => (sel.pieceId ? pieceById(sel.pieceId) : null);
 
   // ---------- snapping ----------
@@ -498,10 +501,13 @@
     if (sel.kind === 'node' && sel.idx < n) {
       for (const item of handleTargets(piece)) {
         const far = item.own ? '' : ' far';
+        const held = sel.handle && sel.handle.idx === item.idx && sel.handle.key === item.key;
         el('line', {
           class: 'handle-line' + far,
           x1: item.node.x, y1: item.node.y, x2: item.p.x, y2: item.p.y,
         }, gOverlay);
+        // the handle in hand is ringed: it is what Del removes
+        if (held) el('circle', { class: 'handle-held', cx: item.p.x, cy: item.p.y, r: px(7.5) }, gOverlay);
         el('circle', {
           class: 'handle-dot' + far, cx: item.p.x, cy: item.p.y, r: px(4.5),
           'data-role': 'handle', 'data-idx': item.idx, 'data-key': item.key,
@@ -633,9 +639,11 @@
       $('sp-del-hin').disabled = !nd.hin;
       $('sp-del-hout').disabled = !nd.hout;
       const near = handleTargets(piece);
-      $('sel-hint').textContent = near.length
-        ? 'Drag the point again to move it · double-click a handle (or drag it onto its point) to delete just that handle — hollow handles belong to the next point along and bend the same edge.'
-        : 'Drag the point again to move it · double-click it to toggle corner / smooth.';
+      $('sel-hint').textContent = sel.handle
+        ? 'Handle in hand (ringed) — Del removes just this handle, not the point · drag it to reshape the curve, or drop it on its point to delete it.'
+        : (near.length
+          ? 'Drag the point again to move it · click a handle then Del, or double-click it, to delete just that handle — hollow handles belong to the next point along and bend the same edge.'
+          : 'Drag the point again to move it · double-click it to toggle corner / smooth · Del removes the point.');
     } else if (showSeg) {
       const n = piece.path.nodes.length;
       const a = piece.path.nodes[sel.idx], b = piece.path.nodes[(sel.idx + 1) % n];
@@ -1403,6 +1411,7 @@
     const killHandle = (t) => {
       beginChange();
       nodes[t.idx][t.key] = null;
+      sel.handle = null;
       endChange();
       renderAll(); renderSidebar();
     };
@@ -1670,6 +1679,7 @@
 
   function selectDown(ev, w) {
     const piece = selPiece();
+    sel.handle = null; // any fresh press drops the handle focus; handle hits re-arm it
     // 0. corner scale handle of the selected piece / group (Shift is a
     // gathering gesture — it never grabs the handles)
     const scIds = ev.shiftKey ? [] : scaleTargets();
@@ -1702,8 +1712,10 @@
     if (piece && sel.kind === 'node') {
       const own = hitHandle(piece, w, true);
       if (own) {
+        sel.handle = { idx: own.idx, key: own.key };
         beginChange();
         drag = { type: 'handle', pieceId: piece.id, idx: own.idx, key: own.key, dead: downPt(ev) };
+        renderAll(true); renderSidebar();
         return;
       }
     }
@@ -1720,6 +1732,7 @@
         if (sel.kind === 'node' && sel.idx === ni) { // already the selection: now it moves
           beginChange();
           drag = { type: 'node', pieceId: piece.id, idx: ni, dead: downPt(ev) };
+          renderAll(true); renderSidebar(); // the press just dropped any handle focus
           return;
         }
         sel.kind = 'node'; sel.idx = ni; sel.nodes = [];
@@ -1730,8 +1743,10 @@
       // selected point, so it is grabbable without selecting the other end
       const far = hitHandle(piece, w, false);
       if (far) {
+        sel.handle = { idx: far.idx, key: far.key };
         beginChange();
         drag = { type: 'handle', pieceId: piece.id, idx: far.idx, key: far.key, dead: downPt(ev) };
+        renderAll(true); renderSidebar();
         return;
       }
       // 2b. notch / slit / hole of the selected piece
@@ -3629,6 +3644,19 @@
       renderAll();
       return;
     }
+    // a handle is picked up: Del takes that handle, not the point under it
+    if (sel.handle) {
+      const hn = piece.path.nodes[sel.handle.idx];
+      const key = sel.handle.key;
+      sel.handle = null;
+      if (hn && hn[key]) {
+        beginChange();
+        hn[key] = null;
+        endChange();
+        renderAll(); renderSidebar();
+        return;
+      }
+    }
     beginChange();
     if (sel.kind === 'node' && piece.path.nodes[sel.idx]) {
       if (piece.path.nodes.length <= (piece.path.closed ? 3 : 2)) {
@@ -4346,8 +4374,9 @@
       if (!p || sel.kind !== 'node' || !p.path.nodes[sel.idx]) return;
       beginChange();
       p.path.nodes[sel.idx][key] = null;
+      sel.handle = null;
       endChange();
-      renderAll();
+      renderAll(); renderSidebar();
     });
   }
   $('sp-clear-slits').addEventListener('click', () => {

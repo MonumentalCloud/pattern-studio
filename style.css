@@ -125,6 +125,8 @@ label.chk { display: flex; align-items: center; gap: 4px; color: var(--dim); cur
    point, so it is grabbable too — drawn hollow to keep the owner obvious */
 .handle-dot.far { fill: var(--bg); stroke: var(--accent2); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
 .handle-line.far { stroke-dasharray: 3 3; }
+/* the handle currently in hand — Del takes this, not the point under it */
+.handle-held { fill: none; stroke: var(--accent2); stroke-width: 1.5; opacity: 0.6; vector-effect: non-scaling-stroke; }
 .seg-highlight { fill: none; stroke: var(--accent); stroke-width: 3; vector-effect: non-scaling-stroke; opacity: 0.85; }
 .scale-box { fill: none; stroke: var(--dim); stroke-width: 1; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; opacity: 0.6; pointer-events: none; }
 .scale-handle { fill: var(--panel); stroke: var(--accent); stroke-width: 1.5; vector-effect: non-scaling-stroke; cursor: nwse-resize; }
