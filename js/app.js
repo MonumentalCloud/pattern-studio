@@ -50,16 +50,16 @@
     return uniqueName(root + ' ' + suffix, skipId);
   }
 
-  // Stitch holes used to be cut at 45° and are 135° now (top-right to
-  // bottom-left). The angle is stored on every hole, so a pattern saved before
-  // the change would keep the old slant forever — rewrite it on load. There
-  // has never been a UI for a custom angle, so any 45 in a file is the old
-  // default; mirrored holes store the negated angle.
+  // Stitch holes are cut at 45°. Builds 51-55 briefly made them 135°, and the
+  // angle is stored on every hole, so patterns touched in that window would
+  // keep the wrong slant forever — rewrite it on load. There has never been a
+  // UI for a custom angle, so any 135 in a file came from that window;
+  // mirrored holes store the negated angle.
   function migrateDoc(d) {
     for (const p of (d && d.pieces) || []) {
       for (const sl of p.stitchSlits || []) {
-        if (sl.ang === 45) sl.ang = 135;
-        else if (sl.ang === -45) sl.ang = -135;
+        if (sl.ang === 135) sl.ang = 45;
+        else if (sl.ang === -135) sl.ang = -45;
       }
     }
     return d;
@@ -3288,7 +3288,7 @@
     let placed = 0;
     if (chain.anchor.kind === 'guide') {
       for (const pos of Geo.pathArcParams(chain.path, chain.loop, fractions)) {
-        piece.stitchSlits.push({ seg: pos.seg, t: pos.t, len: slitLen, ang: 135, off: 0, run });
+        piece.stitchSlits.push({ seg: pos.seg, t: pos.t, len: slitLen, ang: 45, off: 0, run });
         placed++;
       }
       return placed;
@@ -3317,7 +3317,7 @@
       const nrm = { x: os * tan.y, y: -os * tan.x };
       const offI = (q.x - P.x) * nrm.x + (q.y - P.y) * nrm.y;
       const tofI = (P.x - q.x) * tan.x + (P.y - q.y) * tan.y;
-      const slit = { seg: hit.seg, t: hit.t, len: slitLen, ang: 135, off: offI, run };
+      const slit = { seg: hit.seg, t: hit.t, len: slitLen, ang: 45, off: offI, run };
       if (isCut) slit.cut = chain.anchor.cut;
       if (Math.abs(tofI) > 1e-6) slit.toff = tofI;
       piece.stitchSlits.push(slit);
@@ -3811,7 +3811,7 @@
           sl.seg = copy.path.closed ? (2 * n - 2 - sl.seg) % n : (n - 2 - sl.seg);
         }
         sl.t = 1 - sl.t;
-        sl.ang = -(sl.ang == null ? 135 : sl.ang); // keep the diagonal mirrored
+        sl.ang = -(sl.ang == null ? 45 : sl.ang); // keep the diagonal mirrored
         if (sl.toff) sl.toff = -sl.toff; // tangent reverses with the path
       }
       if (copy.foldSeg != null && copy.path.closed) copy.foldSeg = (2 * n - 2 - copy.foldSeg) % n;
