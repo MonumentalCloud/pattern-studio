@@ -496,15 +496,14 @@
 
     // handles for the selected node (and its neighbours' facing handles)
     if (sel.kind === 'node' && sel.idx < n) {
-      const node = nodes[sel.idx];
-      const hs = [];
-      if (node.hin) hs.push({ node, h: node.hin, key: 'hin', idx: sel.idx });
-      if (node.hout) hs.push({ node, h: node.hout, key: 'hout', idx: sel.idx });
-      for (const item of hs) {
-        const hx = item.node.x + item.h.x, hy = item.node.y + item.h.y;
-        el('line', { class: 'handle-line', x1: item.node.x, y1: item.node.y, x2: hx, y2: hy }, gOverlay);
+      for (const item of handleTargets(piece)) {
+        const far = item.own ? '' : ' far';
+        el('line', {
+          class: 'handle-line' + far,
+          x1: item.node.x, y1: item.node.y, x2: item.p.x, y2: item.p.y,
+        }, gOverlay);
         el('circle', {
-          class: 'handle-dot', cx: hx, cy: hy, r: px(4.5),
+          class: 'handle-dot' + far, cx: item.p.x, cy: item.p.y, r: px(4.5),
           'data-role': 'handle', 'data-idx': item.idx, 'data-key': item.key,
         }, gOverlay);
       }
@@ -633,9 +632,10 @@
       $('sel-handle-row').hidden = !(nd.hin || nd.hout);
       $('sp-del-hin').disabled = !nd.hin;
       $('sp-del-hout').disabled = !nd.hout;
-      $('sel-hint').textContent = (nd.hin || nd.hout)
-        ? 'Drag a handle onto its point (or double-click it) to delete just that handle.'
-        : 'Double-click the point to toggle corner / smooth.';
+      const near = handleTargets(piece);
+      $('sel-hint').textContent = near.length
+        ? 'Drag the point again to move it · double-click a handle (or drag it onto its point) to delete just that handle — hollow handles belong to the next point along and bend the same edge.'
+        : 'Drag the point again to move it · double-click it to toggle corner / smooth.';
     } else if (showSeg) {
       const n = piece.path.nodes.length;
       const a = piece.path.nodes[sel.idx], b = piece.path.nodes[(sel.idx + 1) % n];
@@ -661,7 +661,7 @@
       }
       $('sel-hint').textContent = piece.foldSeg === sel.idx
         ? 'This edge is the fold — the piece unfolds across it on export.'
-        : 'Drag the edge to move it · type a length to resize (● = start) · double-click inserts a point · right-click divides · the Offset tool (O) slides/protrudes it along its normal.';
+        : 'Drag the edge again to move it · type a length to resize (● = start) · double-click inserts a point · right-click divides · the Offset tool (O) slides/protrudes it along its normal.';
     } else if (showSegs) {
       $('sel-hint').textContent = tool === 'offset'
         ? `${sel.segs.length} edges selected — drag one to apply the mode live, or type a distance and Apply.`
@@ -697,7 +697,7 @@
   let stitchMulti = []; // stitch tool: [{pieceId, seg|cut}] targets being gathered
   let stitchSideA = null; // matched mode: the confirmed side-A target set
   const HINTS = {
-    select: 'Click a piece or point to select · drag to move · Shift-click pieces or edges to gather several · drag empty space to box-select pieces (piece selected: its points · +Shift: its edges) · Del deletes',
+    select: 'Click to select, then drag the selection to move it · Shift-click pieces or edges to gather several · drag empty space to box-select pieces (piece selected: its points · +Shift: its edges) · Del deletes',
     pen: 'Click = corner, drag = curve · right-click = type exact length/angle · click the first point to close · Esc finishes open',
     shape: 'Drag corner to corner — the panel picks rectangle or ellipse · snaps to grid and existing points',
     notch: 'Click near a point on an outline — the notch snaps to it · right-click an edge (Select tool) to divide it where you need a point',
@@ -787,6 +787,7 @@
   // dblclick event is unreliable once setPointerCapture is involved, and
   // doesn't exist at all for some touch/pen input.
   let lastDown = { t: -1e9, x: 0, y: 0 };
+  let dblPending = null; // double-click held over until pointerup (select tool)
 
   svg.addEventListener('pointerdown', (ev) => {
     if (ev.pointerType === 'touch') {
@@ -816,10 +817,14 @@
     const isDbl = ev.timeStamp - lastDown.t < 400 &&
       Math.hypot(ev.clientX - lastDown.x, ev.clientY - lastDown.y) < 6;
     lastDown = { t: ev.timeStamp, x: ev.clientX, y: ev.clientY };
+    dblPending = null;
     if (isDbl) {
       lastDown.t = -1e9; // a triple-click shouldn't count as two doubles
-      drag = null;
-      return handleDoubleClick(w);
+      if (tool !== 'select') { drag = null; return handleDoubleClick(w); }
+      // select tool: hold the double-click until pointerup. Selecting now takes
+      // two presses, so the second press must still be able to start a move —
+      // it only counts as a double-click if the pointer stayed put.
+      dblPending = { w };
     }
     svg.setPointerCapture(ev.pointerId);
 
@@ -845,6 +850,13 @@
     }
     const w = screenToWorld(ev);
     $('status-pos').textContent = `${fmt(w.x)}, ${fmt(w.y)} cm`;
+
+    // past the slop the press is a real move, and no longer a double-click
+    if (drag && drag.dead) {
+      if (Math.hypot(ev.clientX - drag.dead.x, ev.clientY - drag.dead.y) < DRAG_SLOP) return;
+      drag.dead = null;
+      dblPending = null;
+    }
 
     if (tool === 'pen' && draft) {
       draft.mouse = snap(w);
@@ -1388,20 +1400,14 @@
     if (!piece) return;
     const nodes = piece.path.nodes;
     // double-click a handle dot: delete that handle
-    if (sel.kind === 'node' && nodes[sel.idx]) {
-      const nd = nodes[sel.idx];
-      for (const key of ['hin', 'hout']) {
-        if (!nd[key]) continue;
-        const hp = { x: nd.x + nd[key].x, y: nd.y + nd[key].y };
-        if (Geo.dist(hp, w) < px(8)) {
-          beginChange();
-          nd[key] = null;
-          endChange();
-          renderAll();
-          return;
-        }
-      }
-    }
+    const killHandle = (t) => {
+      beginChange();
+      nodes[t.idx][t.key] = null;
+      endChange();
+      renderAll(); renderSidebar();
+    };
+    const own = hitHandle(piece, w, true);
+    if (own) { killHandle(own); return; }
     // double-click node: toggle corner/smooth
     const ni = hitNode(piece, w);
     if (ni >= 0) {
@@ -1410,6 +1416,10 @@
       renderAll();
       return;
     }
+    // a neighbour's facing handle — same deal, checked after the points so it
+    // can't shadow one
+    const far = hitHandle(piece, w, false);
+    if (far) { killHandle(far); return; }
     // double-click edge: insert node
     const hit = Geo.nearestOnPath(nodes, piece.path.closed, w);
     if (hit && hit.dist < px(8)) {
@@ -1478,7 +1488,15 @@
   svg.addEventListener('pointerup', (ev) => {
     if (ev.pointerType === 'touch') { touchPts.delete(ev.pointerId); if (touchPts.size < 2) pinch = null; }
   });
+  // runs after the handler above has closed out the drag: a press that never
+  // travelled was a double-click after all, so act on it now
+  svg.addEventListener('pointerup', () => {
+    const d = dblPending;
+    dblPending = null;
+    if (d) handleDoubleClick(d.w);
+  });
   svg.addEventListener('pointercancel', (ev) => {
+    dblPending = null;
     if (ev.pointerType === 'touch') { touchPts.delete(ev.pointerId); if (touchPts.size < 2) pinch = null; }
   });
 
@@ -1573,6 +1591,38 @@
   }
 
   // ---- select tool ----
+  // Every handle that bends an edge meeting the selected point: its own two,
+  // plus the facing handle of each neighbour. A curve is shaped from both ends,
+  // so the far handle has to be grabbable (and deletable) here — otherwise an
+  // edge stays curved with nothing on screen to grab.
+  function handleTargets(piece) {
+    if (!piece || sel.kind !== 'node') return [];
+    const nodes = piece.path.nodes, n = nodes.length;
+    if (!nodes[sel.idx]) return [];
+    const out = [];
+    const add = (idx, key, own) => {
+      const node = nodes[idx];
+      if (!node || !node[key]) return;
+      out.push({ idx, key, own, node, p: { x: node.x + node[key].x, y: node.y + node[key].y } });
+    };
+    add(sel.idx, 'hin', true);
+    add(sel.idx, 'hout', true);
+    const closed = piece.path.closed;
+    const prev = sel.idx > 0 ? sel.idx - 1 : (closed ? n - 1 : -1);
+    const next = sel.idx < n - 1 ? sel.idx + 1 : (closed ? 0 : -1);
+    if (prev >= 0 && prev !== sel.idx) add(prev, 'hout', false);
+    if (next >= 0 && next !== sel.idx) add(next, 'hin', false);
+    return out;
+  }
+  // pick a handle under the cursor — own handles win over a neighbour's, so a
+  // far handle sitting near its own point never steals that point's click
+  function hitHandle(piece, w, own) {
+    for (const t of handleTargets(piece)) {
+      if (t.own === own && Geo.dist(t.p, w) < px(8)) return t;
+    }
+    return null;
+  }
+
   function hitNode(piece, w) {
     const tol = px(8);
     let best = -1, bd = tol;
@@ -1612,6 +1662,12 @@
     return selPiece() && sel.kind === null ? [sel.pieceId] : [];
   }
 
+  // Moving is a second gesture: a press that changes the selection only
+  // selects, and an armed move waits for DRAG_SLOP pixels of travel before it
+  // touches the geometry — so a click that wobbles doesn't nudge anything.
+  const DRAG_SLOP = 4;
+  const downPt = (ev) => ({ x: ev.clientX, y: ev.clientY });
+
   function selectDown(ev, w) {
     const piece = selPiece();
     // 0. corner scale handle of the selected piece / group (Shift is a
@@ -1641,19 +1697,14 @@
         }
       }
     }
-    // 1. handle of the selected node
+    // 1. handle of the selected node (its own; a neighbour's comes after the
+    // points, so a far handle near its owner can't swallow that point's click)
     if (piece && sel.kind === 'node') {
-      const nd = piece.path.nodes[sel.idx];
-      if (nd) {
-        for (const key of ['hin', 'hout']) {
-          if (!nd[key]) continue;
-          const hp = { x: nd.x + nd[key].x, y: nd.y + nd[key].y };
-          if (Geo.dist(hp, w) < px(8)) {
-            beginChange();
-            drag = { type: 'handle', pieceId: piece.id, idx: sel.idx, key };
-            return;
-          }
-        }
+      const own = hitHandle(piece, w, true);
+      if (own) {
+        beginChange();
+        drag = { type: 'handle', pieceId: piece.id, idx: own.idx, key: own.key, dead: downPt(ev) };
+        return;
       }
     }
     // 2. node of the selected piece
@@ -1663,13 +1714,24 @@
         if (sel.kind === 'nodes' && sel.nodes.includes(ni)) {
           // drag the whole point selection together
           beginChange();
-          drag = { type: 'nodes', pieceId: piece.id, idxs: sel.nodes.slice(), start: w, applied: { x: 0, y: 0 } };
+          drag = { type: 'nodes', pieceId: piece.id, idxs: sel.nodes.slice(), start: w, applied: { x: 0, y: 0 }, dead: downPt(ev) };
+          return;
+        }
+        if (sel.kind === 'node' && sel.idx === ni) { // already the selection: now it moves
+          beginChange();
+          drag = { type: 'node', pieceId: piece.id, idx: ni, dead: downPt(ev) };
           return;
         }
         sel.kind = 'node'; sel.idx = ni; sel.nodes = [];
-        beginChange();
-        drag = { type: 'node', pieceId: piece.id, idx: ni };
         renderAll(true); renderSidebar();
+        return;
+      }
+      // 2a. facing handle of a neighbouring point — it bends an edge of the
+      // selected point, so it is grabbable without selecting the other end
+      const far = hitHandle(piece, w, false);
+      if (far) {
+        beginChange();
+        drag = { type: 'handle', pieceId: piece.id, idx: far.idx, key: far.key, dead: downPt(ev) };
         return;
       }
       // 2b. notch / slit / hole of the selected piece
@@ -1701,9 +1763,12 @@
         return h2 && h2.dist < px(6);
       });
       if (ci >= 0) {
+        if (sel.kind === 'cut' && sel.idx === ci) { // already the selection: now it moves
+          beginChange();
+          drag = { type: 'cutout', pieceId: piece.id, idx: ci, start: w, applied: { x: 0, y: 0 }, dead: downPt(ev) };
+          return;
+        }
         sel.kind = 'cut'; sel.idx = ci; sel.nodes = [];
-        beginChange();
-        drag = { type: 'cutout', pieceId: piece.id, idx: ci, start: w, applied: { x: 0, y: 0 } };
         renderAll(true); renderSidebar();
         return;
       }
@@ -1725,12 +1790,15 @@
           const ks = new Set();
           for (const i of sel.segs) { ks.add(i); ks.add((i + 1) % nn); }
           beginChange();
-          drag = { type: 'nodes', pieceId: piece.id, idxs: [...ks], start: w, applied: { x: 0, y: 0 } };
+          drag = { type: 'nodes', pieceId: piece.id, idxs: [...ks], start: w, applied: { x: 0, y: 0 }, dead: downPt(ev) };
+          return;
+        }
+        if (sel.kind === 'seg' && sel.idx === hit.seg) { // already the selection: now it moves
+          beginChange();
+          drag = { type: 'seg', pieceId: piece.id, idx: hit.seg, start: w, applied: { x: 0, y: 0 }, dead: downPt(ev) };
           return;
         }
         sel.kind = 'seg'; sel.idx = hit.seg; sel.nodes = [];
-        beginChange();
-        drag = { type: 'seg', pieceId: piece.id, idx: hit.seg, start: w, applied: { x: 0, y: 0 } };
         renderAll(true); renderSidebar();
         return;
       }
@@ -1762,12 +1830,15 @@
         if (multiSel.length > 1 && multiSel.includes(p.id)) {
           // drag the whole marquee group together
           beginChange();
-          drag = { type: 'piece', ids: multiSel.slice(), start: w, applied: { x: 0, y: 0 } };
-        } else {
-          selectPiece(p.id);
-          beginChange();
-          drag = { type: 'piece', ids: [p.id], start: w, applied: { x: 0, y: 0 } };
+          drag = { type: 'piece', ids: multiSel.slice(), start: w, applied: { x: 0, y: 0 }, dead: downPt(ev) };
+          return;
         }
+        if (sel.pieceId === p.id && sel.kind === null) { // already the selection: now it moves
+          beginChange();
+          drag = { type: 'piece', ids: [p.id], start: w, applied: { x: 0, y: 0 }, dead: downPt(ev) };
+          return;
+        }
+        selectPiece(p.id);
         renderAll(true); renderSidebar();
         return;
       }

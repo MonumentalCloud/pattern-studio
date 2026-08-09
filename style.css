@@ -121,6 +121,10 @@ label.chk { display: flex; align-items: center; gap: 4px; color: var(--dim); cur
 .node.first-hint { stroke: var(--accent2); stroke-width: 2; }
 .handle-line { stroke: var(--dim); stroke-width: 1; vector-effect: non-scaling-stroke; }
 .handle-dot { fill: var(--accent2); stroke: none; cursor: move; }
+/* the facing handle of a neighbouring point: it bends an edge of the selected
+   point, so it is grabbable too — drawn hollow to keep the owner obvious */
+.handle-dot.far { fill: var(--bg); stroke: var(--accent2); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.handle-line.far { stroke-dasharray: 3 3; }
 .seg-highlight { fill: none; stroke: var(--accent); stroke-width: 3; vector-effect: non-scaling-stroke; opacity: 0.85; }
 .scale-box { fill: none; stroke: var(--dim); stroke-width: 1; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; opacity: 0.6; pointer-events: none; }
 .scale-handle { fill: var(--panel); stroke: var(--accent); stroke-width: 1.5; vector-effect: non-scaling-stroke; cursor: nwse-resize; }
@@ -181,6 +185,9 @@ label.chk { display: flex; align-items: center; gap: 4px; color: var(--dim); cur
 #piece-list .empty { color: var(--dim); font-style: italic; cursor: default; }
 
 .row { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+/* a laid-out row still has to obey [hidden] — display:flex outranks the
+   browser's own [hidden] { display: none }, so rows stayed on screen */
+.row[hidden] { display: none; }
 .row label { width: 78px; color: var(--dim); flex-shrink: 0; }
 .row input[type="number"] { width: 64px; }
 .row input[type="text"] { flex: 1; min-width: 0; }
