@@ -240,6 +240,43 @@ t('slitLine: diagonal slit centered on the path', () => {
     '45 degrees: ' + JSON.stringify(d));
 });
 
+t('segMidpoint: halfway along a straight edge', () => {
+  const m = Geo.segMidpoint(N(0, 0), N(10, 0));
+  assert(Geo.dist(m, { x: 5, y: 0 }) < 1e-9, 'straight midpoint: ' + JSON.stringify(m));
+});
+
+t('segMidpoint: arc length, not parameter 0.5, on a lopsided curve', () => {
+  // handles pushed hard toward one end: t=0.5 drifts well off the real middle
+  const a = { x: 0, y: 0, hin: null, hout: { x: 7, y: 0 } };
+  const b = { x: 10, y: 8, hin: { x: 0, y: -1 }, hout: null };
+  // reference: walk a fine flattening to exactly half its length
+  const fp = Geo.segFlatten(a, b, 0.00005);
+  let total = 0;
+  for (let i = 1; i < fp.length; i++) total += Geo.dist(fp[i - 1], fp[i]);
+  let half = total / 2, ref = null;
+  for (let i = 1; i < fp.length; i++) {
+    const d = Geo.dist(fp[i - 1], fp[i]);
+    if (half <= d) { ref = Geo.lerp(fp[i - 1], fp[i], half / d); break; }
+    half -= d;
+  }
+  const mid = Geo.segMidpoint(a, b);
+  assert(Geo.dist(mid, ref) < 0.01,
+    `midpoint should sit at half the arc: ${JSON.stringify(mid)} vs ${JSON.stringify(ref)}`);
+  assert(Geo.dist(mid, Geo.segPoint(a, b, 0.5)) > 1,
+    'and on this curve that is far from the parameter-0.5 point: ' +
+    Geo.dist(mid, Geo.segPoint(a, b, 0.5)).toFixed(3));
+});
+
+t('pathMidpoints: one per edge, closed vs open', () => {
+  const sq = [N(0, 0), N(10, 0), N(10, 10), N(0, 10)];
+  assert(Geo.pathMidpoints(sq, true).length === 4, 'closed square has 4 edge middles');
+  assert(Geo.pathMidpoints(sq, false).length === 3, 'open path has one fewer');
+  const m = Geo.pathMidpoints(sq, true);
+  assert(Geo.dist(m[0], { x: 5, y: 0 }) < 1e-9, 'first edge middle: ' + JSON.stringify(m[0]));
+  assert(Geo.dist(m[3], { x: 0, y: 5 }) < 1e-9, 'closing edge middle: ' + JSON.stringify(m[3]));
+  assert(Geo.pathMidpoints([N(0, 0)], false).length === 0, 'a lone point has no edges');
+});
+
 t('asset cache keys match the build number', () => {
   // Every ?v= in index.html is the cache key browsers use for the JS/CSS. If
   // it lags the build, a returning browser keeps serving the old app and new

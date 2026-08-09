@@ -118,6 +118,35 @@
     return l;
   }
 
+  // Middle of one edge by ARC LENGTH — the point that looks like the middle.
+  // On a curve that is not the same as the parameter-0.5 point, which sits
+  // wherever the handles push it.
+  function segMidpoint(a, b, tol) {
+    if (segIsLine(a, b)) return lerp(a, b, 0.5);
+    // finer than the drawing tolerance: the midpoint is measured along this
+    // polyline, so a coarse one biases it toward the flatter end of the curve
+    const fp = segFlatten(a, b, tol || 0.002);
+    let total = 0;
+    for (let i = 1; i < fp.length; i++) total += dist(fp[i - 1], fp[i]);
+    let half = total / 2;
+    for (let i = 1; i < fp.length; i++) {
+      const d = dist(fp[i - 1], fp[i]);
+      if (half <= d) return lerp(fp[i - 1], fp[i], d < EPS ? 0 : half / d);
+      half -= d;
+    }
+    return { x: b.x, y: b.y };
+  }
+
+  // Middles of every edge of a path, in segment order.
+  function pathMidpoints(nodes, closed, tol) {
+    const n = nodes.length;
+    if (n < 2) return [];
+    const segs = closed ? n : n - 1;
+    const out = [];
+    for (let i = 0; i < segs; i++) out.push(segMidpoint(nodes[i], nodes[(i + 1) % n], tol));
+    return out;
+  }
+
   function pathLength(nodes, closed, tol) {
     const n = nodes.length;
     if (n < 2) return 0;
@@ -796,7 +825,7 @@
 
   return {
     sub, add, scale, dot, len, dist, norm, lerp,
-    segCtrl, segIsLine, segPoint, segTangent, segFlatten, segLength,
+    segCtrl, segIsLine, segPoint, segTangent, segFlatten, segLength, segMidpoint, pathMidpoints,
     cubicPoint, cubicTangent, flattenCubic,
     pathPolyline, pathLength, polyArea, bbox, centroid, dedupe,
     outwardSign, offsetClosed, nearestOnPath, pointInPolygon, splitSeg, setSegLength,

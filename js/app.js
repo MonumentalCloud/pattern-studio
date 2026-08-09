@@ -208,23 +208,43 @@
   function snapStep() { return parseFloat($('sel-grid').value) || 0.5; }
   function snapOn() { return $('chk-snap').checked; }
   let alignGuides = []; // transient dashed lines while a snap lines up with far points
+  let snapMarks = []; // transient markers for a snap that isn't on a drawn point
 
   function snap(p, skipPieceId, skipNodeIdx) {
     alignGuides = [];
-    // priority: existing points, then points anywhere along other outlines,
-    // then orthogonal alignment with other points, then grid.
+    snapMarks = [];
+    // priority: existing points, then edge middles, then points anywhere along
+    // other outlines, then orthogonal alignment with other points, then grid.
     // candidate points: outline nodes, cutout corners and — while the pen is
     // drafting — the draft's own placed points (so a path can close square)
     const pts = [];
+    const mids = [];
+    // an edge touching the point being dragged has no fixed middle — it moves
+    // with the drag, so it would chase the cursor instead of anchoring it
+    const midsOf = (nodes, closed, skipIdx) => {
+      const n = nodes.length;
+      const segs = closed ? n : n - 1;
+      for (let i = 0; i < segs; i++) {
+        if (skipIdx != null && (i === skipIdx || (i + 1) % n === skipIdx)) continue;
+        mids.push(Geo.segMidpoint(nodes[i], nodes[(i + 1) % n]));
+      }
+    };
     for (const piece of doc.pieces) {
       if (piece.visible === false) continue;
+      const own = piece.id === skipPieceId;
       piece.path.nodes.forEach((n, i) => {
-        if (piece.id === skipPieceId && i === skipNodeIdx) return;
+        if (own && i === skipNodeIdx) return;
         pts.push(n);
       });
-      for (const c of piece.cutouts || []) for (const n of c.nodes) pts.push(n);
+      midsOf(piece.path.nodes, piece.path.closed, own ? skipNodeIdx : null);
+      for (const c of piece.cutouts || []) {
+        for (const n of c.nodes) pts.push(n);
+        if (c.nodes && c.nodes.length > 1) midsOf(c.nodes, true, null);
+      }
     }
     const draftPts = draft && draft.nodes ? draft.nodes : [];
+    // the draft's own edges get middles too, but not the rubber-band segment
+    if (draftPts.length > 2) midsOf(draftPts.slice(0, -1), false, null);
     const tol = px(9);
     let best = null, bd = tol;
     for (const n of pts) {
@@ -238,6 +258,17 @@
       if (d < bd) { bd = d; best = { x: n.x, y: n.y }; }
     }
     if (best) return best;
+    // edge middles: a tier below real points, so a corner always wins over the
+    // middle of the edge leading to it
+    let bestM = null, bm = px(8);
+    for (const n of mids) {
+      const d = Geo.dist(n, p);
+      if (d < bm) { bm = d; bestM = n; }
+    }
+    if (bestM) {
+      snapMarks.push({ x: bestM.x, y: bestM.y });
+      return { x: bestM.x, y: bestM.y };
+    }
     // on-curve snap: project onto the nearest outline (never the edited piece's own)
     let bestE = null, be = px(7);
     for (const piece of doc.pieces) {
@@ -255,7 +286,7 @@
     // each axis independently (a dashed guide shows the reference point)
     const at = px(6);
     let ax = null, adx = at, ay = null, ady = at;
-    for (const n of pts.concat(draftPts)) {
+    for (const n of pts.concat(draftPts, mids)) {
       const dx = Math.abs(n.x - p.x), dy = Math.abs(n.y - p.y);
       if (dx < adx) { adx = dx; ax = n; }
       if (dy < ady) { ady = dy; ay = n; }
@@ -296,6 +327,15 @@
     for (const g2 of alignGuides) {
       el('line', { class: 'align-guide', x1: g2.x1, y1: g2.y1, x2: g2.x2, y2: g2.y2 }, group);
       el('circle', { class: 'snap-dot', cx: g2.x1, cy: g2.y1, r: px(4) }, group);
+    }
+    // caught the middle of an edge — a diamond, so it reads differently from
+    // landing at some arbitrary point along the curve
+    for (const m of snapMarks) {
+      const r = px(5);
+      el('polygon', {
+        class: 'snap-mid',
+        points: `${m.x},${m.y - r} ${m.x + r},${m.y} ${m.x},${m.y + r} ${m.x - r},${m.y}`,
+      }, group);
     }
   }
 
@@ -1323,7 +1363,7 @@
 
   svg.addEventListener('pointerup', (ev) => {
     if (drag) {
-      if (alignGuides.length) { alignGuides = []; renderAll(true); }
+      if (alignGuides.length || snapMarks.length) { alignGuides = []; snapMarks = []; renderAll(true); }
       if (drag.type === 'pan') svg.classList.remove('panning');
       else if (drag.type === 'measure') clear(gPreview);
       else if (drag.type === 'shape') {
