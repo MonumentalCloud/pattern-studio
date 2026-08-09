@@ -50,6 +50,21 @@
     return uniqueName(root + ' ' + suffix, skipId);
   }
 
+  // Stitch holes used to be cut at 45° and are 135° now (top-right to
+  // bottom-left). The angle is stored on every hole, so a pattern saved before
+  // the change would keep the old slant forever — rewrite it on load. There
+  // has never been a UI for a custom angle, so any 45 in a file is the old
+  // default; mirrored holes store the negated angle.
+  function migrateDoc(d) {
+    for (const p of (d && d.pieces) || []) {
+      for (const sl of p.stitchSlits || []) {
+        if (sl.ang === 45) sl.ang = 135;
+        else if (sl.ang === -45) sl.ang = -135;
+      }
+    }
+    return d;
+  }
+
   function newPiece(nodes, closed) {
     return {
       id: uid(),
@@ -3656,6 +3671,7 @@
     let clip = null;
     try { clip = JSON.parse(localStorage.getItem(CLIP_KEY)); } catch (e) { /* ignore */ }
     if (!clip || !Array.isArray(clip.pieces) || !clip.pieces.length) return;
+    migrateDoc(clip); // the clipboard may come from a tab on an older build
     clip.n = (clip.n || 0) + 1; // each paste lands a bit further
     try { localStorage.setItem(CLIP_KEY, JSON.stringify(clip)); } catch (e) { /* quota */ }
     const off = 2 * clip.n;
@@ -3998,7 +4014,7 @@
         const parsed = JSON.parse(rd.result);
         if (!parsed || !Array.isArray(parsed.pieces)) throw new Error('bad file');
         beginChange();
-        doc = parsed;
+        doc = migrateDoc(parsed);
         endChange();
         clearSel();
         $('doc-name').value = doc.name || 'Untitled pattern';
@@ -4150,7 +4166,7 @@
       const parsed = JSON.parse(b64decode(file.content));
       if (!parsed || !Array.isArray(parsed.pieces)) throw new Error('not a Pattern Studio project');
       beginChange();
-      doc = parsed;
+      doc = migrateDoc(parsed);
       endChange();
       clearSel();
       if (FS_OK) rememberHandle(null); // cloud project ≠ the last local file
@@ -4641,7 +4657,7 @@
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (parsed && Array.isArray(parsed.pieces)) doc = parsed;
+        if (parsed && Array.isArray(parsed.pieces)) doc = migrateDoc(parsed);
       }
     } catch (e) { /* corrupted autosave — start fresh */ }
     $('doc-name').value = doc.name || 'Untitled pattern';
