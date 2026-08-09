@@ -9,7 +9,7 @@
 <body>
 <div id="app">
   <header id="topbar">
-    <span id="logo" title="build 56">✂ Pattern Studio</span>
+    <span id="logo" title="build 57">✂ Pattern Studio</span>
     <input id="doc-name" type="text" value="Untitled pattern" spellcheck="false" title="Pattern name">
     <span class="sep"></span>
     <button id="btn-new" title="New document">New</button>
@@ -200,6 +200,12 @@
         <div class="row" id="sel-clear-slits-row" hidden>
           <button id="sp-clear-slits" title="Delete every stitching slit on this edge (zoom in to pick single ones)">Remove stitch holes</button>
         </div>
+        <div class="row" id="sel-slit-ang-row" hidden>
+          <label>Slant</label>
+          <input id="sp-slit-ang" type="number" min="-180" max="180" step="5" title="Angle of the slit measured from the edge it sits on — 45 and −45 are the two diagonals"> <em>°</em>
+          <button id="sp-slit-ang-sel" title="Set the slant on the selected hole(s)">Set</button>
+          <button id="sp-slit-ang-run" title="Set the slant on every hole of this stitch line">Whole line</button>
+        </div>
         <div class="row" id="sel-del-run-row" hidden>
           <button id="sp-del-run" class="danger" title="Delete every hole of the stitch line this hole belongs to">Delete stitch line</button>
         </div>
@@ -253,6 +259,8 @@
           <input id="st-len" type="number" min="0.05" max="1" step="0.05" value="0.15"> <em>cm</em></div>
         <div class="row"><label>Inset</label>
           <input id="st-off" type="number" min="-2" max="2" step="0.05" value="0" title="Distance from the edge: + moves the slits inside the piece, − outside, 0 centers them on the line"> <em>cm</em></div>
+        <div class="row"><label>Slant</label>
+          <input id="st-ang" type="number" min="-180" max="180" step="5" value="45" title="Angle of each slit measured from the edge it sits on (not from the page) — 45 and −45 are the two diagonals, 90 is square across the edge"> <em>°</em></div>
         <div class="row btns"><button id="st-apply" title="Advance the current mode (Enter): Single stitches the selection; Matched confirms side A, then stitches A + B together">Stitch selected</button></div>
         <div class="row hint">Diagonal slits for hand sewing. Select edges, guide lines or internal
           cutouts — click, Shift-click or drag a box; contiguous edges chain into one run.

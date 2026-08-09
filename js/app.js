@@ -24,12 +24,13 @@
 
   // ---------- document state ----------
   const STORAGE_KEY = 'patternStudioDoc.v1';
+  const DOC_VERSION = 2; // 2: stitch slant is user-set (see migrateDoc)
   let doc = newDoc();
   let uidCounter = 1;
 
   function uid() { return 'p' + (uidCounter++) + '_' + Math.random().toString(36).slice(2, 7); }
   function newDoc() {
-    return { version: 1, name: 'Untitled pattern', pieces: [] };
+    return { version: DOC_VERSION, name: 'Untitled pattern', pieces: [] };
   }
   // ---------- piece names ----------
   // Derived names used to glue another word onto whatever was already there,
@@ -50,18 +51,21 @@
     return uniqueName(root + ' ' + suffix, skipId);
   }
 
-  // Stitch holes are cut at 45°. Builds 51-55 briefly made them 135°, and the
-  // angle is stored on every hole, so patterns touched in that window would
-  // keep the wrong slant forever — rewrite it on load. There has never been a
-  // UI for a custom angle, so any 135 in a file came from that window;
-  // mirrored holes store the negated angle.
+  // Builds 51-55 cut stitch holes at 135° instead of 45°, and the slant is
+  // stored per hole, so patterns touched in that window kept the wrong one.
+  // Fold it back ONCE, stamped by document version: the slant is user-set now,
+  // so a deliberate 135 has to survive a reload.
   function migrateDoc(d) {
-    for (const p of (d && d.pieces) || []) {
-      for (const sl of p.stitchSlits || []) {
-        if (sl.ang === 135) sl.ang = 45;
-        else if (sl.ang === -135) sl.ang = -45;
+    if (!d) return d;
+    if ((d.version || 1) < 2) {
+      for (const p of d.pieces || []) {
+        for (const sl of p.stitchSlits || []) {
+          if (sl.ang === 135) sl.ang = 45;
+          else if (sl.ang === -135) sl.ang = -45;
+        }
       }
     }
+    d.version = DOC_VERSION;
     return d;
   }
 
@@ -690,16 +694,24 @@
     const slitsSel = piece && sel.kind === 'slits' && sel.slits && sel.slits.length > 0;
     $('sel-props').hidden = !(showNode || showSeg || showSegs || showMove || slitSel || slitsSel);
     $('sel-del-run-row').hidden = !(slitSel || slitsSel);
+    $('sel-slit-ang-row').hidden = !(slitSel || slitsSel);
     if (slitSel) {
       const runOf = (sl) => (slitSel.run != null ? sl.run === slitSel.run : (sl.seg === slitSel.seg && sl.cut === slitSel.cut));
       const count = piece.stitchSlits.filter(runOf).length;
       $('sp-del-run').textContent = `Delete stitch line (${count} hole${count > 1 ? 's' : ''})`;
+      if (document.activeElement !== $('sp-slit-ang')) {
+        $('sp-slit-ang').value = slitSel.ang == null ? 45 : slitSel.ang;
+      }
       $('sel-hint').textContent =
-        'One hole of a stitch line — Del removes just this hole; the button removes the whole line. Shift-click or drag a box to gather several holes.';
+        'One hole of a stitch line — the slant is measured from the edge it sits on, so ±45 are the two diagonals · Del removes just this hole; the button removes the whole line. Shift-click or drag a box to gather several holes.';
     } else if (slitsSel) {
       $('sp-del-run').textContent = `Delete ${sel.slits.length} stitch holes`;
+      if (document.activeElement !== $('sp-slit-ang')) {
+        const first = piece.stitchSlits[sel.slits[0]];
+        $('sp-slit-ang').value = first ? (first.ang == null ? 45 : first.ang) : 45;
+      }
       $('sel-hint').textContent =
-        `${sel.slits.length} stitch holes selected — Del (or the button) removes them · Shift-click holes to add/remove · drag a box over more.`;
+        `${sel.slits.length} stitch holes selected — set their slant above, or Del (or the button) removes them · Shift-click holes to add/remove · drag a box over more.`;
     }
     $('sel-node-row').hidden = !showNode;
     $('sel-round-row').hidden = !showNode;
@@ -3279,6 +3291,13 @@
     return chains;
   }
 
+  // Slant for holes about to be placed, off the edge they sit on. Kept as a
+  // per-hole value so a run can be re-angled later without touching the rest.
+  function stitchAngle() {
+    const v = parseFloat($('st-ang').value);
+    return Number.isFinite(v) ? Math.max(-180, Math.min(180, v)) : 45;
+  }
+
   // place holes at the given arc-length fractions of a chain's path, anchoring
   // each back into the document (per-hole off/toff keep corner miters exact)
   function stitchPlaceRun(chain, fractions, slitLen) {
@@ -3288,7 +3307,7 @@
     let placed = 0;
     if (chain.anchor.kind === 'guide') {
       for (const pos of Geo.pathArcParams(chain.path, chain.loop, fractions)) {
-        piece.stitchSlits.push({ seg: pos.seg, t: pos.t, len: slitLen, ang: 45, off: 0, run });
+        piece.stitchSlits.push({ seg: pos.seg, t: pos.t, len: slitLen, ang: stitchAngle(), off: 0, run });
         placed++;
       }
       return placed;
@@ -3317,7 +3336,7 @@
       const nrm = { x: os * tan.y, y: -os * tan.x };
       const offI = (q.x - P.x) * nrm.x + (q.y - P.y) * nrm.y;
       const tofI = (P.x - q.x) * tan.x + (P.y - q.y) * tan.y;
-      const slit = { seg: hit.seg, t: hit.t, len: slitLen, ang: 45, off: offI, run };
+      const slit = { seg: hit.seg, t: hit.t, len: slitLen, ang: stitchAngle(), off: offI, run };
       if (isCut) slit.cut = chain.anchor.cut;
       if (Math.abs(tofI) > 1e-6) slit.toff = tofI;
       piece.stitchSlits.push(slit);
@@ -4469,6 +4488,38 @@
     endChange();
     renderAll(); renderSidebar();
   });
+  // re-angle existing holes: the selected ones, or every hole of their run(s)
+  function applySlitAngle(wholeRun) {
+    const p = selPiece();
+    if (!p || !(p.stitchSlits || []).length) return;
+    const v = parseFloat($('sp-slit-ang').value);
+    if (!Number.isFinite(v)) { $('status-hint').textContent = 'Type a slant in degrees first.'; return; }
+    const ang = Math.max(-180, Math.min(180, v));
+    let picked;
+    if (sel.kind === 'slits' && sel.slits && sel.slits.length) picked = new Set(sel.slits);
+    else if (sel.kind === 'slit' && p.stitchSlits[sel.idx]) picked = new Set([sel.idx]);
+    else return;
+    let hit = (s, i) => picked.has(i);
+    if (wholeRun) {
+      const chosen = [...picked].map((i) => p.stitchSlits[i]).filter(Boolean);
+      const runs = new Set(chosen.map((s) => s.run).filter((r) => r != null));
+      const loose = chosen.filter((s) => s.run == null);
+      hit = (s, i) => picked.has(i) || (s.run != null && runs.has(s.run)) ||
+        loose.some((l) => s.run == null && s.seg === l.seg && s.cut === l.cut);
+    }
+    beginChange();
+    let n = 0;
+    p.stitchSlits.forEach((s, i) => { if (hit(s, i)) { s.ang = ang; n++; } });
+    endChange();
+    renderAll(); renderSidebar();
+    $('status-hint').textContent = `Slant set to ${ang}° on ${n} hole${n === 1 ? '' : 's'}`;
+  }
+  $('sp-slit-ang-sel').addEventListener('click', () => applySlitAngle(false));
+  $('sp-slit-ang-run').addEventListener('click', () => applySlitAngle(true));
+  $('sp-slit-ang').addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter') { ev.preventDefault(); applySlitAngle(false); }
+  });
+
   $('sp-del-run').addEventListener('click', () => {
     const p = selPiece();
     if (!p) return;
