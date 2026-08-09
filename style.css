@@ -184,6 +184,10 @@ label.chk { display: flex; align-items: center; gap: 4px; color: var(--dim); cur
 #piece-list li .eye.off { opacity: 0.25; }
 #piece-list li .nm { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #piece-list li .len { color: var(--dim); font-size: 11px; }
+#piece-list li .nm-edit {
+  flex: 1; min-width: 0; font: inherit; color: var(--text);
+  background: var(--bg); border: 1px solid var(--accent); border-radius: 3px; padding: 1px 4px;
+}
 #piece-list .empty { color: var(--dim); font-style: italic; cursor: default; }
 
 .row { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }

@@ -31,10 +31,29 @@
   function newDoc() {
     return { version: 1, name: 'Untitled pattern', pieces: [] };
   }
+  // ---------- piece names ----------
+  // Derived names used to glue another word onto whatever was already there,
+  // so a few operations left you with "Piece 1 copy copy (mirror) stitch line".
+  // decorate() strips a repeat of the same suffix first and lets uniqueName
+  // number it instead: copy, copy 2, copy 3.
+  function uniqueName(want, skipId) {
+    const taken = new Set(doc.pieces.filter((p) => p.id !== skipId).map((p) => p.name));
+    if (!taken.has(want)) return want;
+    for (let i = 2; i < 500; i++) if (!taken.has(want + ' ' + i)) return want + ' ' + i;
+    return want;
+  }
+  function decorate(base, suffix, skipId) {
+    const esc = suffix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const root = String(base || 'Piece')
+      .replace(new RegExp('(?:\\s*' + esc + '(?:\\s+\\d+)?)+\\s*$', 'i'), '')
+      .trim() || 'Piece';
+    return uniqueName(root + ' ' + suffix, skipId);
+  }
+
   function newPiece(nodes, closed) {
     return {
       id: uid(),
-      name: 'Piece ' + (doc.pieces.length + 1),
+      name: uniqueName('Piece ' + (doc.pieces.length + 1)),
       visible: true,
       seamAllowance: 0, // the drawn outline IS the cutting line
       notchLength: 0.4,
@@ -553,6 +572,21 @@
   }
 
   // ---------- sidebar ----------
+  let renamingId = null; // piece whose name is being edited inline in the list
+
+  // a typed name is taken as typed — uniqueName only tidies generated ones
+  function commitRename(piece, raw) {
+    if (renamingId !== piece.id) return;
+    renamingId = null;
+    const name = String(raw || '').trim();
+    if (name && name !== piece.name) {
+      beginChange();
+      piece.name = name;
+      endChange();
+    }
+    renderAll();
+  }
+
   function renderSidebar() {
     const list = $('piece-list');
     clear(list);
@@ -576,13 +610,42 @@
         endChange();
         renderAll();
       });
-      const nm = document.createElement('span');
-      nm.className = 'nm';
-      nm.textContent = piece.name;
       const ln = document.createElement('span');
       ln.className = 'len';
       const ep = effPiece(piece);
       ln.textContent = fmt(Geo.pathLength(ep.path.nodes, ep.path.closed)) + ' cm';
+      if (renamingId === piece.id) {
+        // rename in place — the list survives re-renders because renamingId,
+        // not the DOM, is what remembers the edit is open
+        const inp = document.createElement('input');
+        inp.className = 'nm-edit';
+        inp.type = 'text';
+        inp.value = piece.name;
+        const stop = (e) => e.stopPropagation();
+        inp.addEventListener('click', stop);
+        inp.addEventListener('dblclick', stop);
+        inp.addEventListener('pointerdown', stop);
+        inp.addEventListener('keydown', (e) => {
+          e.stopPropagation();
+          if (e.key === 'Enter') { inp.blur(); }
+          else if (e.key === 'Escape') { renamingId = null; renderSidebar(); }
+        });
+        inp.addEventListener('blur', () => commitRename(piece, inp.value));
+        li.append(eye, inp, ln);
+        list.appendChild(li);
+        // focus once it is actually in the document
+        setTimeout(() => { inp.focus(); inp.select(); }, 0);
+        continue;
+      }
+      const nm = document.createElement('span');
+      nm.className = 'nm';
+      nm.textContent = piece.name;
+      nm.title = piece.name + ' — double-click to rename';
+      nm.addEventListener('dblclick', (e) => {
+        e.stopPropagation();
+        renamingId = piece.id;
+        renderSidebar();
+      });
       li.append(eye, nm, ln);
       li.addEventListener('click', () => { selectPiece(piece.id); renderAll(); });
       list.appendChild(li);
@@ -2330,7 +2393,9 @@
     pA.stitchSlits = stitchSlits;
     pA.grain = grain;
     pA.cutouts = cutouts;
-    pA.name = pA.name + '+' + pB.name;
+    // keep both names while that stays readable, else fall back to a suffix
+    const merged = pA.name + '+' + pB.name;
+    pA.name = merged.length <= 40 ? uniqueName(merged, pA.id) : decorate(pA.name, 'welded', pA.id);
     doc.pieces = doc.pieces.filter((p) => p.id !== pB.id);
     endChange();
     weldFirst = null;
@@ -2488,7 +2553,7 @@
         insetChain = null;
         const pts = Geo.offsetClosed(Geo.dedupe(Geo.pathPolyline(p.path.nodes, true, 0.02)), -d);
         if (pts.length < 3) return;
-        newGuidePiece(Geo.simplifyPoly(pts, 0.01, true), true, p.name + ' stitch line');
+        newGuidePiece(Geo.simplifyPoly(pts, 0.01, true), true, decorate(p.name, 'stitch line'));
         return;
       }
     }
@@ -2525,7 +2590,7 @@
       const pts = Geo.offsetClosed(Geo.dedupe(Geo.pathPolyline(piece.path.nodes, true, 0.02)), -chain.d);
       if (pts.length >= 3) {
         mk(Geo.simplifyPoly(pts, 0.01, true).map((p) => ({ x: p.x, y: p.y, hin: null, hout: null })),
-          true, piece.name + ' stitch line');
+          true, decorate(piece.name, 'stitch line'));
       }
       runCount = 1;
     } else {
@@ -2538,9 +2603,8 @@
         while (chain.segs.has(nx)) { arc.push(nx); nx = (nx + 1) % n; }
         arcs.push(arc);
       }
-      arcs.forEach((arc, i) => {
-        mk(edgeGuideNodes(piece, arc, chain.d), false,
-          piece.name + ' stitch line' + (arcs.length > 1 ? ' ' + (i + 1) : ''));
+      arcs.forEach((arc) => {
+        mk(edgeGuideNodes(piece, arc, chain.d), false, decorate(piece.name, 'stitch line'));
       });
       runCount = arcs.length;
     }
@@ -2807,8 +2871,9 @@
     }
 
     // 5. write back: A replaces the original (same id), B is new
-    const base = target.name;
-    target.name = base + ' 1';
+    // cutting a cut piece shouldn't stack counters ("Front 1 1 1")
+    const base = target.name.replace(/\s+\d+$/, '').trim() || target.name;
+    target.name = uniqueName(base + ' 1', target.id);
     target.path = { closed: true, nodes: nodesA };
     target.notches = nA;
     target.stitchSlits = sA;
@@ -2817,7 +2882,7 @@
     target.grain = gA;
     target.foldSeg = null;
     const pieceB = {
-      id: uid(), name: base + ' 2', visible: true,
+      id: uid(), name: uniqueName(base + ' 2'), visible: true,
       seamAllowance: target.seamAllowance, notchLength: target.notchLength,
       path: { closed: true, nodes: nodesB },
       notches: nB, stitchSlits: sB, holes: hB, cutouts: cB, grain: gB, foldSeg: null,
@@ -2827,7 +2892,7 @@
     endChange();
     selectPiece(target.id);
     renderAll();
-    $('status-hint').textContent = `Cut "${base}" into "${base} 1" and "${base} 2"` +
+    $('status-hint').textContent = `Cut "${base}" into "${target.name}" and "${pieceB.name}"` +
       (sourcePiece ? ' (cut path consumed)' : '');
   }
 
@@ -3621,7 +3686,7 @@
       if (!src) continue;
       const p = JSON.parse(JSON.stringify(src));
       p.id = uid();
-      p.name = src.name + ' copy';
+      p.name = decorate(src.name, 'copy');
       movePiece(p, 3, 3);
       doc.pieces.push(p);
       newIds.push(p.id);
@@ -3707,7 +3772,7 @@
   function duplicatePiece(piece, mirror) {
     const copy = JSON.parse(JSON.stringify(piece));
     copy.id = uid();
-    copy.name = piece.name + (mirror ? ' (mirror)' : ' copy');
+    copy.name = decorate(piece.name, mirror ? '(mirror)' : 'copy');
     if (mirror) {
       const poly = Geo.pathPolyline(copy.path.nodes, copy.path.closed, 0.1);
       const bb = Geo.bbox(poly);
@@ -4188,7 +4253,7 @@
     if (pts.length < 3) { $('status-hint').textContent = 'That distance swallows the whole piece.'; return; }
     const copy = {
       id: uid(),
-      name: p.name + (d > 0 ? ' inset' : ' outset'),
+      name: decorate(p.name, d > 0 ? 'inset' : 'outset'),
       visible: true,
       seamAllowance: p.seamAllowance,
       notchLength: p.notchLength,
