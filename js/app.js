@@ -481,7 +481,7 @@
 
       // label
       if (closed && seamPts && seamPts.length > 2) {
-        const c = Geo.centroid(seamPts);
+        const c = Geo.labelBox(seamPts); // same anchor the engraved name uses
         el('text', {
           class: 'piece-label', x: c.x, y: c.y,
           'font-size': px(13), 'text-anchor': 'middle',
@@ -4025,18 +4025,56 @@
     download(safeName() + '.pattern.json', data, 'application/json');
   }
 
+  const esc = (v) => String(v).replace(/[&<>"]/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+  // Export settings shared by DXF and SVG.
+  function exportOpts() {
+    return {
+      labels: $('ex-labels').checked,
+      labelHeight: Math.max(0.2, parseFloat($('ex-label-h').value) || 0.8),
+    };
+  }
+
+  // Names the stroke font can't draw fall back to a TEXT entity, whose look
+  // depends on the reader's font — say so rather than let it surprise them at
+  // the laser. Pieces too small to hold legible text are dropped entirely.
+  function reportLabelIssues(opts) {
+    if (!opts.labels) return;
+    const fellBack = [], tooSmall = [];
+    for (const p of doc.pieces) {
+      if (p.visible === false || p.guide || !p.name || !p.path.closed) continue;
+      const s = DXF.pieceShapes(p, opts);
+      if (s.texts && s.texts.length) fellBack.push(p.name);
+      else if (!(s.polylines || []).some((pl) => pl.layer === 'MARK' && !pl.closed)) tooSmall.push(p.name);
+    }
+    const bits = [];
+    if (fellBack.length) {
+      bits.push(`${fellBack.length} name${fellBack.length > 1 ? 's' : ''} exported as DXF text ` +
+        `(no engraving strokes for those characters): ${fellBack.slice(0, 3).join(', ')}`);
+    }
+    if (tooSmall.length) {
+      bits.push(`${tooSmall.length} piece${tooSmall.length > 1 ? 's' : ''} too small to label: ` +
+        tooSmall.slice(0, 3).join(', '));
+    }
+    if (bits.length) $('status-hint').textContent = bits.join(' · ');
+  }
+
   function exportDXF() {
     const ok = doc.pieces.some((p) => p.visible !== false && p.path.nodes.length >= 2);
     if (!ok) { alert('Nothing to export — draw a piece first.'); return; }
-    download(safeName() + '.dxf', DXF.exportDXF(doc), 'application/dxf');
+    const opts = exportOpts();
+    download(safeName() + '.dxf', DXF.exportDXF(doc, opts), 'application/dxf');
+    reportLabelIssues(opts);
   }
 
   function exportSVG() {
     const ok = doc.pieces.some((p) => p.visible !== false && p.path.nodes.length >= 2);
     if (!ok) { alert('Nothing to export — draw a piece first.'); return; }
+    const svgOpts = exportOpts();
     const shapes = doc.pieces
       .filter((p) => p.visible !== false && p.path.nodes.length >= 2)
-      .map((p) => ({ piece: p, s: DXF.pieceShapes(p) }));
+      .map((p) => ({ piece: p, s: DXF.pieceShapes(p, svgOpts) }));
     const every = [];
     for (const { s } of shapes) {
       for (const pl of s.polylines) every.push(...pl.pts);
@@ -4063,12 +4101,19 @@
         body += `<circle cx="${tx(c.c).split(',')[0]}" cy="${tx(c.c).split(',')[1]}" r="${(c.r * 10).toFixed(2)}" ` +
           `fill="none" stroke="${COLORS[c.layer]}" stroke-width="0.3"/>\n`;
       }
+      // names with no stroke glyphs: real <text>, rendered by the viewer's font
+      for (const t of s.texts || []) {
+        const [x, y] = tx({ x: t.x, y: t.y }).split(',');
+        body += `<text x="${x}" y="${y}" font-size="${(t.height * 10).toFixed(2)}" ` +
+          `text-anchor="middle" fill="${COLORS[t.layer]}">${esc(t.value)}</text>\n`;
+      }
     }
     const svgText =
       `<?xml version="1.0" encoding="UTF-8"?>\n` +
       `<svg xmlns="http://www.w3.org/2000/svg" width="${wMM.toFixed(2)}mm" height="${hMM.toFixed(2)}mm" ` +
       `viewBox="0 0 ${wMM.toFixed(2)} ${hMM.toFixed(2)}">\n<!-- Pattern Studio export, units: mm -->\n${body}</svg>\n`;
     download(safeName() + '.svg', svgText, 'image/svg+xml');
+    reportLabelIssues(svgOpts);
   }
 
   /* global DXFImport */
@@ -4347,6 +4392,9 @@
     e.target.value = '';
   });
   $('btn-save').addEventListener('click', (ev) => saveJSON(ev.shiftKey));
+  $('ex-labels').addEventListener('change', () => {
+    $('ex-label-h-row').hidden = !$('ex-labels').checked;
+  });
   $('btn-export-dxf').addEventListener('click', exportDXF);
   $('btn-export-svg').addEventListener('click', exportSVG);
   $('btn-undo').addEventListener('click', undo);

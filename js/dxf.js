@@ -16,11 +16,11 @@
  */
 (function (root, factory) {
   if (typeof module !== 'undefined' && module.exports) {
-    module.exports = factory(require('./geometry.js'));
+    module.exports = factory(require('./geometry.js'), require('./strokefont.js'));
   } else {
-    root.DXF = factory(root.Geo);
+    root.DXF = factory(root.Geo, root.StrokeFont);
   }
-})(typeof self !== 'undefined' ? self : this, function (Geo) {
+})(typeof self !== 'undefined' ? self : this, function (Geo, StrokeFont) {
   'use strict';
 
   const FLATTEN_TOL_CM = 0.01; // 0.1 mm
@@ -92,6 +92,17 @@
     w.pair(40, NUM(r));
   }
 
+  // Only used for names the stroke font has no glyphs for (Hangul, CJK...).
+  // The reader supplies the font, so this is a fallback, not the normal path.
+  function text(w, layer, p, height, value) {
+    w.pair(0, 'TEXT'); w.pair(8, layer);
+    w.pair(10, NUM(p.x)); w.pair(20, NUM(p.y)); w.pair(30, '0.0');
+    w.pair(40, NUM(height));
+    w.pair(1, String(value).replace(/[\r\n]+/g, ' '));
+    w.pair(72, 1); // horizontally centred
+    w.pair(11, NUM(p.x)); w.pair(21, NUM(p.y)); w.pair(31, '0.0');
+  }
+
   // Resolve a fold-line piece into its full (unfolded) outline: the half is
   // mirrored across the fold edge and welded to itself along it, so the fold
   // edge disappears inside the outline. Notches and holes are mirrored too
@@ -159,7 +170,8 @@
 
   // Collect exportable shapes for one piece, in document coords (cm, y-down).
   // Returns { polylines: [{layer, pts, closed}], lines: [{layer,a,b}], circles: [{layer,c,r}] }
-  function pieceShapes(piece) {
+  // opts.labels engraves the piece name; opts.labelHeight is its cap height (cm).
+  function pieceShapes(piece, opts) {
     let foldLine = null;
     if (piece.foldSeg != null) {
       const fn = piece.path.nodes, f = piece.foldSeg;
@@ -256,16 +268,51 @@
         wing(a, Geo.scale(d, -1));
       }
     }
+
+    // engraved piece name, on MARK so it burns rather than cuts
+    if (opts && opts.labels && piece.name && !piece.guide) {
+      const label = labelShapes(piece, seamPts, closed, opts);
+      if (label) {
+        if (label.strokes) for (const s of label.strokes) out.polylines.push({ layer: 'MARK', pts: s, closed: false });
+        if (label.text) (out.texts = out.texts || []).push(label.text);
+      }
+    }
     return out;
   }
 
+  // Where and how big the name goes: centred on the piece, shrunk to fit
+  // inside it, and never below a size that would engrave as mush.
+  const LABEL_MIN_H = 0.25; // cm
+  function labelShapes(piece, seamPts, closed, opts) {
+    if (!closed || !seamPts || seamPts.length < 3) return null;
+    const name = String(piece.name);
+    const bb = Geo.bbox(seamPts);
+    const c = Geo.labelBox(seamPts); // lands on material even on a concave piece
+    let h = opts.labelHeight > 0 ? opts.labelHeight : 0.8;
+    // fit inside the material actually available across the label line, not
+    // the bounding box — a crescent's bbox is mostly air
+    const boxW = (c.w > 0 ? c.w : bb.maxX - bb.minX) * 0.85, boxH = (bb.maxY - bb.minY) / 3;
+    const w1 = StrokeFont.width(name, h);
+    if (w1 > boxW && w1 > 0) h *= boxW / w1;
+    if (h > boxH) h = boxH;
+    if (h < LABEL_MIN_H) return null; // too small to read — better none than mush
+    const origin = { x: c.x, y: c.y + h / 2 }; // baseline, so the text centres on c
+    if (!StrokeFont.supports(name)) {
+      // Hangul, CJK, accents: no glyphs to stroke. Fall back to a TEXT entity
+      // so the name still reaches the file with the reader's own font, rather
+      // than dropping characters and engraving a lie.
+      return { text: { layer: 'MARK', value: name, height: h, x: origin.x, y: origin.y, align: 'center' } };
+    }
+    return { strokes: StrokeFont.strokes(name, origin, h, 'center') };
+  }
+
   // doc: { pieces: [...] } in cm/y-down. Returns DXF file string (mm, y-up).
-  function exportDXF(doc) {
+  function exportDXF(doc, opts) {
     // gather everything in cm first to compute the bbox
     const all = [];
     for (const piece of doc.pieces) {
       if (piece.visible === false) continue;
-      all.push(pieceShapes(piece));
+      all.push(pieceShapes(piece, opts));
     }
     const every = [];
     for (const s of all) {
@@ -294,6 +341,7 @@
       for (const pl of s.polylines) polyline(w, pl.layer, pl.pts.map(tx), pl.closed);
       for (const l of s.lines) line(w, l.layer, tx(l.a), tx(l.b));
       for (const c of s.circles) circle(w, c.layer, tx(c.c), c.r * 10);
+      for (const t of s.texts || []) text(w, t.layer, tx({ x: t.x, y: t.y }), t.height * 10, t.value);
     }
     w.pair(0, 'ENDSEC');
     w.pair(0, 'EOF');

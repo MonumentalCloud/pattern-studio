@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pattern Studio</title>
-<link rel="stylesheet" href="style.css?v=60">
+<link rel="stylesheet" href="style.css?v=61">
 </head>
 <body>
 <div id="app">
   <header id="topbar">
-    <span id="logo" title="build 60">✂ Pattern Studio</span>
+    <span id="logo" title="build 61">✂ Pattern Studio</span>
     <input id="doc-name" type="text" value="Untitled pattern" spellcheck="false" title="Pattern name">
     <span class="sep"></span>
     <button id="btn-new" title="New document">New</button>
@@ -119,6 +119,19 @@
       <section>
         <h3>Pieces <button id="btn-add-piece" title="Start a new piece with the pen tool">+ Draw</button></h3>
         <ul id="piece-list"></ul>
+      </section>
+      <section id="export-props">
+        <h3>Export</h3>
+        <div class="row">
+          <label class="chk"><input id="ex-labels" type="checkbox"> Engrave piece names</label>
+        </div>
+        <div class="row" id="ex-label-h-row" hidden>
+          <label>Text height</label>
+          <input id="ex-label-h" type="number" min="0.2" max="10" step="0.1" value="0.8" title="Cap height in cm. Shrunk automatically when a piece is too small to hold it, and skipped below 2.5 mm"> <em>cm</em>
+        </div>
+        <div class="row hint">Writes each piece's name inside its outline on the <b>MARK</b> layer,
+          as single-stroke lines (engraves in one pass, no font needed). Applies to DXF and SVG.
+          Guide/stitch lines are left unlabelled.</div>
       </section>
       <section id="piece-props" hidden>
         <h3>Piece</h3>
@@ -320,6 +333,7 @@
           <li><b>Boolean</b>: overlap two pieces → union / subtract / intersect</li>
           <li><b>Shape</b>: drag rectangles/ellipses · dragging pieces magnets onto other points</li>
           <li><b>Pieces list</b>: double-click a name — or hit the ✎ — to rename it in place (Enter saves, Esc cancels)</li>
+          <li><b>Export</b>: tick <b>Engrave piece names</b> to burn each name inside its piece (single-stroke, MARK layer, DXF + SVG)</li>
           <li><b>Snapping</b>: points, the middle of every edge (◇ marker, measured along the curve), anywhere on another outline, then grid</li>
           <li><b>Del</b> removes point · scroll/two-finger pans · pinch or <b>Ctrl</b>+scroll zooms · <b>Space</b>+drag pans</li>
           <li>Dashed line = cutting line (seam allowance)</li>
@@ -329,9 +343,10 @@
   </div>
 </div>
 <input id="file-input" type="file" accept=".json,.dxf,application/json" hidden>
-<script src="js/geometry.js?v=60"></script>
-<script src="js/dxf.js?v=60"></script>
-<script src="js/dxfimport.js?v=60"></script>
-<script src="js/app.js?v=60"></script>
+<script src="js/geometry.js?v=61"></script>
+<script src="js/strokefont.js?v=61"></script>
+<script src="js/dxf.js?v=61"></script>
+<script src="js/dxfimport.js?v=61"></script>
+<script src="js/app.js?v=61"></script>
 </body>
 </html>

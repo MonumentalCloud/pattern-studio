@@ -185,6 +185,57 @@
     return { x: x / pts.length, y: y / pts.length };
   }
 
+  // True area centroid. centroid() above averages the POINTS, which drags the
+  // result toward whichever edge got flattened into the most segments — fine
+  // for a rough middle, wrong for placing a label.
+  function polyCentroid(pts) {
+    if (pts.length < 3) return centroid(pts);
+    let a2 = 0, cx = 0, cy = 0;
+    for (let i = 0; i < pts.length; i++) {
+      const p = pts[i], q = pts[(i + 1) % pts.length];
+      const f = p.x * q.y - q.x * p.y;
+      a2 += f; cx += (p.x + q.x) * f; cy += (p.y + q.y) * f;
+    }
+    if (Math.abs(a2) < EPS) return centroid(pts);
+    return { x: cx / (3 * a2), y: cy / (3 * a2) };
+  }
+
+  // Where a label goes and how much room it has: the area centroid when that
+  // lands on material, otherwise the middle of the widest interior run (a
+  // crescent or an L has its centroid out in the air). w = interior width there.
+  function labelBox(pts) {
+    if (pts.length < 3) return { x: 0, y: 0, w: 0 };
+    const spanAt = (y) => {
+      const xs = [];
+      for (let i = 0; i < pts.length; i++) {
+        const a = pts[i], b = pts[(i + 1) % pts.length];
+        if ((a.y <= y) === (b.y <= y)) continue;
+        xs.push(a.x + (b.x - a.x) * (y - a.y) / (b.y - a.y));
+      }
+      return xs.sort((m, n) => m - n);
+    };
+    const c = polyCentroid(pts);
+    if (pointInPolygon(pts, c)) {
+      const xs = spanAt(c.y);
+      let w = 0;
+      for (let i = 0; i + 1 < xs.length; i += 2) {
+        if (c.x >= xs[i] - EPS && c.x <= xs[i + 1] + EPS) w = xs[i + 1] - xs[i];
+      }
+      return { x: c.x, y: c.y, w };
+    }
+    const bb = bbox(pts);
+    let best = null;
+    for (let k = 1; k <= 9; k++) {
+      const y = bb.minY + (bb.maxY - bb.minY) * (k / 10);
+      const xs = spanAt(y);
+      for (let i = 0; i + 1 < xs.length; i += 2) {
+        const w = xs[i + 1] - xs[i];
+        if (!best || w > best.w) best = { x: (xs[i] + xs[i + 1]) / 2, y, w };
+      }
+    }
+    return best || { x: c.x, y: c.y, w: 0 };
+  }
+
   // Remove consecutive duplicate points (within tolerance).
   function dedupe(pts, tol) {
     tol = tol || 1e-6;
@@ -827,7 +878,7 @@
     sub, add, scale, dot, len, dist, norm, lerp,
     segCtrl, segIsLine, segPoint, segTangent, segFlatten, segLength, segMidpoint, pathMidpoints,
     cubicPoint, cubicTangent, flattenCubic,
-    pathPolyline, pathLength, polyArea, bbox, centroid, dedupe,
+    pathPolyline, pathLength, polyArea, bbox, centroid, polyCentroid, labelBox, dedupe,
     outwardSign, offsetClosed, nearestOnPath, pointInPolygon, splitSeg, setSegLength,
     reverseNodes, weldClosedPaths, reflectPoint, reflectNodes, segArcParams, slitLine, notchLines, notchLinesPath,
     pathArcParams, simplifyPoly, offsetOpen, pathIntersections, sewSlits, clipLoops,

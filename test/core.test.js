@@ -277,6 +277,107 @@ t('pathMidpoints: one per edge, closed vs open', () => {
   assert(Geo.pathMidpoints([N(0, 0)], false).length === 0, 'a lone point has no edges');
 });
 
+t('stroke font: known glyphs stroke, unknown ones are reported', () => {
+  const SF = require('../js/strokefont.js');
+  assert(SF.supports('FRONT PANEL 2 (MIRROR)'), 'ASCII names are strokeable');
+  assert(SF.supports('front panel'), 'lowercase maps onto the capitals');
+  assert(!SF.supports('앞판'), 'Hangul has no glyphs');
+  assert(JSON.stringify(SF.unsupportedChars('Front 앞판')) === JSON.stringify(['앞', '판']),
+    'and it names which characters: ' + JSON.stringify(SF.unsupportedChars('Front 앞판')));
+  const st = SF.strokes('AB', { x: 0, y: 0 }, 1);
+  assert(st.length === 4, 'A (2 strokes) + B (2 strokes) = 4, got ' + st.length);
+  for (const stroke of st) for (const p of stroke) {
+    assert(Number.isFinite(p.x) && Number.isFinite(p.y), 'every point is real: ' + JSON.stringify(p));
+    assert(p.y <= 1e-9, 'baseline at y=0 and glyphs go up (y-down doc coords): ' + p.y);
+  }
+  assert(SF.width('A', 2) > SF.width('A', 1), 'width scales with height');
+});
+
+t('polyCentroid ignores how finely edges were flattened', () => {
+  // same square, but one edge subdivided into many points
+  const plain = [N(0, 0), N(10, 0), N(10, 10), N(0, 10)];
+  const dense = [{ x: 0, y: 0 }];
+  for (let i = 1; i <= 40; i++) dense.push({ x: 10 * i / 40, y: 0 });
+  dense.push({ x: 10, y: 10 }, { x: 0, y: 10 });
+  const c1 = Geo.polyCentroid(plain), c2 = Geo.polyCentroid(dense);
+  assert(Geo.dist(c1, { x: 5, y: 5 }) < 1e-9, 'square centroid: ' + JSON.stringify(c1));
+  assert(Geo.dist(c2, { x: 5, y: 5 }) < 1e-9, 'unchanged by subdivision: ' + JSON.stringify(c2));
+  // the point-average version is the one that drifts
+  assert(Geo.dist(Geo.centroid(dense), { x: 5, y: 5 }) > 1,
+    'point-average really does drift: ' + JSON.stringify(Geo.centroid(dense)));
+});
+
+t('labelBox lands on material even when the centroid does not', () => {
+  // a U: its area centroid falls in the gap between the arms
+  const u = [
+    { x: 0, y: 0 }, { x: 3, y: 0 }, { x: 3, y: 7 }, { x: 7, y: 7 },
+    { x: 7, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 },
+  ];
+  assert(!Geo.pointInPolygon(u, Geo.polyCentroid(u)), 'the U really is the awkward case');
+  const box = Geo.labelBox(u);
+  assert(Geo.pointInPolygon(u, { x: box.x, y: box.y }),
+    'label anchor is inside the shape: ' + JSON.stringify(box));
+  assert(box.w > 0, 'and reports the room available there: ' + box.w);
+});
+
+t('export labels: name engraves inside the piece on MARK', () => {
+  const piece = {
+    id: 'p', name: 'FRONT', visible: true, seamAllowance: 0, notchLength: 0.4,
+    path: { closed: true, nodes: [N(0, 0), N(20, 0), N(20, 12), N(0, 12)] },
+    notches: [], holes: [], grain: null, foldSeg: null, cutouts: [], stitchSlits: [],
+  };
+  const plain = DXF.pieceShapes(piece);
+  const marked = DXF.pieceShapes(piece, { labels: true, labelHeight: 1 });
+  const openMark = (s) => (s.polylines || []).filter((pl) => pl.layer === 'MARK' && !pl.closed);
+  assert(openMark(plain).length === 0, 'off by default');
+  assert(openMark(marked).length > 0, 'on when asked');
+  // every stroke sits inside the outline
+  const poly = Geo.pathPolyline(piece.path.nodes, true, 0.05);
+  for (const pl of openMark(marked)) {
+    for (const p of pl.pts) {
+      assert(Geo.pointInPolygon(poly, p), 'stroke point outside the piece: ' + JSON.stringify(p));
+    }
+  }
+  assert(!marked.texts, 'ASCII needs no TEXT fallback');
+});
+
+t('export labels: a piece too small to read is left unlabelled', () => {
+  const tiny = {
+    id: 'p', name: 'FRONT PANEL LEFT', visible: true, seamAllowance: 0, notchLength: 0.4,
+    path: { closed: true, nodes: [N(0, 0), N(0.6, 0), N(0.6, 0.6), N(0, 0.6)] },
+    notches: [], holes: [], grain: null, foldSeg: null, cutouts: [], stitchSlits: [],
+  };
+  const s = DXF.pieceShapes(tiny, { labels: true, labelHeight: 1 });
+  const openMark = (s2) => (s2.polylines || []).filter((pl) => pl.layer === 'MARK' && !pl.closed);
+  assert(openMark(s).length === 0 && !s.texts, 'nothing engraved rather than mush');
+});
+
+t('export labels: non-Latin names fall back to a DXF TEXT entity', () => {
+  const piece = {
+    id: 'p', name: '앞판', visible: true, seamAllowance: 0, notchLength: 0.4,
+    path: { closed: true, nodes: [N(0, 0), N(20, 0), N(20, 12), N(0, 12)] },
+    notches: [], holes: [], grain: null, foldSeg: null, cutouts: [], stitchSlits: [],
+  };
+  const s = DXF.pieceShapes(piece, { labels: true, labelHeight: 1 });
+  assert(s.texts && s.texts.length === 1, 'falls back rather than dropping the name');
+  assert(s.texts[0].value === '앞판' && s.texts[0].layer === 'MARK', JSON.stringify(s.texts[0]));
+  const dxf = DXF.exportDXF({ version: 2, name: 't', pieces: [piece] }, { labels: true, labelHeight: 1 });
+  assert(/\r\nTEXT\r\n/.test(dxf), 'and the entity reaches the file');
+  assert(dxf.indexOf('앞판') > 0, 'with the name intact');
+});
+
+t('export labels: guide/stitch-line pieces are not labelled', () => {
+  const guide = {
+    id: 'g', name: 'Front stitch line', visible: true, guide: true,
+    seamAllowance: 0, notchLength: 0.4,
+    path: { closed: true, nodes: [N(0, 0), N(20, 0), N(20, 12), N(0, 12)] },
+    notches: [], holes: [], grain: null, foldSeg: null, cutouts: [], stitchSlits: [],
+  };
+  const s = DXF.pieceShapes(guide, { labels: true, labelHeight: 1 });
+  const open = (s.polylines || []).filter((pl) => pl.layer === 'MARK' && !pl.closed);
+  assert(open.length === 0 && !s.texts, 'a guide line carries no engraved name');
+});
+
 t('asset cache keys match the build number', () => {
   // Every ?v= in index.html is the cache key browsers use for the JS/CSS. If
   // it lags the build, a returning browser keeps serving the old app and new
