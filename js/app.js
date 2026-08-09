@@ -4783,6 +4783,9 @@
         if (parsed && Array.isArray(parsed.pieces)) doc = migrateDoc(parsed);
       }
     } catch (e) { /* corrupted autosave — start fresh */ }
+    // surface the build the browser actually loaded: a stale cached copy is
+    // otherwise indistinguishable from a change that never shipped
+    $('status-build').textContent = $('logo').title || '';
     $('doc-name').value = doc.name || 'Untitled pattern';
     setTool('select');
     applyView();

@@ -240,6 +240,23 @@ t('slitLine: diagonal slit centered on the path', () => {
     '45 degrees: ' + JSON.stringify(d));
 });
 
+t('asset cache keys match the build number', () => {
+  // Every ?v= in index.html is the cache key browsers use for the JS/CSS. If
+  // it lags the build, a returning browser keeps serving the old app and new
+  // work simply never appears — which looks exactly like a change that was
+  // never made.
+  const fs = require('fs');
+  const html = fs.readFileSync(require('path').join(__dirname, '..', 'index.html'), 'utf8');
+  const build = /id="logo" title="build (\d+)"/.exec(html);
+  assert(build, 'index.html should carry a build number on #logo');
+  const keys = [...html.matchAll(/\?v=(\d+)/g)].map((m) => m[1]);
+  assert(keys.length >= 4, 'expected the css + js assets to be cache-busted, saw ' + keys.length);
+  for (const k of keys) {
+    assert(k === build[1],
+      `asset pinned at ?v=${k} but this is build ${build[1]} — bump the cache keys`);
+  }
+});
+
 t('slitLine abs: the angle is measured off the page, not the edge', () => {
   // same absolute angle on edges running four different ways => identical direction
   const dirs = [
