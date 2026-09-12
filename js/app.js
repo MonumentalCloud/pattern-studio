@@ -383,7 +383,8 @@
         for (const sl of piece.stitchSlits || []) {
           if (sl.seg >= gn.length) continue;
           const ln = Geo.slitLine(gn[sl.seg], gn[(sl.seg + 1) % gn.length], sl, gS);
-          el('line', { class: 'piece-slit', x1: ln.a.x, y1: ln.a.y, x2: ln.b.x, y2: ln.b.y }, g);
+          const pts = Geo.slitContour(ln, sl.width);
+          el('path', { class: 'piece-slit', d: polyD(pts, pts.length > 2) }, g);
         }
         continue;
       }
@@ -445,7 +446,8 @@
             if (sl.seg >= nodes.length) continue;
             ln = Geo.slitLine(nodes[sl.seg], nodes[(sl.seg + 1) % nodes.length], sl, outS);
           }
-          el('line', { class: 'piece-slit', x1: ln.a.x, y1: ln.a.y, x2: ln.b.x, y2: ln.b.y }, g);
+          const pts = Geo.slitContour(ln, sl.width);
+          el('path', { class: 'piece-slit', d: polyD(pts, pts.length > 2) }, g);
         }
       }
 
@@ -485,7 +487,7 @@
         el('text', {
           class: 'piece-label', x: c.x, y: c.y,
           'font-size': px(13), 'text-anchor': 'middle',
-        }, g).textContent = piece.name;
+        }, g).textContent = piece.name.length > 30 ? piece.name.slice(0, 27) + '…' : piece.name;
       }
     }
   }
@@ -662,10 +664,11 @@
     for (const piece of doc.pieces) {
       const li = document.createElement('li');
       if (piece.id === sel.pieceId || multiSel.includes(piece.id)) li.classList.add('selected');
-      const eye = document.createElement('span');
+      const eye = document.createElement('button');
       eye.className = 'eye' + (piece.visible === false ? ' off' : '');
       eye.textContent = '👁';
-      eye.title = 'Show / hide';
+      eye.title = 'Show / hide ' + piece.name;
+      eye.setAttribute('aria-label', eye.title);
       eye.addEventListener('click', (e) => {
         e.stopPropagation();
         beginChange();
@@ -704,10 +707,11 @@
       nm.className = 'nm';
       nm.textContent = piece.name;
       nm.title = piece.name + ' — double-click (or the ✎) to rename';
-      const ren = document.createElement('span');
+      const ren = document.createElement('button');
       ren.className = 'ren';
       ren.textContent = '✎';
-      ren.title = 'Rename this piece';
+      ren.title = 'Rename ' + piece.name;
+      ren.setAttribute('aria-label', ren.title);
       ren.addEventListener('click', (e) => {
         e.stopPropagation();
         renamingId = piece.id;
@@ -765,7 +769,7 @@
     if (slitSel) {
       const runOf = (sl) => (slitSel.run != null ? sl.run === slitSel.run : (sl.seg === slitSel.seg && sl.cut === slitSel.cut));
       const count = piece.stitchSlits.filter(runOf).length;
-      $('sp-del-run').textContent = `Delete stitch line (${count} hole${count > 1 ? 's' : ''})`;
+      $('sp-del-run').textContent = 'Delete selected hole';
       if (document.activeElement !== $('sp-slit-ang')) {
         $('sp-slit-ang').value = slitSel.ang == null ? 45 : slitSel.ang;
       }
@@ -850,12 +854,129 @@
       $('sel-hint').textContent =
         `${sel.nodes.length} points selected — drag or arrows move them · type Δx/Δy for an exact move.`;
     } else if (sel.kind === 'hole') {
-      $('sel-hint').textContent = 'Drill hole — drag or arrows move it · type Δx/Δy for an exact move.';
+      $('sel-hint').textContent = 'Circular cutout — drag or arrows move it · type Δx/Δy for an exact move.';
     } else if (cutSel) {
       const cSlits = (piece.stitchSlits || []).filter((sl) => sl.cut === sel.idx).length;
       $('sel-hint').textContent = 'Internal cutout — drag / arrows / Move by reposition it · Del removes it' +
         (cSlits ? ` (and its ${cSlits} stitch holes)` : '') + '.';
     }
+    renderInspector(piece);
+  }
+
+  // One inspector owns a tool's controls, including when Select finds its objects.
+  function renderInspector(piece) {
+    const editingSlits = piece && (sel.kind === 'slit' || sel.kind === 'slits');
+    const stitchVisible = tool === 'stitch' || (tool === 'select' && editingSlits);
+    $('stitch-props').hidden = !stitchVisible;
+    const edit = tool !== 'stitch' || $('st-workflow').value === 'edit';
+    if (tool === 'select' && editingSlits) $('st-workflow').value = 'edit';
+    $('st-create').hidden = edit;
+    $('st-edit').hidden = !edit;
+    $('st-edit-fields').hidden = !editingSlits;
+    $('st-edit-notice').hidden = true;
+    if (editingSlits) {
+      const indices = sel.kind === 'slit' ? [sel.idx] : sel.slits;
+      const sl = piece.stitchSlits[indices[0]];
+      if (sl) {
+        for (const [id, value] of [['sp-slit-len', sl.len * 10 || 1.5], ['sp-slit-width', (sl.width || 0) * 10]]) {
+          if (document.activeElement !== $(id)) $(id).value = Math.round(value * 1000) / 1000;
+        }
+        const groups = selectedStitchRuns(true);
+        if (sl.pair) {
+          const pair = groups.filter(g => g.piece.stitchSlits[g.indices[0]].pair === sl.pair);
+          try {
+            const lengths = {};
+            for (const g of pair) {
+              const holes = g.indices.map(i => g.piece.stitchSlits[i]);
+              const chains = stitchChains(stitchRunTargets(g.piece, holes), 0);
+              if (chains.length === 1) lengths[holes[0].pairSide] = Geo.pathLength(chains[0].path, chains[0].loop);
+            }
+            $('st-edit-notice').textContent = lengths.A == null || lengths.B == null
+              ? 'Matched side missing or unavailable. Recreate the pair to restore its original side A reference.'
+              : matchedLengthNotice(lengths.A, lengths.B);
+          } catch (_) {
+            $('st-edit-notice').textContent = 'The matched seam path has changed and cannot be checked. Recreate the pair before re-spacing.';
+          }
+          $('st-edit-notice').hidden = !$('st-edit-notice').textContent;
+        }
+        $('st-edit-summary').textContent = `${indices.length} hole(s) on ${piece.name}. ` +
+          (sl.pair && groups.length > 1 ? `Linked matched pair (${groups.length} runs).` : 'Unlinked run — edits affect this run only.');
+      }
+    } else $('st-edit-summary').textContent = 'Click a hole or stitched edge to select it. Then drag a box to select holes on that piece.';
+    $('piece-props').hidden = !piece || tool !== 'select';
+    $('sel-props').hidden = tool !== 'select' || $('sel-props').hidden || !!editingSlits;
+    $('notch-props').hidden = !(tool === 'notch' || (tool === 'select' && piece && sel.kind === 'notch'));
+    $('pp-notch').disabled = $('pp-notch-style').disabled = !piece;
+    $('round-props').hidden = !(tool === 'round' || (tool === 'select' && piece && sel.kind === 'node'));
+    $('sel-round-row').hidden = false;
+    $('sp-round-btn').disabled = !piece || sel.kind !== 'node';
+    $('hole-props').hidden = !(tool === 'hole' || (tool === 'select' && piece && sel.kind === 'hole'));
+    $('hole-update').hidden = !piece || sel.kind !== 'hole';
+    if (piece && sel.kind === 'hole' && document.activeElement !== $('hole-diameter')) {
+      $('hole-diameter').value = (piece.holes[sel.idx].r || 0.15) * 20;
+    }
+    $('select-props').hidden = tool !== 'select';
+    $('pen-props').hidden = tool !== 'pen';
+    $('grain-props').hidden = tool !== 'grain';
+    $('grain-remove').disabled = !piece || !piece.grain;
+    $('piece-title').textContent = multiSel.length > 1 ? `${multiSel.length} pieces selected` : 'Whole piece';
+    $('selection-title').textContent = 'Selected ' + ({seg:'edge',segs:'edges',node:'point',nodes:'points',hole:'hole',cut:'cutout'}[sel.kind] || 'object');
+    $('pp-dup').textContent = 'Duplicate ' + (multiSel.length > 1 ? `${multiSel.length} pieces` : 'piece');
+    $('pp-del').textContent = 'Delete ' + (multiSel.length > 1 ? `${multiSel.length} pieces` : 'whole piece');
+    $('pp-mirror').textContent = multiSel.length > 1 ? 'Mirror first piece' : 'Mirror copy';
+    $('tool-title').textContent = tool === 'bool' ? 'Boolean' : tool.charAt(0).toUpperCase() + tool.slice(1);
+  }
+
+  function selectedStitchRuns(linked) {
+    const p = selPiece();
+    if (!p) return [];
+    const indices = sel.kind === 'slit' ? [sel.idx] : sel.kind === 'slits' ? sel.slits : [];
+    const chosen = indices.map(i => p.stitchSlits[i]).filter(Boolean);
+    const pairs = new Set(linked ? chosen.map(s => s.pair).filter(Boolean) : []);
+    const groups = [];
+    for (const piece of doc.pieces) {
+      const byRun = new Map();
+      (piece.stitchSlits || []).forEach((s, i) => {
+        const local = piece === p && chosen.some(c => c.run != null ? c.run === s.run && c.pair === s.pair : s.run == null && c.seg === s.seg && c.cut === s.cut);
+        if (!local && !pairs.has(s.pair)) return;
+        const key = s.run == null ? `legacy:${s.cut == null ? 'outline' : s.cut}:${s.seg}` : `${s.pair || ''}:${s.run}`;
+        if (!byRun.has(key)) byRun.set(key, []);
+        byRun.get(key).push(i);
+      });
+      for (const indices of byRun.values()) groups.push({piece, indices});
+    }
+    return groups;
+  }
+
+  function stitchEditDown(ev, w) {
+    for (const p of doc.pieces.slice().reverse()) {
+      if (p.visible === false) continue;
+      const i = hitSlit(p, w);
+      if (i < 0) continue;
+      const indices = new Set(ev.shiftKey && sel.pieceId === p.id
+        ? (sel.kind === 'slits' ? sel.slits : sel.kind === 'slit' ? [sel.idx] : []) : []);
+      if (indices.has(i)) indices.delete(i); else indices.add(i);
+      selectPiece(p.id);
+      sel.kind = 'slits'; sel.slits = [...indices];
+      if (!sel.slits.length) sel.kind = null;
+      $('sp-slit-inset').value = 0;
+      renderAll();
+      return;
+    }
+    const res = nearestEdgeAt(w, true), co = cutoutAt(w);
+    const p = co && (!res || co.dist < res.hit.dist) ? co.piece : res && res.piece;
+    if (p) {
+      const cut = co && co.piece === p && (!res || co.dist < res.hit.dist) ? co.cut : null;
+      const i = (p.stitchSlits || []).findIndex(s => cut != null ? s.cut === cut : s.cut == null && (p.guide || s.seg === res.hit.seg));
+      if (i >= 0) {
+        selectPiece(p.id); sel.kind = 'slit'; sel.idx = i;
+        sel.slits = selectedStitchRuns(false).flatMap(g => g.indices);
+        sel.kind = 'slits'; sel.idx = -1;
+        $('sp-slit-inset').value = 0;
+        renderAll(); return;
+      }
+    }
+    drag = {type:'marquee', mode:'stitch-edit', a:w, b:w, prevPieceId:sel.pieceId, shift:ev.shiftKey};
   }
 
   // ---------- tools ----------
@@ -864,11 +985,11 @@
   let stitchMulti = []; // stitch tool: [{pieceId, seg|cut}] targets being gathered
   let stitchSideA = null; // matched mode: the confirmed side-A target set
   const HINTS = {
-    select: 'Click to select, then drag the selection to move it · Shift-click pieces or edges to gather several · drag empty space to box-select pieces (piece selected: its points · +Shift: its edges) · Del deletes',
+    select: 'Click to select, then drag to move · Box selection chooses pieces, points, edges or stitch holes explicitly · Shift adds · Del deletes the selected objects',
     pen: 'Click = corner, drag = curve · right-click = type exact length/angle · click the first point to close · Esc finishes open',
     shape: 'Drag corner to corner — the panel picks rectangle or ellipse · snaps to grid and existing points',
-    notch: 'Click near a point on an outline — the notch snaps to it · right-click an edge (Select tool) to divide it where you need a point',
-    hole: 'Click inside a piece to add a drill hole',
+    notch: 'Click near a point on an outline — the notch snaps to it · right-click an edge to divide it where you need a point',
+    hole: 'Click inside a piece to add a circular cutout',
     grain: 'Drag inside a piece to set the grainline · click (no drag) removes it',
     weld: 'Click an edge, then the matching edge on another piece — the second piece moves; both seam edges disappear',
     offset: 'Click edges to select them (click again to deselect, drag a box for several) · drag a selected edge to apply the mode live · Apply uses the exact distance · in Guide mode click inside a piece for a full ring · Esc clears',
@@ -879,7 +1000,16 @@
     measure: 'Drag to measure a distance',
   };
   function setTool(t) {
+    const prev = tool;
     tool = t;
+    if (t === 'stitch' && prev !== 'stitch') {
+      const p = selPiece();
+      if (p && (sel.kind === 'slit' || sel.kind === 'slits')) $('st-workflow').value = 'edit';
+      else if (p && (sel.kind === 'seg' || sel.kind === 'segs')) {
+        $('st-workflow').value = 'create';
+        stitchMulti = selectedSegsOf(p).map(seg => ({pieceId:p.id, seg}));
+      }
+    }
     if (t !== 'pen') finishDraft(false);
     if (t !== 'weld') weldFirst = null;
     if (t !== 'stitch') { stitchMulti = []; stitchSideA = null; }
@@ -894,7 +1024,9 @@
       b.classList.toggle('active', b.dataset.tool === t));
     svg.setAttribute('class', 'tool-' + t);
     $('status-hint').textContent = HINTS[t] || '';
-    renderAll(true);
+    if (t === 'stitch') updateStitchUi();
+    renderAll();
+    $('sidebar').scrollTop = 0;
   }
 
   // ---------- pen tool (drafting a new piece) ----------
@@ -1437,6 +1569,23 @@
           drag = null;
           return;
         }
+        if (drag.mode === 'stitch-edit') {
+          const p = pieceById(drag.prevPieceId);
+          if (p) {
+            const indices = new Set(drag.shift && sel.kind === 'slits' ? sel.slits : []);
+            (p.stitchSlits || []).forEach((sl, i) => {
+              const ln = slitLineFor(p, sl);
+              if (!ln) return;
+              const c = Geo.lerp(ln.a, ln.b, 0.5);
+              if (c.x >= x0 && c.x <= x1 && c.y >= y0 && c.y <= y1) indices.add(i);
+            });
+            selectPiece(p.id); sel.slits = [...indices]; sel.kind = indices.size ? 'slits' : null;
+            $('sp-slit-inset').value = 0;
+          }
+          drag = null; renderAll();
+          $('status-hint').textContent = p ? `${sel.slits.length} stitch holes selected` : 'Click a hole or stitched edge first, then drag a box to select its holes.';
+          return;
+        }
         if (drag.mode === 'stitch-add') {
           // stitch tool: box-select targets; a plain empty click clears them
           if (x1 - x0 > 0.2 || y1 - y0 > 0.2) stitchBoxAdd(x0, y0, x1, y1);
@@ -1449,59 +1598,26 @@
           // with a piece selected, the marquee grabs its POINTS first
           const prevPiece = drag.prevPieceId ? pieceById(drag.prevPieceId) : null;
           let done = false;
-          if (prevPiece && drag.shift) {
-            // Shift-marquee: grab the piece's EDGES (both endpoints inside),
-            // adding to any existing edge selection
-            const nodes = prevPiece.path.nodes;
-            const n = nodes.length;
-            const segCount = prevPiece.path.closed ? n : n - 1;
-            const inside = (nd) => nd.x >= x0 && nd.x <= x1 && nd.y >= y0 && nd.y <= y1;
-            const set = new Set(selectedSegsOf(prevPiece));
-            for (let i = 0; i < segCount; i++) {
-              if (inside(nodes[i]) && inside(nodes[(i + 1) % n])) set.add(i);
-            }
-            if (set.size) {
-              setSegSelection(prevPiece, [...set].sort((sa, sb) => sa - sb));
-              $('status-hint').textContent =
-                `${set.size} edge${set.size > 1 ? 's' : ''} selected — drag one to move them together · switch to Offset (O) to slide/protrude them`;
-              done = true;
-            }
-          }
-          if (!done && prevPiece) {
-            const nodeIdxs = [];
-            prevPiece.path.nodes.forEach((nd, i) => {
-              if (nd.x >= x0 && nd.x <= x1 && nd.y >= y0 && nd.y <= y1) nodeIdxs.push(i);
-            });
-            // stitch holes in the box too — whichever the box caught MORE of
-            // wins (dense imported outlines have points everywhere, which
-            // used to make hole sections unselectable)
-            const slitIdxs = [];
-            if ((prevPiece.stitchSlits || []).length) {
-              prevPiece.stitchSlits.forEach((sl2, i) => {
-                const ln = slitLineFor(prevPiece, sl2);
-                if (!ln) return;
-                const c = Geo.lerp(ln.a, ln.b, 0.5);
-                if (c.x >= x0 && c.x <= x1 && c.y >= y0 && c.y <= y1) slitIdxs.push(i);
+          const target = $('select-box').value;
+          if (target !== 'pieces') {
+            done = true;
+            if (!prevPiece) {
+              $('status-hint').textContent = 'Select a piece first, then box-select its ' + target + '.';
+            } else {
+              const inside = p => p.x >= x0 && p.x <= x1 && p.y >= y0 && p.y <= y1;
+              const kind = target === 'points' ? 'nodes' : target === 'edges' ? 'segs' : 'slits';
+              const set = new Set(drag.shift && sel.kind === kind ? sel[kind] : []);
+              if (target === 'points') prevPiece.path.nodes.forEach((nd, i) => { if (inside(nd)) set.add(i); });
+              else if (target === 'edges') {
+                const nodes = prevPiece.path.nodes;
+                for (let i = 0; i < nodes.length - (prevPiece.path.closed ? 0 : 1); i++) if (inside(nodes[i]) && inside(nodes[(i + 1) % nodes.length])) set.add(i);
+              } else (prevPiece.stitchSlits || []).forEach((sl, i) => {
+                const ln = slitLineFor(prevPiece, sl);
+                if (ln && inside(Geo.lerp(ln.a, ln.b, 0.5))) set.add(i);
               });
-            }
-            if (slitIdxs.length > nodeIdxs.length) {
-              sel.pieceId = prevPiece.id;
-              sel.nodes = [];
-              multiSel = [];
-              if (slitIdxs.length === 1) { sel.kind = 'slit'; sel.idx = slitIdxs[0]; }
-              else { sel.kind = 'slits'; sel.slits = slitIdxs; sel.idx = -1; }
-              $('status-hint').textContent =
-                `${slitIdxs.length} stitch hole${slitIdxs.length > 1 ? 's' : ''} selected — Del removes them · Shift-click holes to add/remove`;
-              done = true;
-            } else if (nodeIdxs.length) {
-              sel.pieceId = prevPiece.id;
-              sel.kind = 'nodes';
-              sel.idx = -1;
-              sel.nodes = nodeIdxs;
-              multiSel = [];
-              $('status-hint').textContent =
-                `${nodeIdxs.length} point${nodeIdxs.length > 1 ? 's' : ''} selected — drag or arrows move them together · Del deletes`;
-              done = true;
+              selectPiece(prevPiece.id);
+              sel.kind = set.size ? kind : null; sel[kind] = [...set]; sel.idx = -1;
+              $('status-hint').textContent = `${set.size} ${target} selected`;
             }
           }
           if (!done) {
@@ -2046,7 +2162,7 @@
       if (!ln) { centers.push(null); return; }
       const p = Geo.lerp(ln.a, ln.b, 0.5);
       centers.push(p);
-      const d = Geo.dist(p, w);
+      const d = Geo.nearestOnPath([{...ln.a}, {...ln.b}], false, w).dist - (sl.width || 0) / 2;
       if (d < bd) { bd = d; best = i; }
     });
     if (best < 0) return -1;
@@ -2059,7 +2175,7 @@
       const d = Geo.dist(c, centers[best]);
       if (d < gap) gap = d;
     });
-    if (gap * view.scale < 16) return -1;
+    if (tool !== 'stitch' && gap * view.scale < 16) return -1;
     return best;
   }
 
@@ -2097,7 +2213,7 @@
   svg.addEventListener('contextmenu', (ev) => {
     ev.preventDefault();
     if (tool === 'pen' && draft && draft.nodes.length) { openPenDialog(ev); return; }
-    if (tool === 'select') {
+    if (tool === 'select' || tool === 'notch') {
       const w = screenToWorld(ev);
       const sp = selPiece();
       // a point first: right-click opens the node menu
@@ -2370,11 +2486,13 @@
   }
 
   function holeDown(w) {
+    const diameter = Number($('hole-diameter').value);
+    if (!Number.isFinite(diameter) || diameter < 0.5 || diameter > 100) { $('status-hint').textContent = 'Hole diameter must be 0.5–100 mm.'; return; }
     const res = pickPieceAt(w, true);
     if (!res) return;
     beginChange();
     res.piece.holes = res.piece.holes || [];
-    res.piece.holes.push({ x: snap(w).x, y: snap(w).y, r: 0.15 });
+    res.piece.holes.push({ x: snap(w).x, y: snap(w).y, r: diameter / 20 });
     endChange();
     selectPiece(res.piece.id);
     renderAll();
@@ -3006,6 +3124,7 @@
     if (isFolded(best.piece)) { alert('Unfold this piece ("Unfold now") before rounding its corners.'); return; }
     const probe = filletParams(best.piece, best.idx, 0.01);
     if (probe.error) { $('status-hint').textContent = probe.error; return; }
+    selectPiece(best.piece.id); sel.kind = 'node'; sel.idx = best.idx; renderSidebar();
     drag = { type: 'round', pieceId: best.piece.id, idx: best.idx, R: 0, maxR: probe.maxR };
     $('status-hint').textContent = 'Drag outward — the distance sets the radius · release to apply';
   }
@@ -3220,8 +3339,24 @@
   // Two explicit modes (st-mode): "single" runs holes along every selected
   // target independently; "matched" gathers side A, confirms, gathers side B,
   // then gives BOTH sides the same number of holes at matching fractions.
+  function matchedLengthNotice(a, b) {
+    if (Math.abs(a - b) < 0.01) return '';
+    return `Unequal seam lengths: side A ${(a * 10).toFixed(1)} mm, side B ${(b * 10).toFixed(1)} mm. Original side A determines hole count; side B’s spacing adjusts to match. Check that this difference is intentional.`;
+  }
   function updateStitchUi() {
+    $('st-match-notice').hidden = true;
+    if ($('st-workflow').value === 'edit') {
+      $('status-hint').textContent = 'Edit stitches: click a hole or stitched edge, then box-select holes on that piece · Shift adds/removes · Del removes selected holes';
+      return;
+    }
     const matched = $('st-mode').value === 'matched';
+    if (matched && stitchSideA && stitchMulti.length) {
+      const a = stitchChains(stitchSideA, 0), b = stitchChains(stitchMulti, 0);
+      if (a.length === 1 && b.length === 1) {
+        $('st-match-notice').textContent = matchedLengthNotice(Geo.pathLength(a[0].path, a[0].loop), Geo.pathLength(b[0].path, b[0].loop));
+        $('st-match-notice').hidden = !$('st-match-notice').textContent;
+      }
+    }
     const btn = $('st-apply');
     const nSel = stitchMulti.length;
     const s2 = nSel > 1 ? 's' : '';
@@ -3244,6 +3379,7 @@
   }
 
   function stitchDown(ev, w) {
+    if ($('st-workflow').value === 'edit') return stitchEditDown(ev, w);
     const res = nearestEdgeAt(w, true);
     const co = cutoutAt(w);
     if (!res && !co) {
@@ -3305,7 +3441,7 @@
       if (p.guide) {
         if (!guideSeen.has(p.id)) {
           guideSeen.add(p.id);
-          chains.push({ piece: p, path: p.path.nodes, loop: p.path.closed, anchor: { kind: 'guide' } });
+          chains.push({ piece: p, path: p.path.nodes, loop: p.path.closed, anchor: { kind: 'guide' }, inset:off });
         }
         continue;
       }
@@ -3336,7 +3472,7 @@
         const pts = off ? Geo.offsetClosed(base, -off) : base;
         if (pts.length >= 3) {
           chains.push({
-            piece: p, loop: true, anchor: { kind: 'outline' },
+            piece: p, loop: true, anchor: { kind: 'outline', segs:[...set] },
             path: mkNodes(Geo.simplifyPoly(pts, 0.005, true)),
           });
         }
@@ -3354,7 +3490,7 @@
           arc.push(nxt);
           cur = nxt;
         }
-        chains.push({ piece: p, loop: false, anchor: { kind: 'outline' }, path: edgeGuideNodes(p, arc, off) });
+        chains.push({ piece: p, loop: false, anchor: { kind: 'outline', segs:arc.slice() }, path: edgeGuideNodes(p, arc, off) });
       }
     }
     return chains;
@@ -3390,15 +3526,18 @@
 
   // place holes at the given arc-length fractions of a chain's path, anchoring
   // each back into the document (per-hole off/toff keep corner miters exact)
-  function stitchPlaceRun(chain, fractions, slitLen) {
+  function stitchPlaceRun(chain, fractions, slitLen, settings) {
+    settings = settings || {width:Number($('st-width').value) / 10, ang:stitchAngle(), abs:stitchAngleAbs()};
+    if (!Number.isFinite(settings.width) || settings.width < 0 || settings.width > slitLen) throw new Error('Slot width must be between 0 and slit length.');
     const piece = chain.piece;
     piece.stitchSlits = piece.stitchSlits || [];
     const run = nextStitchRun(piece);
     let placed = 0;
     if (chain.anchor.kind === 'guide') {
       for (const pos of Geo.pathArcParams(chain.path, chain.loop, fractions)) {
-        const gs = { seg: pos.seg, t: pos.t, len: slitLen, ang: stitchAngle(), off: 0, run };
-        if (stitchAngleAbs()) gs.abs = true;
+        const gs = { seg: pos.seg, t: pos.t, len: slitLen, width:settings.width, ang:settings.ang, off:chain.inset || 0, run };
+        if (settings.abs) gs.abs = true;
+        if (settings.pair) { gs.pair = settings.pair; gs.pairSide = settings.pairSide; }
         piece.stitchSlits.push(gs);
         placed++;
       }
@@ -3418,7 +3557,7 @@
         // holes on the outline itself sit exactly on the boundary — only
         // reject when a real inset would land outside
         const bhit = Geo.nearestOnPath(piece.path.nodes, piece.path.closed, P);
-        if (!bhit || bhit.dist > 0.05) continue;
+        if (!bhit || bhit.dist > 0.05) throw new Error('The stitch run falls outside the piece. Reduce the inset.');
       }
       const hit = Geo.nearestOnPath(anchorNodes, anchorClosed, P);
       if (!hit) continue;
@@ -3428,10 +3567,13 @@
       const nrm = { x: os * tan.y, y: -os * tan.x };
       const offI = (q.x - P.x) * nrm.x + (q.y - P.y) * nrm.y;
       const tofI = (P.x - q.x) * tan.x + (P.y - q.y) * tan.y;
-      const slit = { seg: hit.seg, t: hit.t, len: slitLen, ang: stitchAngle(), off: offI, run };
-      if (stitchAngleAbs()) slit.abs = true;
+      const slit = { seg: hit.seg, t: hit.t, len: slitLen, width:settings.width, ang:settings.ang, off: offI, run };
+      if (settings.abs) slit.abs = true;
+      if (settings.pair) { slit.pair = settings.pair; slit.pairSide = settings.pairSide; }
+      if (chain.anchor.segs) slit.sourceSegments = chain.anchor.segs.slice();
       if (isCut) slit.cut = chain.anchor.cut;
       if (Math.abs(tofI) > 1e-6) slit.toff = tofI;
+      if (!Geo.slitFitsPiece(piece, slit)) throw new Error('A slot crosses the outline or a cutout. Increase inset or reduce slit length/width.');
       piece.stitchSlits.push(slit);
       placed++;
     }
@@ -3487,8 +3629,9 @@
     if (lenA < 1e-6 || lenB < 1e-6) return;
     const count = Math.max(2, Math.round(lenA / spacing));
     beginChange();
-    stitchPlaceRun(A, stitchFractions(count, A.loop), slitLen);
-    stitchPlaceRun(B, stitchFractions(count, B.loop), slitLen);
+    const settings = {width:Number($('st-width').value) / 10, ang:stitchAngle(), abs:stitchAngleAbs(), pair:uid()};
+    stitchPlaceRun(A, stitchFractions(count, A.loop), slitLen, {...settings, pairSide:"A"});
+    stitchPlaceRun(B, stitchFractions(count, B.loop), slitLen, {...settings, pairSide:"B"});
     endChange();
     stitchSideA = null;
     stitchMulti = [];
@@ -3500,6 +3643,12 @@
 
   // the panel button / Enter: advance the current mode's flow
   function stitchApply() {
+    try {
+      if (!$('st-spacing').checkValidity() || !$('st-len').checkValidity() || !$('st-off').checkValidity() || !$('st-width').checkValidity()) throw new Error('Check the stitch dimensions before applying.');
+      stitchApplyUnsafe();
+    } catch (e) { cancelStitchChange(e.message); }
+  }
+  function stitchApplyUnsafe() {
     if ($('st-mode').value === 'matched') {
       if (!stitchSideA) {
         if (!stitchMulti.length) {
@@ -3553,7 +3702,7 @@
       return;
     }
     if ((ev.ctrlKey || ev.metaKey) && k === 'd') { duplicateSelection(); ev.preventDefault(); return; }
-    if (k === 'enter' && tool === 'stitch' && (stitchMulti.length || stitchSideA)) {
+    if (k === 'enter' && tool === 'stitch' && $('st-workflow').value === 'create' && (stitchMulti.length || stitchSideA)) {
       stitchApply();
       ev.preventDefault();
       return;
@@ -3585,8 +3734,9 @@
       return;
     }
     if (k === 'enter' && tool === 'pen' && draft) { finishDraft(false); return; }
-    if (k === 'delete' || k === 'backspace') { deleteSelection(); ev.preventDefault(); return; }
+    if (k === 'delete' || k === 'backspace') { if (tool === 'stitch' && $('st-workflow').value === 'edit' && !['slit','slits'].includes(sel.kind)) { $('status-hint').textContent = 'No stitch holes selected.'; ev.preventDefault(); return; } if (tool === 'stitch' && $('st-workflow').value === 'create') { stitchMulti = []; stitchSideA = null; updateStitchUi(); renderAll(); ev.preventDefault(); return; } deleteSelection(); ev.preventDefault(); return; }
     if (k === 'arrowleft' || k === 'arrowright' || k === 'arrowup' || k === 'arrowdown') {
+      if (tool === 'stitch' && ($('st-workflow').value !== 'edit' || !['slit','slits'].includes(sel.kind))) { ev.preventDefault(); return; }
       if (!selPiece() && !multiSel.length) return;
       ev.preventDefault();
       const step = ev.altKey ? 0.1 : ev.shiftKey ? snapStep() * 5 : snapStep();
@@ -3660,17 +3810,20 @@
       piece.holes[sel.idx].y += dy;
     } else if (sel.kind === 'cut' && piece.cutouts && piece.cutouts[sel.idx]) {
       for (const nd of piece.cutouts[sel.idx].nodes) { nd.x += dx; nd.y += dy; }
-    } else if (sel.kind === 'notch' || sel.kind === 'slit') {
-      const arr = sel.kind === 'notch' ? piece.notches : piece.stitchSlits;
-      const it = arr && arr[sel.idx];
-      const ctx = it && (sel.kind === 'slit'
-        ? slitContext(piece, it)
-        : (it.seg < piece.path.nodes.length ? { nodes: piece.path.nodes } : null));
-      if (ctx) {
-        const n = ctx.nodes.length;
-        const len = Geo.segLength(ctx.nodes[it.seg], ctx.nodes[(it.seg + 1) % n]);
-        const dir = dx !== 0 ? Math.sign(dx) : -Math.sign(dy);
-        if (len > 1e-6) it.t = Math.min(0.99, Math.max(0.01, it.t + dir * Math.hypot(dx, dy) / len));
+    } else if (sel.kind === 'notch' || sel.kind === 'slit' || sel.kind === 'slits') {
+      const indices = sel.kind === 'slits' ? (sel.slits || []) : [sel.idx];
+      for (const index of indices) {
+        const arr = sel.kind === 'notch' ? piece.notches : piece.stitchSlits;
+        const it = arr && arr[index];
+        const ctx = it && (sel.kind !== 'notch'
+          ? slitContext(piece, it)
+          : (it.seg < piece.path.nodes.length ? { nodes: piece.path.nodes } : null));
+        if (ctx) {
+          const n = ctx.nodes.length;
+          const len = Geo.segLength(ctx.nodes[it.seg], ctx.nodes[(it.seg + 1) % n]);
+          const dir = dx !== 0 ? Math.sign(dx) : -Math.sign(dy);
+          if (len > 1e-6) it.t = Math.min(0.99, Math.max(0.01, it.t + dir * Math.hypot(dx, dy) / len));
+        }
       }
     } else {
       movePiece(piece, dx, dy);
@@ -3792,6 +3945,7 @@
     for (const src of clip.pieces) {
       const p = JSON.parse(JSON.stringify(src));
       p.id = uid();
+      for (const sl of p.stitchSlits || []) { delete sl.pair; delete sl.pairSide; }
       movePiece(p, off, off);
       doc.pieces.push(p);
       newIds.push(p.id);
@@ -3814,6 +3968,7 @@
       if (!src) continue;
       const p = JSON.parse(JSON.stringify(src));
       p.id = uid();
+      for (const sl of p.stitchSlits || []) { delete sl.pair; delete sl.pairSide; }
       p.name = decorate(src.name, 'copy');
       movePiece(p, 3, 3);
       doc.pieces.push(p);
@@ -3900,6 +4055,7 @@
   function duplicatePiece(piece, mirror) {
     const copy = JSON.parse(JSON.stringify(piece));
     copy.id = uid();
+    for (const sl of copy.stitchSlits || []) { delete sl.pair; delete sl.pairSide; }
     copy.name = decorate(piece.name, mirror ? '(mirror)' : 'copy');
     if (mirror) {
       const poly = Geo.pathPolyline(copy.path.nodes, copy.path.closed, 0.1);
@@ -4416,7 +4572,7 @@
     const p = selPiece(); if (!p) return;
     beginChange(); p.notchLength = Math.max(0.1, parseFloat(e.target.value) || 0.4); endChange(); renderAll();
   });
-  $('pp-dup').addEventListener('click', () => { const p = selPiece(); if (p) duplicatePiece(p, false); });
+  $('pp-dup').addEventListener('click', duplicateSelection);
   $('pp-mirror').addEventListener('click', () => { const p = selPiece(); if (p) duplicatePiece(p, true); });
   $('pp-inset-btn').addEventListener('click', () => {
     const p = selPiece();
@@ -4569,9 +4725,9 @@
     ev.stopPropagation();
   });
   $('pp-del').addEventListener('click', () => {
-    const p = selPiece(); if (!p) return;
+    const ids = selectionIds(); if (!ids.length) return;
     beginChange();
-    doc.pieces = doc.pieces.filter((q) => q.id !== p.id);
+    doc.pieces = doc.pieces.filter(q => !ids.includes(q.id));
     endChange();
     clearSel();
     renderAll();
@@ -4630,38 +4786,119 @@
     renderAll(); renderSidebar();
   });
   // re-angle existing holes: the selected ones, or every hole of their run(s)
+  function stitchEditSettings() {
+    const len = Number($('sp-slit-len').value) / 10;
+    const width = Number($('sp-slit-width').value) / 10;
+    const inset = Number($('sp-slit-inset').value) / 10;
+    const ang = Number($('sp-slit-ang').value);
+    if (![len, width, inset, ang].every(Number.isFinite) || len < 0.05 || len > 1 || width < 0 || width > len || Math.abs(inset) > 2 || Math.abs(ang) > 180) {
+      throw new Error('Use length 0.5–10 mm, width 0–length, inset change ±20 mm, and slant ±180°.');
+    }
+    return {len, width, inset, ang, abs:$('sp-slit-ang-ref').value === 'page'};
+  }
+
   function applySlitAngle(wholeRun) {
     const p = selPiece();
-    if (!p || !(p.stitchSlits || []).length) return;
-    const v = parseFloat($('sp-slit-ang').value);
-    if (!Number.isFinite(v)) { $('status-hint').textContent = 'Type a slant in degrees first.'; return; }
-    const ang = clampAng(v, 45);
-    const abs = $('sp-slit-ang-ref').value === 'page';
-    let picked;
-    if (sel.kind === 'slits' && sel.slits && sel.slits.length) picked = new Set(sel.slits);
-    else if (sel.kind === 'slit' && p.stitchSlits[sel.idx]) picked = new Set([sel.idx]);
-    else return;
-    let hit = (s, i) => picked.has(i);
-    if (wholeRun) {
-      const chosen = [...picked].map((i) => p.stitchSlits[i]).filter(Boolean);
-      const runs = new Set(chosen.map((s) => s.run).filter((r) => r != null));
-      const loose = chosen.filter((s) => s.run == null);
-      hit = (s, i) => picked.has(i) || (s.run != null && runs.has(s.run)) ||
-        loose.some((l) => s.run == null && s.seg === l.seg && s.cut === l.cut);
-    }
-    beginChange();
-    let n = 0;
-    p.stitchSlits.forEach((s, i) => {
-      if (!hit(s, i)) return;
-      s.ang = ang;
-      if (abs) s.abs = true; else delete s.abs;
-      n++;
-    });
-    endChange();
-    renderAll(); renderSidebar();
-    $('status-hint').textContent =
-      `Slant set to ${ang}° from the ${abs ? 'page' : 'edge'} ${angLabel(ang, abs)} on ${n} hole${n === 1 ? '' : 's'}`;
+    if (!p) return;
+    try {
+      const values = stitchEditSettings();
+      const indices = sel.kind === 'slit' ? [sel.idx] : sel.kind === 'slits' ? sel.slits : [];
+      const groups = wholeRun ? selectedStitchRuns(true) : [{piece:p, indices}];
+      const changes = [];
+      for (const group of groups) for (const i of group.indices) {
+        const s = group.piece.stitchSlits[i];
+        const next = {...s, len:values.len, width:values.width, ang:values.ang, abs:values.abs, off:(s.off || 0) + values.inset};
+        if (!Geo.slitFitsPiece(group.piece, next)) throw new Error('A slot crosses the cutting outline or a cutout. Increase inset or reduce length/width.');
+        changes.push({piece:group.piece, i, next});
+      }
+      if (!changes.length) return;
+      beginChange();
+      for (const c of changes) c.piece.stitchSlits[c.i] = c.next;
+      endChange();
+      $('sp-slit-inset').value = 0;
+      renderAll();
+      $('status-hint').textContent = `Updated ${changes.length} holes${wholeRun && groups.length > 1 ? ' across linked runs' : ''}`;
+    } catch (e) { $('status-hint').textContent = e.message; }
   }
+
+  function stitchRunTargets(piece, holes) {
+    if (piece.guide) return [{pieceId:piece.id, seg:0}];
+    const cuts = new Set(holes.map(s => s.cut));
+    if (cuts.size !== 1) throw new Error('This run spans multiple boundaries. Recreate it from its source edges.');
+    if (holes[0].cut != null) return [{pieceId:piece.id, cut:holes[0].cut, seg:0}];
+    const pts = holes.map(s => slitLineFor(piece, s)).filter(Boolean).map(l => Geo.lerp(l.a,l.b,0.5));
+    const candidates = [];
+    if (holes[0].sourceSegments) candidates.push(holes[0].sourceSegments);
+    const occupied = [...new Set(holes.map(s=>s.seg))];
+    const n = piece.path.nodes.length, closed = piece.path.closed;
+    // Legacy runs have only projected anchors. Recover a source only when its
+    // inset path actually contains every surviving hole, including corner holes.
+    // ponytail: bounded legacy recovery; recreate a run if over 64 edges are ambiguous.
+    if (occupied.length <= 64) {
+      const have = new Set(occupied);
+      for (const start of occupied) {
+        const arc = [];
+        for (let i=start; have.has(i) && arc.length<occupied.length; i=closed?(i+1)%n:i+1) {
+          arc.push(i); candidates.push(arc.slice());
+        }
+      }
+    }
+    const offsets = [...new Set(holes.map(s=>Math.round((s.off || 0)*100000)/100000))];
+    for (const segs of candidates) {
+      const targets = segs.map(seg=>({pieceId:piece.id,seg}));
+      for (const off of offsets) {
+        const chains = stitchChains(targets,off);
+        if (chains.length === 1 && pts.every(p=>Geo.nearestOnPath(chains[0].path,chains[0].loop,p).dist < 0.02)) return targets;
+      }
+    }
+    throw new Error('The original stitch path cannot be recovered reliably after these edits. Recreate the run from its source edges.');
+  }
+
+  function rebuildStitchRuns() {
+    const groups = selectedStitchRuns(true);
+    if (!groups.length) return;
+    try {
+      const settings = stitchEditSettings();
+      const spacing = Number($('sp-run-spacing').value) / 10;
+      const inset = Number($('sp-run-inset').value) / 10;
+      if (!Number.isFinite(spacing) || spacing < 0.1 || spacing > 2 || !Number.isFinite(inset) || Math.abs(inset) > 2) throw new Error('Use spacing 1–20 mm and inset ±20 mm.');
+      const plans = groups.map(g => {
+        const old = g.indices.map(i => g.piece.stitchSlits[i]);
+        const targets = stitchRunTargets(g.piece, old);
+        const chains = stitchChains(targets, inset);
+        if (chains.length !== 1) throw new Error('This run now spans disconnected edges. Select and recreate its connected edges in Create runs.');
+        return {...g, chain:chains[0], pair:old[0].pair, pairSide:old[0].pairSide};
+      });
+      for (const plan of plans) {
+        const reference = plan.pair ? plans.find(p => p.pair === plan.pair && p.pairSide === 'A') : plan;
+        if (!reference) throw new Error('Original side A is unavailable. Recreate the matched pair before re-spacing.');
+        plan.count = Math.max(2, Math.round(Geo.pathLength(reference.chain.path, reference.chain.loop) / spacing));
+      }
+      beginChange();
+      // Remove by object identity: multiple paired runs may share one piece.
+      const drop = new Set(groups.flatMap(g => g.indices.map(i => g.piece.stitchSlits[i])));
+      for (const piece of new Set(groups.map(g => g.piece))) piece.stitchSlits = piece.stitchSlits.filter(s => !drop.has(s));
+      const newSelection = [];
+      const selectedPiece = selPiece();
+      for (const plan of plans) {
+        const from = plan.piece.stitchSlits.length;
+        stitchPlaceRun(plan.chain, stitchFractions(plan.count, plan.chain.loop), settings.len, {...settings, pair:plan.pair, pairSide:plan.pairSide});
+        if (plan.piece === selectedPiece) for (let i = from; i < plan.piece.stitchSlits.length; i++) newSelection.push(i);
+      }
+      endChange();
+      sel.kind = 'slits'; sel.slits = newSelection; sel.idx = -1;
+      $('sp-slit-inset').value = 0;
+      renderAll();
+      $('status-hint').textContent = `Re-spaced ${plans.length} run(s); matched sides retain equal counts`;
+    } catch (e) { cancelStitchChange(e.message); }
+  }
+
+  function cancelStitchChange(message) {
+    if (pendingSnapshot != null) { doc = JSON.parse(pendingSnapshot); pendingSnapshot = null; }
+    renderAll();
+    $('status-hint').textContent = message;
+  }
+
   $('sp-slit-ang-sel').addEventListener('click', () => applySlitAngle(false));
   $('sp-slit-ang-run').addEventListener('click', () => applySlitAngle(true));
   for (const id of ['st-ang', 'st-ang-ref']) $(id).addEventListener('input', refreshAngEg);
@@ -4689,7 +4926,7 @@
       keep = (s, i) => !drop.has(i);
     } else if (sel.kind === 'slit' && (p.stitchSlits || [])[sel.idx]) {
       const sl = p.stitchSlits[sel.idx];
-      keep = (s) => (sl.run != null ? s.run !== sl.run : !(s.seg === sl.seg && s.cut === sl.cut));
+      keep = (s, i) => i !== sel.idx;
     } else if (sel.kind === 'seg' || sel.kind === 'segs') {
       const segsSel = new Set(sel.kind === 'segs' ? sel.segs : [sel.idx]);
       const onEdge = (s2) => p.guide || (s2.cut == null && segsSel.has(s2.seg));
@@ -4702,7 +4939,7 @@
     endChange();
     if (sel.kind === 'slit' || sel.kind === 'slits') { sel.kind = null; sel.idx = -1; sel.slits = []; }
     renderAll(); renderSidebar();
-    $('status-hint').textContent = 'Stitch line deleted';
+    $('status-hint').textContent = 'Selected stitch holes deleted';
   });
   function segOffsetNormal(p, i) {
     const n = p.path.nodes.length;
@@ -4854,6 +5091,8 @@
     p.path.nodes = u.path.nodes;
     p.notches = u.notches;
     p.holes = u.holes;
+    p.stitchSlits = u.stitchSlits;
+    p.cutouts = u.cutouts;
     p.foldSeg = null;
     endChange();
     selectPiece(p.id);
@@ -4861,6 +5100,51 @@
   });
   $('chk-snap').addEventListener('change', () => {});
   window.addEventListener('resize', applyView);
+
+  $('st-workflow').addEventListener('change', () => {
+    stitchMulti = []; stitchSideA = null;
+    const action = $('st-workflow').value;
+    if (tool !== 'stitch') setTool('stitch');
+    $('st-workflow').value = action;
+    updateStitchUi(); renderAll();
+  });
+  $('sp-run-rebuild').addEventListener('click', rebuildStitchRuns);
+  $('sp-delete-whole').addEventListener('click', () => {
+    const groups = selectedStitchRuns(false);
+    if (!groups.length) return;
+    const drop = new Set(groups.flatMap(g=>g.indices.map(i=>g.piece.stitchSlits[i])));
+    beginChange();
+    for (const p of new Set(groups.map(g=>g.piece))) p.stitchSlits = p.stitchSlits.filter(s=>!drop.has(s));
+    endChange(); sel.kind=null; sel.idx=-1; sel.slits=[]; renderAll();
+    $('status-hint').textContent = `Deleted ${groups.length} run(s); matched partners were kept`;
+  });
+  $('hole-update').addEventListener('click', () => {
+    const p = selPiece(), value = Number($('hole-diameter').value);
+    if (!p || sel.kind !== 'hole') return;
+    if (!Number.isFinite(value) || value < 0.5 || value > 100) { $('status-hint').textContent = 'Hole diameter must be 0.5–100 mm.'; return; }
+    beginChange(); p.holes[sel.idx].r = value / 20; endChange(); renderAll();
+  });
+  $('grain-remove').addEventListener('click', () => {
+    const p = selPiece(); if (!p || !p.grain) return;
+    beginChange(); p.grain = null; endChange(); renderAll();
+  });
+  $('pen-add').addEventListener('click', () => {
+    if (!draft || !draft.nodes.length) { $('status-hint').textContent = 'Place the first point on the canvas.'; return; }
+    if (!$('pen-length').checkValidity() || !$('pen-angle').checkValidity()) return;
+    $('pd-len').value = $('pen-length').value; $('pd-ang').value = $('pen-angle').value;
+    commitPenDialog();
+  });
+  $('pen-finish').addEventListener('click', () => finishDraft(false));
+  $('tool-cancel').addEventListener('click', () => {
+    stitchMulti = []; stitchSideA = null; weldFirst = null; knifeFirst = null; boolFirst = null; insetChain = null;
+    if (tool === 'pen') finishDraft(false);
+    clearSel(); renderAll(); $('status-hint').textContent = HINTS[tool];
+  });
+  new MutationObserver(() => { $('tool-instructions').textContent = $('status-hint').textContent; })
+    .observe($('status-hint'), {childList:true, characterData:true, subtree:true});
+  document.addEventListener('click', ev => {
+    for (const menu of document.querySelectorAll('.top-menu[open]')) if (!menu.contains(ev.target)) menu.open = false;
+  });
 
   // ---------- boot ----------
   (function boot() {

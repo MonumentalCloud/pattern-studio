@@ -4,23 +4,52 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pattern Studio</title>
-<link rel="stylesheet" href="style.css?v=61">
+<link rel="stylesheet" href="style.css?v=62">
 </head>
 <body>
 <div id="app">
   <header id="topbar">
-    <span id="logo" title="build 61">✂ Pattern Studio</span>
+    <span id="logo" title="build 62">✂ Pattern Studio</span>
     <input id="doc-name" type="text" value="Untitled pattern" spellcheck="false" title="Pattern name">
-    <span class="sep"></span>
-    <button id="btn-new" title="New document">New</button>
+    <details class="top-menu"><summary>File</summary><div class="menu-panel"><div class="row btns">    <button id="btn-new" title="New document">New</button>
     <button id="btn-open" title="Open .json project or import a .dxf">Open</button>
-    <button id="btn-save" title="Download .json project">Save</button>
+    <button id="btn-save" title="Download .json project">Save</button></div>      <section id="cloud">
+        <h3>Cloud (GitHub)</h3>
+        <div id="gh-disconnected">
+          <div class="row"><label for="gh-token">Token</label><input id="gh-token" type="password" spellcheck="false" placeholder="github_pat_…"></div>
+          <div class="row"><label for="gh-repo">Repo</label><input id="gh-repo" type="text" spellcheck="false" placeholder="you/my-patterns"></div>
+          <div class="row btns"><button id="gh-connect">Connect</button></div>
+          <div class="row hint">Patterns save as versioned files in your own GitHub repo. Create a repo, then a
+            <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">fine-grained token</a>
+            with <b>Contents: read &amp; write</b> on just that repo. The token never leaves this browser.</div>
+        </div>
+        <div id="gh-connected" hidden>
+          <div class="row hint" id="gh-status"></div>
+          <div class="row btns">
+            <button id="gh-save" class="accent" title="Save the current pattern to your repo (one commit per save)">Save to cloud</button>
+            <button id="gh-logout" title="Forget the token in this browser">Disconnect</button>
+          </div>
+          <ul id="gh-files"></ul>
+        </div>
+      </section></div></details>
+    <details class="top-menu"><summary>Export</summary><div class="menu-panel"><div class="row btns">    <button id="btn-export-dxf" class="accent" title="Export DXF (mm) for laser cutting">Export DXF</button>
+    <button id="btn-export-svg" title="Export SVG (true-size mm)">Export SVG</button></div>      <section id="export-props">
+        <h3>Export</h3>
+        <div class="row">
+          <label class="chk"><input id="ex-labels" type="checkbox"> Engrave piece names</label>
+        </div>
+        <div class="row" id="ex-label-h-row" hidden>
+          <label for="ex-label-h">Text height</label>
+          <input id="ex-label-h" type="number" min="0.2" max="10" step="0.1" value="0.8" title="Cap height in cm. Shrunk automatically when a piece is too small to hold it, and skipped below 2.5 mm"> <em>cm</em>
+        </div>
+        <div class="row hint">Writes each piece's name inside its outline on the <b>MARK</b> layer,
+          as single-stroke lines (engraves in one pass, no font needed). Applies to DXF and SVG.
+          Guide/stitch lines are left unlabelled.</div>
+      </section></div></details>
+
     <span class="sep"></span>
     <button id="btn-undo" title="Undo (Ctrl+Z)">↩</button>
     <button id="btn-redo" title="Redo (Ctrl+Y)">↪</button>
-    <span class="sep"></span>
-    <button id="btn-export-dxf" class="accent" title="Export DXF (mm) for laser cutting">Export DXF</button>
-    <button id="btn-export-svg" title="Export SVG (true-size mm)">Export SVG</button>
     <span class="spacer"></span>
     <label class="chk"><input id="chk-snap" type="checkbox" checked> Snap</label>
     <select id="sel-grid" title="Snap grid">
@@ -50,11 +79,11 @@
         <button class="tool" data-tool="weld" title="Weld two pieces into one along matching edges (W)">⋈<span>Weld<kbd>W</kbd></span></button>
       </div>
       <div class="tgroup"><em class="glabel">sew</em>
-        <button class="tool" data-tool="stitch" title="Matched stitching slits along edges or guide lines (S)">⋰<span>Stitch<kbd>S</kbd></span></button>
-        <button class="tool" data-tool="notch" title="Add notch on an edge (N)">⌖<span>Notch<kbd>N</kbd></span></button>
+        <button class="tool" data-tool="stitch" title="Create and edit stitching slots (S)">⋰<span>Stitch<kbd>S</kbd></span></button>
+        <button class="tool" data-tool="notch" title="Add notch at an outline point (N)">⌖<span>Notch<kbd>N</kbd></span></button>
       </div>
-      <div class="tgroup"><em class="glabel">mark</em>
-        <button class="tool" data-tool="hole" title="Add drill hole (H)">◉<span>Hole<kbd>H</kbd></span></button>
+      <div class="tgroup"><em class="glabel">cut / mark</em>
+        <button class="tool" data-tool="hole" title="Add a circular physical cutout (H)">◉<span>Hole<kbd>H</kbd></span></button>
         <button class="tool" data-tool="grain" title="Drag to set grainline (G)">⇕<span>Grain<kbd>G</kbd></span></button>
       </div>
     </nav>
@@ -78,33 +107,33 @@
         <g id="layer-overlay"></g>
       </svg>
       <div id="divide-dialog" hidden>
-        <div class="row"><label>From</label>
+        <div class="row"><label for="dv-from">From</label>
           <select id="dv-from" title="Which end of the edge measurements count from">
             <option value="start">start (●)</option>
             <option value="end">end</option>
           </select></div>
-        <div class="row"><label>At</label>
+        <div class="row"><label for="dv-dist">At</label>
           <input id="dv-dist" type="number" min="0.05" step="0.1"> <em>cm</em>
           <button id="dv-dist-btn">Add point</button></div>
-        <div class="row"><label>At</label>
+        <div class="row"><label for="dv-pct">At</label>
           <input id="dv-pct" type="number" min="1" max="99" step="1" value="50"> <em>%</em>
           <button id="dv-pct-btn">Add point</button></div>
-        <div class="row"><label>Into</label>
+        <div class="row"><label for="dv-n">Into</label>
           <input id="dv-n" type="number" min="2" max="50" step="1" value="2"> <em>parts</em>
           <button id="dv-n-btn">Divide</button></div>
         <div class="row hint" id="dv-hint"></div>
       </div>
       <div id="node-dialog" hidden>
         <div class="row btns"><button id="nd-smooth">Convert to curve point</button></div>
-        <div class="row"><label>Round</label>
+        <div class="row"><label for="nd-round-r">Round</label>
           <input id="nd-round-r" type="number" min="0.1" max="50" step="0.1" value="1"> <em>cm</em>
           <button id="nd-round-btn">Apply</button></div>
         <div class="row btns"><button id="nd-del" class="danger">Delete point</button></div>
         <div class="row hint">Esc closes</div>
       </div>
       <div id="pen-dialog" hidden>
-        <div class="row"><label>Length</label><input id="pd-len" type="number" min="0.1" step="0.1"> <em>cm</em></div>
-        <div class="row"><label>Angle</label><input id="pd-ang" type="number" step="1" title="0° = right, 90° = up, counter-clockwise"> <em>°</em></div>
+        <div class="row"><label for="pd-len">Length</label><input id="pd-len" type="number" min="0.1" step="0.1"> <em>cm</em></div>
+        <div class="row"><label for="pd-ang">Angle</label><input id="pd-ang" type="number" step="1" title="0° = right, 90° = up, counter-clockwise"> <em>°</em></div>
         <div class="row hint">Enter places the point · Esc cancels</div>
       </div>
       <div id="statusbar">
@@ -116,141 +145,96 @@
     </div>
 
     <aside id="sidebar">
-      <section>
-        <h3>Pieces <button id="btn-add-piece" title="Start a new piece with the pen tool">+ Draw</button></h3>
-        <ul id="piece-list"></ul>
-      </section>
-      <section id="export-props">
-        <h3>Export</h3>
-        <div class="row">
-          <label class="chk"><input id="ex-labels" type="checkbox"> Engrave piece names</label>
-        </div>
-        <div class="row" id="ex-label-h-row" hidden>
-          <label>Text height</label>
-          <input id="ex-label-h" type="number" min="0.2" max="10" step="0.1" value="0.8" title="Cap height in cm. Shrunk automatically when a piece is too small to hold it, and skipped below 2.5 mm"> <em>cm</em>
-        </div>
-        <div class="row hint">Writes each piece's name inside its outline on the <b>MARK</b> layer,
-          as single-stroke lines (engraves in one pass, no font needed). Applies to DXF and SVG.
-          Guide/stitch lines are left unlabelled.</div>
-      </section>
-      <section id="piece-props" hidden>
-        <h3>Piece</h3>
-        <div class="row"><label>Name</label><input id="pp-name" type="text" spellcheck="false"></div>
-        <div class="row"><label>Notch</label>
-          <input id="pp-notch" type="number" min="0.1" max="2" step="0.1" title="Notch depth (cm)"> <em>cm</em>
-          <select id="pp-notch-style" title="Slit: one straight snip into the edge. V cut: a small triangular chip">
-            <option value="slit">Slit</option>
-            <option value="v">V cut</option>
+      <section id="tool-context"><h3 id="tool-title">Select</h3><p id="tool-instructions" class="hint"></p><button id="tool-cancel">Clear selection / cancel</button></section>
+<section id="select-props"><h3>Box selection</h3><div class="row"><label for="select-box">Select</label><select id="select-box"><option value="pieces">Pieces</option><option value="points">Points on selected piece</option><option value="edges">Edges on selected piece</option><option value="holes">Stitch holes on selected piece</option></select></div><p class="hint">Choose exactly what a drag box selects. Shift adds to the selection.</p></section>
+<section id="stitch-props" hidden>
+        <h3>Stitch</h3>
+        <div class="row"><label for="st-workflow">Action</label><select id="st-workflow"><option value="create">Create runs</option><option value="edit">Edit holes / runs</option></select></div>
+        <div id="st-create">
+        <div class="row"><label for="st-mode">Mode</label>
+          <select id="st-mode" title="Single: every selected target gets its own run. Matched: side A and side B get the SAME number of holes at matching positions (for seams)">
+            <option value="single">Single runs</option>
+            <option value="matched">Matched pair (A → B)</option>
           </select></div>
-        <div class="row stats">
-          <span>Perimeter <b id="pp-perim">–</b></span>
-        </div>
-        <div class="row">
-          <label>Move by</label>
-          <input id="pp-dx" type="number" step="0.1" value="0" title="Δx (cm): + right, − left">
-          <input id="pp-dy" type="number" step="0.1" value="0" title="Δy (cm): + down, − up"> <em>cm</em>
-          <button id="pp-move-btn" title="Move the piece (or every marquee-selected piece) by exactly this much (Enter applies)">Move</button>
-        </div>
-        <div class="row">
-          <label>Scale</label>
-          <input id="pp-scale" type="number" step="1" min="1" value="100" title="Resize the piece — or every marquee-selected piece — about their shared centre"> <em>%</em>
-          <button id="pp-scale-btn" title="Scales the outline, curves, holes and cutouts; stitch slit sizes stay as set (Enter applies)">Apply</button>
-        </div>
-        <div class="row">
-          <label>Rotate</label>
-          <input id="pp-rot" type="number" step="1" value="0" title="Degrees — positive turns counter-clockwise, like the pen angles"> <em>°</em>
-          <button id="pp-rot-btn" title="Rotate the piece (or every marquee-selected piece) about their shared centre (Enter applies); or drag the round handle above the selection">Apply</button>
-        </div>
-        <div class="row">
-          <label>Inset copy</label>
-          <input id="pp-inset-d" type="number" step="0.1" value="0.5" title="Distance to shrink the copy inward (cm) — negative grows it outward"> <em>cm</em>
-          <button id="pp-inset-btn" title="Duplicate this piece with its outline offset inward (a lining / padding layer) — it lands on top of the original, concentric">Make</button>
-        </div>
-        <div class="row btns">
-          <button id="pp-dup">Duplicate</button>
-          <button id="pp-mirror" title="Mirrored copy (for asymmetric pieces / left+right)">Mirror copy</button>
-          <button id="pp-bake" title="Replace the folded half with the full unfolded outline (editable everywhere)" hidden>Unfold now</button>
-          <button id="pp-del" class="danger">Delete</button>
-        </div>
-      </section>
-      <section id="sel-props" hidden>
-        <h3>Selection</h3>
-        <div class="row" id="sel-node-row" hidden>
-          <label>Point</label>
-          <input id="sp-x" type="number" step="0.1" title="x (cm)">
-          <input id="sp-y" type="number" step="0.1" title="y (cm)">
-        </div>
-        <div class="row" id="sel-handle-row" hidden>
-          <label>Handles</label>
-          <button id="sp-del-hin" title="Delete the incoming handle (edge arriving at this point)">× in</button>
-          <button id="sp-del-hout" title="Delete the outgoing handle (edge leaving this point)">× out</button>
-        </div>
-        <div class="row" id="sel-round-row" hidden>
-          <label>Radius</label>
-          <input id="sp-round-r" type="number" min="0.1" max="50" step="0.1" value="1"> <em>cm</em>
-          <button id="sp-round-btn" title="Replace this corner with a circular arc of the given radius">Round</button>
-        </div>
-        <div class="row" id="sel-seg-row" hidden>
-          <label>Length</label>
-          <input id="sp-seglen" type="number" min="0.1" step="0.1" title="Edge length (cm)"> <em>cm</em>
-        </div>
-        <div class="row" id="sel-seg-anchor-row" hidden>
-          <label>Move</label>
-          <select id="sp-seg-anchor" title="Which end of the edge moves when the length changes">
-            <option value="both">Both ends</option>
-            <option value="start">Start (●)</option>
-            <option value="end">End</option>
-          </select>
-        </div>
-        <div class="row" id="sel-move-row" hidden>
-          <label>Move by</label>
-          <input id="sp-dx" type="number" step="0.1" value="0" title="Δx (cm): + right, − left">
-          <input id="sp-dy" type="number" step="0.1" value="0" title="Δy (cm): + down, − up"> <em>cm</em>
-          <button id="sp-move-btn" title="Move the selection by exactly this much (Enter applies)">Move</button>
-        </div>
-        <div class="row" id="sel-fold-row" hidden>
-          <button id="sp-fold" title="Draft half the piece and mirror it across this edge — the piece unfolds to the full shape on export">Make fold line</button>
-        </div>
+        <div class="row"><label for="st-spacing">Spacing</label>
+          <input id="st-spacing" type="number" min="0.1" max="2" step="0.05" value="0.3"> <em>cm</em></div>
+        <div class="row"><label for="st-len">Slit length</label>
+          <input id="st-len" type="number" min="0.05" max="1" step="0.05" value="0.15"> <em>cm</em></div>
+        <div class="row"><label for="st-width">Slot width</label><input id="st-width" type="number" min="0" max="5" step="0.1" value="0.5"><em>mm</em></div>
+        <div class="row"><label for="st-off">Inset</label>
+          <input id="st-off" type="number" min="-2" max="2" step="0.05" value="0.3" title="Distance from the edge: + moves the slits inside the piece, − outside, 0 centers them on the line"> <em>cm</em></div>
+        <div class="row"><label for="st-ang-ref">Slant from</label>
+          <select id="st-ang-ref" title="From edge: the angle is measured off the edge each hole sits on, so the slits follow the outline round a curve (traditional saddle stitch). From page: one fixed direction for every hole, so they all stay parallel however the outline turns">
+            <option value="edge">Edge — follows the outline</option>
+            <option value="page">Page — all parallel</option>
+          </select></div>
+        <div class="row"><label for="st-ang">Slant</label>
+          <input id="st-ang" type="number" min="-180" max="180" step="5" value="45" title="From edge: ±45 are the two diagonals, 90 is square across the edge. From page: 0 = horizontal, 90 = vertical, 45 = ＼, −45 = ／"> <em>°</em>
+          <span id="st-ang-eg" class="ang-eg"></span></div>
+        <p id="st-match-notice" class="seam-notice" role="status" hidden></p>
+        <div class="row btns"><button id="st-apply" title="Advance the current mode (Enter): Single stitches the selection; Matched confirms side A, then stitches A + B together">Stitch selected</button></div>
+        <div class="row hint">Diagonal slits for hand sewing. Select edges, guide lines or internal
+          cutouts — click, Shift-click or drag a box; contiguous edges chain into one run.
+          <b>Single</b>: Enter runs holes along every selection. <b>Matched</b>: select side A,
+          Enter, select side B, Enter — both sides get the same holes for seam pairing.
+          Set Inset ≈ 0.3 so holes sit inside the cut edge.</div>
+      </div>
+        <div id="st-edit" hidden>
+          <p id="st-edit-summary" class="hint">Click a hole, or drag a box to select holes.</p>
+          <p id="st-edit-notice" class="seam-notice" role="status" hidden></p>
+          <div id="st-edit-fields" hidden>
+            <div class="row"><label for="sp-slit-len">Slit length</label><input id="sp-slit-len" type="number" min="0.5" max="10" step="0.1"><em>mm</em></div>
+            <div class="row"><label for="sp-slit-width">Slot width</label><input id="sp-slit-width" type="number" min="0" max="5" step="0.1"><em>mm</em></div>
+            <div class="row"><label for="sp-slit-inset">Inset change</label><input id="sp-slit-inset" type="number" min="-20" max="20" step="0.1" value="0" title="Move inward by this amount, preserving corner offsets. Negative moves outward."><em>mm</em></div>
         <div class="row" id="sel-clear-slits-row" hidden>
           <button id="sp-clear-slits" title="Delete every stitching slit on this edge (zoom in to pick single ones)">Remove stitch holes</button>
         </div>
         <div class="row" id="sel-slit-ang-ref-row" hidden>
-          <label>Slant from</label>
+          <label for="sp-slit-ang-ref">Slant from</label>
           <select id="sp-slit-ang-ref" title="From edge: measured off the edge the hole sits on, so slits follow the outline. From page: one fixed direction for every hole (0 = horizontal, 90 = vertical)">
             <option value="edge">Edge — follows the outline</option>
             <option value="page">Page — all parallel</option>
           </select>
         </div>
         <div class="row" id="sel-slit-ang-row" hidden>
-          <label>Slant</label>
+          <label for="sp-slit-ang">Slant</label>
           <input id="sp-slit-ang" type="number" min="-180" max="180" step="5" title="From edge: ±45 are the two diagonals. From page: 0 = horizontal, 90 = vertical"> <em>°</em>
           <span id="sp-slit-ang-eg" class="ang-eg"></span>
         </div>
         <div class="row btns" id="sel-slit-ang-btns" hidden>
-          <button id="sp-slit-ang-sel" title="Set the slant on the selected hole(s)">Set selected</button>
-          <button id="sp-slit-ang-run" title="Set the slant on every hole of this stitch line">Whole line</button>
+          <button id="sp-slit-ang-sel" title="Apply length, width, slant and inset change to selected holes">Apply to selected holes</button>
+          <button id="sp-slit-ang-run" title="Apply settings to the whole run and linked matched side">Apply to run / matched pair</button>
         </div>
         <div class="row" id="sel-del-run-row" hidden>
-          <button id="sp-del-run" class="danger" title="Delete every hole of the stitch line this hole belongs to">Delete stitch line</button>
+          <button id="sp-del-run" class="danger" title="Delete only the selected stitch holes">Delete stitch line</button>
         </div>
-        <div class="row hint" id="sel-hint"></div>
+            <button id="sp-delete-whole" class="danger">Delete whole run (keep partner)</button>
+            <details><summary>Re-space whole run</summary>
+              <p class="hint">Rebuilds holes on the run’s occupied edges. Replaces manual gaps. Original side A sets the count; side B adjusts its spacing to match.</p>
+              <div class="row"><label for="sp-run-spacing">Spacing</label><input id="sp-run-spacing" type="number" min="1" max="20" step="0.1" value="3"><em>mm</em></div>
+              <div class="row"><label for="sp-run-inset">Run inset</label><input id="sp-run-inset" type="number" min="-20" max="20" step="0.1" value="3"><em>mm</em></div>
+              <button id="sp-run-rebuild">Re-space run / matched pair</button>
+            </details>
+          </div>
+        </div>
+        <p class="hint">Width 0 makes a line cut. Positive width cuts a slot. Start with a small paper test to fit your iron.</p>
       </section>
-      <section id="offset-props" hidden>
+<section id="offset-props" hidden>
         <h3>Offset edges</h3>
-        <div class="row"><label>Mode</label>
+        <div class="row"><label for="of-mode">Mode</label>
           <select id="of-mode">
             <option value="slide">Slide — move the edge</option>
             <option value="extrude">Protrude — tab / recess</option>
             <option value="guide">Guide line — scribe inset</option>
           </select></div>
-        <div class="row"><label>Distance</label>
+        <div class="row"><label for="of-dist">Distance</label>
           <input id="of-dist" type="number" step="0.05" value="0.3" title="+ outward, − inward (guide lines always go inward)"> <em>cm</em>
           <button id="of-apply" title="Apply the exact distance to the selected edges (Enter applies)">Apply</button></div>
         <div class="row hint" id="of-hint">Moves the selected edges along their normals (+ out, − in), mitred where two share a corner; neighbouring edges stretch to follow.</div>
       </section>
-      <section id="shape-props" hidden>
+<section id="shape-props" hidden>
         <h3>Shape</h3>
-        <div class="row"><label>Kind</label>
+        <div class="row"><label for="sh-kind">Kind</label>
           <select id="sh-kind">
             <option value="rect">Rectangle</option>
             <option value="ellipse">Ellipse</option>
@@ -258,9 +242,9 @@
         <div class="row hint">Drag corner to corner — dimensions show live and snap to the grid and
           existing points.</div>
       </section>
-      <section id="bool-props" hidden>
+<section id="bool-props" hidden>
         <h3>Boolean</h3>
-        <div class="row"><label>Operation</label>
+        <div class="row"><label for="bl-op">Operation</label>
           <select id="bl-op">
             <option value="union">Union (A + B)</option>
             <option value="subtract">Subtract (A − B)</option>
@@ -270,54 +254,101 @@
           settings; overlapping outlines must cross exactly twice. Subtract with B fully
           inside A punches it through as an internal cutout — a hole on the CUT layer.</div>
       </section>
-      <section id="stitch-props" hidden>
-        <h3>Stitch holes</h3>
-        <div class="row"><label>Mode</label>
-          <select id="st-mode" title="Single: every selected target gets its own run. Matched: side A and side B get the SAME number of holes at matching positions (for seams)">
-            <option value="single">Single runs</option>
-            <option value="matched">Matched pair (A → B)</option>
-          </select></div>
-        <div class="row"><label>Spacing</label>
-          <input id="st-spacing" type="number" min="0.1" max="2" step="0.05" value="0.3"> <em>cm</em></div>
-        <div class="row"><label>Slit length</label>
-          <input id="st-len" type="number" min="0.05" max="1" step="0.05" value="0.15"> <em>cm</em></div>
-        <div class="row"><label>Inset</label>
-          <input id="st-off" type="number" min="-2" max="2" step="0.05" value="0" title="Distance from the edge: + moves the slits inside the piece, − outside, 0 centers them on the line"> <em>cm</em></div>
-        <div class="row"><label>Slant from</label>
-          <select id="st-ang-ref" title="From edge: the angle is measured off the edge each hole sits on, so the slits follow the outline round a curve (traditional saddle stitch). From page: one fixed direction for every hole, so they all stay parallel however the outline turns">
-            <option value="edge">Edge — follows the outline</option>
-            <option value="page">Page — all parallel</option>
-          </select></div>
-        <div class="row"><label>Slant</label>
-          <input id="st-ang" type="number" min="-180" max="180" step="5" value="45" title="From edge: ±45 are the two diagonals, 90 is square across the edge. From page: 0 = horizontal, 90 = vertical, 45 = ＼, −45 = ／"> <em>°</em>
-          <span id="st-ang-eg" class="ang-eg"></span></div>
-        <div class="row btns"><button id="st-apply" title="Advance the current mode (Enter): Single stitches the selection; Matched confirms side A, then stitches A + B together">Stitch selected</button></div>
-        <div class="row hint">Diagonal slits for hand sewing. Select edges, guide lines or internal
-          cutouts — click, Shift-click or drag a box; contiguous edges chain into one run.
-          <b>Single</b>: Enter runs holes along every selection. <b>Matched</b>: select side A,
-          Enter, select side B, Enter — both sides get the same holes for seam pairing.
-          Set Inset ≈ 0.3 so holes sit inside the cut edge.</div>
-      </section>
-      <section id="cloud">
-        <h3>Cloud (GitHub)</h3>
-        <div id="gh-disconnected">
-          <div class="row"><label>Token</label><input id="gh-token" type="password" spellcheck="false" placeholder="github_pat_…"></div>
-          <div class="row"><label>Repo</label><input id="gh-repo" type="text" spellcheck="false" placeholder="you/my-patterns"></div>
-          <div class="row btns"><button id="gh-connect">Connect</button></div>
-          <div class="row hint">Patterns save as versioned files in your own GitHub repo. Create a repo, then a
-            <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">fine-grained token</a>
-            with <b>Contents: read &amp; write</b> on just that repo. The token never leaves this browser.</div>
+<section id="notch-props" hidden><h3>Notch</h3>        <div class="row"><label for="pp-notch">Depth</label>
+          <input id="pp-notch" type="number" min="0.1" max="2" step="0.1" title="Notch depth (cm)"> <em>cm</em>
+          <select id="pp-notch-style" title="Slit: one straight snip into the edge. V cut: a small triangular chip">
+            <option value="slit">Slit</option>
+            <option value="v">V cut</option>
+          </select></div><p class="hint">Depth and style apply to all notches on the selected piece. Click near an outline point to add a notch. Right-click an edge to divide it precisely.</p></section>
+<section id="round-props" hidden><h3>Round corner</h3>        <div class="row" id="sel-round-row" hidden>
+          <label for="sp-round-r">Radius</label>
+          <input id="sp-round-r" type="number" min="0.1" max="50" step="0.1" value="1"> <em>cm</em>
+          <button id="sp-round-btn" title="Replace this corner with a circular arc of the given radius">Round</button>
+        </div><p class="hint">Click a corner, then enter its radius; or drag a corner to round it live.</p></section>
+<section id="hole-props" hidden><h3>Hole · physical cutout</h3><div class="row"><label for="hole-diameter">Diameter</label><input id="hole-diameter" type="number" min="0.5" max="100" step="0.5" value="3"><em>mm</em></div><button id="hole-update" hidden>Apply to selected hole</button><p class="hint">Click inside a piece to add a circular cutout. Circles export on CUT, including holes in existing patterns.</p></section>
+<section id="pen-props" hidden><h3>Pen · next segment</h3><div class="row"><label for="pen-length">Length</label><input id="pen-length" type="number" min="0.1" step="0.1" value="5"><em>cm</em></div><div class="row"><label for="pen-angle">Angle</label><input id="pen-angle" type="number" step="1" value="0"><em>°</em></div><div class="row btns"><button id="pen-add">Add segment</button><button id="pen-finish">Finish open path</button></div><p class="hint">Place the first point on the canvas. 0° is right, 90° is up. Click the first point to close.</p></section>
+<section id="grain-props" hidden><h3>Grainline</h3><p class="hint">Drag inside a piece to create or replace its grainline. A click removes it.</p><button id="grain-remove">Remove grainline</button></section>
+<section id="sel-props" hidden>
+        <h3 id="selection-title">Selection</h3>
+        <div class="row" id="sel-node-row" hidden>
+          <label for="sp-x">Point</label>
+          <input id="sp-x" type="number" step="0.1" title="x (cm)">
+          <input id="sp-y" type="number" step="0.1" title="y (cm)">
         </div>
-        <div id="gh-connected" hidden>
-          <div class="row hint" id="gh-status"></div>
-          <div class="row btns">
-            <button id="gh-save" class="accent" title="Save the current pattern to your repo (one commit per save)">Save to cloud</button>
-            <button id="gh-logout" title="Forget the token in this browser">Disconnect</button>
-          </div>
-          <ul id="gh-files"></ul>
+        <div class="row" id="sel-handle-row" hidden>
+          <label>Handles</label>
+          <button id="sp-del-hin" title="Delete the incoming handle (edge arriving at this point)">× in</button>
+          <button id="sp-del-hout" title="Delete the outgoing handle (edge leaving this point)">× out</button>
+        </div>
+
+        <div class="row" id="sel-seg-row" hidden>
+          <label for="sp-seglen">Length</label>
+          <input id="sp-seglen" type="number" min="0.1" step="0.1" title="Edge length (cm)"> <em>cm</em>
+        </div>
+        <div class="row" id="sel-seg-anchor-row" hidden>
+          <label for="sp-seg-anchor">Move</label>
+          <select id="sp-seg-anchor" title="Which end of the edge moves when the length changes">
+            <option value="both">Both ends</option>
+            <option value="start">Start (●)</option>
+            <option value="end">End</option>
+          </select>
+        </div>
+        <div class="row" id="sel-move-row" hidden>
+          <label for="sp-dx">Move by</label>
+          <input id="sp-dx" type="number" step="0.1" value="0" title="Δx (cm): + right, − left">
+          <input id="sp-dy" type="number" step="0.1" value="0" title="Δy (cm): + down, − up"> <em>cm</em>
+          <button id="sp-move-btn" title="Move the selection by exactly this much (Enter applies)">Move</button>
+        </div>
+        <div class="row" id="sel-fold-row" hidden>
+          <button id="sp-fold" title="Draft half the piece and mirror it across this edge — the piece unfolds to the full shape on export">Make fold line</button>
+        </div>
+
+
+
+
+
+        <div class="row hint" id="sel-hint"></div>
+      </section>
+<section id="piece-props" hidden>
+        <h3 id="piece-title">Piece</h3>
+        <div class="row"><label for="pp-name">Name</label><input id="pp-name" type="text" spellcheck="false"></div>
+
+        <div class="row stats">
+          <span>Perimeter <b id="pp-perim">–</b></span>
+        </div>
+        <div class="row">
+          <label for="pp-dx">Move by</label>
+          <input id="pp-dx" type="number" step="0.1" value="0" title="Δx (cm): + right, − left">
+          <input id="pp-dy" type="number" step="0.1" value="0" title="Δy (cm): + down, − up"> <em>cm</em>
+          <button id="pp-move-btn" title="Move the piece (or every marquee-selected piece) by exactly this much (Enter applies)">Move</button>
+        </div>
+        <div class="row">
+          <label for="pp-scale">Scale</label>
+          <input id="pp-scale" type="number" step="1" min="1" value="100" title="Resize the piece — or every marquee-selected piece — about their shared centre"> <em>%</em>
+          <button id="pp-scale-btn" title="Scales the outline, curves, holes and cutouts; stitch slit sizes stay as set (Enter applies)">Apply</button>
+        </div>
+        <div class="row">
+          <label for="pp-rot">Rotate</label>
+          <input id="pp-rot" type="number" step="1" value="0" title="Degrees — positive turns counter-clockwise, like the pen angles"> <em>°</em>
+          <button id="pp-rot-btn" title="Rotate the piece (or every marquee-selected piece) about their shared centre (Enter applies); or drag the round handle above the selection">Apply</button>
+        </div>
+        <div class="row">
+          <label for="pp-inset-d">Inset duplicate</label>
+          <input id="pp-inset-d" type="number" step="0.1" value="0.5" title="Distance to shrink the copy inward (cm) — negative grows it outward"> <em>cm</em>
+          <button id="pp-inset-btn" title="Duplicate this piece with its outline offset inward (a lining / padding layer) — it lands on top of the original, concentric">Make</button>
+        </div>
+        <div class="row btns">
+          <button id="pp-dup">Duplicate piece</button>
+          <button id="pp-mirror" title="Mirrored copy (for asymmetric pieces / left+right)">Mirror copy</button>
+          <button id="pp-bake" title="Replace the folded half with the full unfolded outline (editable everywhere)" hidden>Unfold now</button>
+          <button id="pp-del" class="danger">Delete piece</button>
         </div>
       </section>
-      <section id="help">
+<section id="pieces-panel">
+        <h3>Pieces <button id="btn-add-piece" title="Start a new piece with the pen tool">+ Draw</button></h3>
+        <ul id="piece-list"></ul>
+      </section>
+<details id="quick-help"><summary>Keyboard & help</summary><section id="help">
         <h3>Quick help</h3>
         <ul class="help">
           <li><b>Pen</b>: click = corner, drag = curve, click first point to close · right-click = type exact length &amp; angle</li>
@@ -327,8 +358,8 @@
           <li>Right-click an edge → divide it at a distance, percentage, or into equal parts</li>
           <li><b>Weld</b>: click an edge on each of two pieces to fuse them into one (the seam disappears)</li>
           <li><b>Fold</b>: select a straight edge → "Make fold line" — draft half, the mirror updates live</li>
-          <li><b>Inset</b>: click an edge (or inside a piece) → guide line for stitching</li>
-          <li><b>Stitch</b>: click two edges or guides → matched stitching slits on both</li>
+          <li><b>Offset → Guide line</b>: click edges (or inside a piece) to create a stitching guide</li>
+          <li><b>Stitch</b>: Create runs on edges/guides/cutouts; Edit selects holes explicitly. Matched mode pairs two sides.</li>
           <li><b>Knife</b>: click two points (or an open path) to cut a piece in two</li>
           <li><b>Boolean</b>: overlap two pieces → union / subtract / intersect</li>
           <li><b>Shape</b>: drag rectangles/ellipses · dragging pieces magnets onto other points</li>
@@ -336,17 +367,17 @@
           <li><b>Export</b>: tick <b>Engrave piece names</b> to burn each name inside its piece (single-stroke, MARK layer, DXF + SVG)</li>
           <li><b>Snapping</b>: points, the middle of every edge (◇ marker, measured along the curve), anywhere on another outline, then grid</li>
           <li><b>Del</b> removes point · scroll/two-finger pans · pinch or <b>Ctrl</b>+scroll zooms · <b>Space</b>+drag pans</li>
-          <li>Dashed line = cutting line (seam allowance)</li>
+          <li>Solid outlines, holes and stitch slots = CUT. Dashed guide lines and grainlines = MARK.</li>
         </ul>
-      </section>
+      </section></details>
     </aside>
   </div>
 </div>
 <input id="file-input" type="file" accept=".json,.dxf,application/json" hidden>
-<script src="js/geometry.js?v=61"></script>
-<script src="js/strokefont.js?v=61"></script>
-<script src="js/dxf.js?v=61"></script>
-<script src="js/dxfimport.js?v=61"></script>
-<script src="js/app.js?v=61"></script>
+<script src="js/geometry.js?v=62"></script>
+<script src="js/strokefont.js?v=62"></script>
+<script src="js/dxf.js?v=62"></script>
+<script src="js/dxfimport.js?v=62"></script>
+<script src="js/app.js?v=62"></script>
 </body>
 </html>

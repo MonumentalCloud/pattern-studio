@@ -1076,4 +1076,115 @@ t('offsetOpen: a run over a spike clips its crossing too', () => {
   }
 });
 
+t('physical slot contour has exact length/width and legacy zero width stays a line', () => {
+  const line = Geo.slitLine(N(0,0), N(10,0), {t:0.5,len:0.2,ang:37}, -1);
+  const pts = Geo.slitContour(line, 0.05);
+  assert.equal(pts.length, 4);
+  assert(Math.abs(Geo.dist(pts[0],pts[1])-0.2)<1e-10);
+  assert(Math.abs(Geo.dist(pts[1],pts[2])-0.05)<1e-10);
+  assert.deepEqual(Geo.slitContour(line), [line.a,line.b]);
+  assert.throws(()=>Geo.slitContour(line, NaN));
+  assert.throws(()=>Geo.slitContour(line, -0.1));
+});
+
+t('physical slots export closed CUT contours for outline, guide and cutout anchors', () => {
+  const nodes = [N(0,0),N(10,0),N(10,10),N(0,10)];
+  for (const variant of ['outline','guide','cutout']) {
+    const p = {path:{nodes,closed:true},holes:[],stitchSlits:[{seg:0,t:0.5,len:0.2,width:0.05,off:0.3,ang:45}]};
+    if (variant === 'guide') p.guide = true;
+    if (variant === 'cutout') { p.cutouts=[{nodes:[N(2,2),N(4,2),N(4,4),N(2,4)]}]; p.stitchSlits[0].cut=0; }
+    const shapes=DXF.pieceShapes(p);
+    assert(shapes.polylines.some(pl=>pl.layer==='CUT' && pl.closed && pl.pts.length===4 && Math.abs(Geo.dist(pl.pts[0],pl.pts[1])-0.2)<1e-8));
+    assert.equal(shapes.lines.filter(l=>l.layer==='CUT').length,0);
+    p.stitchSlits[0].width=0;
+    assert.equal(DXF.pieceShapes(p).lines.filter(l=>l.layer==='CUT').length,1);
+  }
+});
+
+t('Hole circles are physical CUT geometry, including guide pieces', () => {
+  for (const guide of [false,true]) {
+    const p={guide,path:{nodes:[N(0,0),N(5,0),N(5,5),N(0,5)],closed:true},holes:[{x:2,y:2,r:0.2}]};
+    assert.deepEqual(DXF.pieceShapes(p).circles,[{layer:'CUT',c:{x:2,y:2},r:0.2}]);
+  }
+});
+
+t('wide slots must clear the full outer boundary, internal cutouts and circular holes', () => {
+  const p={path:{nodes:[N(0,0),N(10,0),N(10,10),N(0,10)],closed:true},holes:[]};
+  const slit={seg:0,t:0.5,len:0.2,width:0.05,off:0.3,ang:45};
+  assert(Geo.slitFitsPiece(p,slit));
+  assert(!Geo.slitFitsPiece(p,{...slit,off:0}));
+  p.holes=[{x:5,y:0.3,r:0.2}];
+  assert(!Geo.slitFitsPiece(p,slit));
+  p.holes=[]; p.cutouts=[{nodes:[N(4.5,0.1),N(5.5,0.1),N(5.5,0.6),N(4.5,0.6)]}];
+  assert(!Geo.slitFitsPiece(p,slit));
+  assert(Geo.slitFitsPiece(p,{...slit,cut:0,seg:2,off:0.3}));
+});
+
+t('folded physical slots preserve width and export both halves', () => {
+  const p={path:{nodes:[N(0,0),N(5,0),N(5,5),N(0,5)],closed:true},foldSeg:3,
+    stitchSlits:[{seg:1,t:0.5,len:0.2,width:0.05,off:0.3,ang:45}],holes:[],notches:[]};
+  const u=DXF.unfoldPiece(p);
+  assert.equal(u.stitchSlits.length,2);
+  assert(u.stitchSlits.every(s=>s.width===0.05));
+  const slots=DXF.pieceShapes(p).polylines.filter(pl=>pl.closed && pl.pts.length===4 && Math.abs(Geo.dist(pl.pts[0],pl.pts[1])-0.2)<1e-8);
+  assert.equal(slots.length,2);
+});
+
+t('unfold remaps every cutout stitch and gives mirrored runs separate identities', () => {
+  const square=(x,y)=>[N(x,y),N(x+1,y),N(x+1,y+1),N(x,y+1)];
+  const p={path:{nodes:[N(0,0),N(10,0),N(10,20),N(0,20)],closed:true},foldSeg:3,
+    cutouts:[{nodes:square(2,2)},{nodes:square(5,10)}],holes:[],notches:[],
+    stitchSlits:[{cut:1,seg:0,t:0.5,len:0.2,width:0.05,off:0.3,ang:45,run:1,pair:'test'}]};
+  const u=DXF.unfoldPiece(p);
+  assert.equal(u.cutouts.length,4);
+  assert.equal(u.stitchSlits.length,2);
+  assert.equal(u.stitchSlits[0].cut,2);
+  assert.equal(u.stitchSlits[1].cut,3);
+  assert.equal(u.stitchSlits[0].pair,'test');
+  assert.equal(u.stitchSlits[1].pair,undefined);
+  assert.notEqual(u.stitchSlits[0].run,u.stitchSlits[1].run);
+  for (const sl of u.stitchSlits) {
+    const c=u.cutouts[sl.cut].nodes;
+    const line=Geo.slitLine(c[sl.seg],c[(sl.seg+1)%c.length],sl,-Geo.outwardSign(Geo.pathPolyline(c,true,0.01)));
+    assert(Math.abs(Geo.lerp(line.a,line.b,0.5).y-9.7)<0.001);
+  }
+});
+
+t('plural stitch nudges move only chosen holes, including an empty selection', () => {
+  const source = require('fs').readFileSync(require.resolve('../js/app.js'), 'utf8');
+  const start = source.indexOf('  function applyMove(');
+  const end = source.indexOf('\n  // Fillet', start);
+  const piece = {path:{nodes:[N(0,0),N(10,0)]},stitchSlits:[{seg:0,t:0.2},{seg:0,t:0.5},{seg:0,t:0.8}]};
+  const sel = {kind:'slits',slits:[0,2]};
+  const context = {Geo,sel,multiSel:[],selPiece:()=>piece,slitContext:()=>({nodes:piece.path.nodes}),movePiece:()=>assert.fail('moved whole piece')};
+  require('vm').runInNewContext(source.slice(start,end)+'; applyMove(0.1,0);',context);
+  assert(Math.abs(piece.stitchSlits[0].t-0.21)<1e-8);
+  assert.equal(piece.stitchSlits[1].t,0.5);
+  assert(Math.abs(piece.stitchSlits[2].t-0.81)<1e-8);
+  sel.slits=[];
+  require('vm').runInNewContext('applyMove(0.1,0)',context);
+});
+
+t('matched re-spacing uses original A when B comes first and is selected', () => {
+  const source = require('fs').readFileSync(require.resolve('../js/app.js'), 'utf8');
+  const start = source.indexOf('  function rebuildStitchRuns(');
+  const end = source.indexOf('\n  function cancelStitchChange', start);
+  const b = {length:10,stitchSlits:[{pair:'p',pairSide:'B'}]};
+  const a = {length:20,stitchSlits:[{pair:'p',pairSide:'A'}]};
+  const groups = [b,a].map(piece=>({piece,indices:[0]}));
+  const fields = {'sp-run-spacing':{value:'4'},'sp-run-inset':{value:'3'},'sp-slit-inset':{},'status-hint':{}};
+  const context = {Geo,$:id=>fields[id],selectedStitchRuns:()=>groups,stitchEditSettings:()=>({len:0.2}),
+    stitchRunTargets:piece=>piece,stitchChains:piece=>[{piece,path:[N(0,0),N(piece.length,0)],loop:false}],
+    stitchFractions:n=>Array.from({length:n},(_,i)=>i/n),
+    stitchPlaceRun:(chain,fractions,len,settings)=>chain.piece.stitchSlits.push(...fractions.map(()=>({...settings}))),
+    beginChange:()=>{},endChange:()=>{},selPiece:()=>b,sel:{},renderAll:()=>{},cancelStitchChange:message=>assert.fail(message)};
+  require('vm').runInNewContext(source.slice(start,end)+'; rebuildStitchRuns();',context);
+  assert.equal(a.stitchSlits.length,50); assert.equal(b.stitchSlits.length,50);
+  assert(a.stitchSlits.every(s=>s.pairSide==='A')); assert(b.stitchSlits.every(s=>s.pairSide==='B'));
+  const noticeStart=source.indexOf('  function matchedLengthNotice('), noticeEnd=source.indexOf('  function updateStitchUi(',noticeStart);
+  require('vm').runInNewContext(source.slice(noticeStart,noticeEnd),context);
+  assert.equal(context.matchedLengthNotice(20,20),'');
+  assert(context.matchedLengthNotice(20,10).includes('Original side A determines hole count'));
+});
+
 console.log(`\n${passed} tests passed${process.exitCode ? ' (with failures)' : ''}`);

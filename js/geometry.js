@@ -686,6 +686,33 @@
     };
   }
 
+  // Physical slot boundary, in cm. A zero-width legacy slit stays a line.
+  function slitContour(line, width) {
+    if (width == null || width === 0) return [line.a, line.b];
+    if (!Number.isFinite(width) || width < 0) throw new Error('Slot width must be a finite, non-negative number.');
+    const d = norm(sub(line.b, line.a));
+    const n = { x: -d.y * width / 2, y: d.x * width / 2 };
+    return [add(line.a, n), add(line.b, n), sub(line.b, n), sub(line.a, n)];
+  }
+
+  function slitFitsPiece(piece, sl) {
+    if (!sl.width || piece.guide || !piece.path.closed) return true;
+    const nodes = sl.cut == null ? piece.path.nodes : (piece.cutouts || [])[sl.cut]?.nodes;
+    if (!nodes || !nodes[sl.seg]) return false;
+    const sign = outwardSign(pathPolyline(nodes, true, 0.01)) * (sl.cut == null ? 1 : -1);
+    const pts = slitContour(slitLine(nodes[sl.seg], nodes[(sl.seg + 1) % nodes.length], sl, sign), sl.width);
+    const outer = pathPolyline(piece.path.nodes, true, 0.01);
+    if (pts.some(p => !pointInPolygon(outer, p)) || pathIntersections(piece.path.nodes, true, pts, true).length) return false;
+    for (const c of piece.cutouts || []) {
+      const ring = pathPolyline(c.nodes, true, 0.01);
+      if (pts.some(p => pointInPolygon(ring, p)) || pathIntersections(c.nodes, true, pts, true).length || pointInPolygon(pts, ring[0])) return false;
+    }
+    for (const h of piece.holes || []) {
+      if (pointInPolygon(pts, h) || nearestOnPath(pts, true, h).dist <= (h.r || 0.15)) return false;
+    }
+    return true;
+  }
+
   // Reflect point p across the line through a and b.
   function reflectPoint(p, a, b) {
     const d = norm(sub(b, a));
@@ -880,7 +907,7 @@
     cubicPoint, cubicTangent, flattenCubic,
     pathPolyline, pathLength, polyArea, bbox, centroid, polyCentroid, labelBox, dedupe,
     outwardSign, offsetClosed, nearestOnPath, pointInPolygon, splitSeg, setSegLength,
-    reverseNodes, weldClosedPaths, reflectPoint, reflectNodes, segArcParams, slitLine, notchLines, notchLinesPath,
+    reverseNodes, weldClosedPaths, reflectPoint, reflectNodes, segArcParams, slitLine, slitContour, slitFitsPiece, notchLines, notchLinesPath,
     pathArcParams, simplifyPoly, offsetOpen, pathIntersections, sewSlits, clipLoops,
   };
 });

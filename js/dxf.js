@@ -12,7 +12,7 @@
  *       CUT   (color 1, red)    — cutting line (seam allowance if > 0,
  *                                 otherwise the pattern outline) + notch slits
  *       SEAM  (color 3, green)  — stitch line, only when allowance > 0
- *       MARK  (color 5, blue)   — grainlines, drill-hole circles
+ *       MARK  (color 5, blue)   — grainlines and guide lines; hole circles are CUT
  */
 (function (root, factory) {
   if (typeof module !== 'undefined' && module.exports) {
@@ -138,28 +138,51 @@
       const v = sl.ang == null ? 45 : sl.ang;
       return sl.abs ? 2 * axisDeg - v : -v;
     };
-    const stitchSlits = [];
-    for (const sl of piece.stitchSlits || []) {
-      if (sl.cut != null) { stitchSlits.push(sl); continue; } // rides its cutout as-is
-      const s1 = res.segMapA[sl.seg];
-      if (s1 != null) stitchSlits.push(Object.assign({}, sl, { seg: s1 }));
-      const s2 = res.segMapB[sl.seg];
-      if (s2 != null) {
-        stitchSlits.push(Object.assign({}, sl, {
-          seg: s2,
-          t: res.flipT ? 1 - sl.t : sl.t,
-          ang: mirrorAng(sl),
-          toff: sl.toff ? -sl.toff : undefined, // tangent reverses with the path
-        }));
-      }
-    }
-    const cutouts = [];
+    const cutouts = [], cutMap = [];
     for (const c of piece.cutouts || []) {
+      const mapping = {original:cutouts.length, mirror:null};
       cutouts.push(c);
       const refl = Geo.reflectNodes(c.nodes, a, b);
       const cen = Geo.centroid(Geo.pathPolyline(c.nodes, true, 0.1));
       const mcen = Geo.centroid(Geo.pathPolyline(refl, true, 0.1));
-      if (Geo.dist(cen, mcen) > 0.05) cutouts.push({ nodes: refl });
+      if (Geo.dist(cen, mcen) > 0.05) { mapping.mirror=cutouts.length; cutouts.push({nodes:refl}); }
+      cutMap.push(mapping);
+    }
+    const stitchSlits = [], mirroredRuns = new Map();
+    let nextRun = (piece.stitchSlits || []).reduce((m,s)=>Math.max(m,s.run || 0),0) + 1;
+    function mirrorSlit(sl, changes) {
+      const mirrored = Object.assign({}, sl, {ang:mirrorAng(sl)}, changes);
+      // Once baked, the reflected half is independently editable. It must
+      // neither merge into the original run nor inherit its external pair.
+      delete mirrored.pair;
+      delete mirrored.pairSide;
+      delete mirrored.sourceSegments;
+      if (sl.run != null) {
+        const key = `${sl.pair || ''}:${sl.run}`;
+        if (!mirroredRuns.has(key)) mirroredRuns.set(key,nextRun++);
+        mirrored.run = mirroredRuns.get(key);
+      }
+      return mirrored;
+    }
+    for (const sl of piece.stitchSlits || []) {
+      if (sl.cut != null) {
+        const mapping = cutMap[sl.cut];
+        if (!mapping) continue;
+        stitchSlits.push(Object.assign({},sl,{cut:mapping.original}));
+        if (mapping.mirror != null) stitchSlits.push(mirrorSlit(sl,{cut:mapping.mirror}));
+        continue;
+      }
+      const s1 = res.segMapA[sl.seg];
+      if (s1 != null) {
+        const original = Object.assign({},sl,{seg:s1});
+        if (sl.sourceSegments) original.sourceSegments=sl.sourceSegments.map(i=>res.segMapA[i]).filter(i=>i!=null);
+        stitchSlits.push(original);
+      }
+      const s2 = res.segMapB[sl.seg];
+      if (s2 != null) stitchSlits.push(mirrorSlit(sl,{
+        seg:s2, t:res.flipT ? 1-sl.t : sl.t,
+        toff:sl.toff ? -sl.toff : undefined,
+      }));
     }
     const out = Object.assign({}, piece, {
       path: { closed: true, nodes: res.nodes },
@@ -197,10 +220,12 @@
       for (const sl of piece.stitchSlits || []) {
         if (sl.seg >= nodes.length) continue;
         const line = Geo.slitLine(nodes[sl.seg], nodes[(sl.seg + 1) % nodes.length], sl, gS);
-        out.lines.push({ layer: 'CUT', a: line.a, b: line.b });
+        const pts = Geo.slitContour(line, sl.width);
+        if (pts.length > 2) out.polylines.push({ layer: 'CUT', pts, closed: true });
+        else out.lines.push({ layer: 'CUT', a: line.a, b: line.b });
       }
       for (const h of piece.holes || []) {
-        out.circles.push({ layer: 'MARK', c: { x: h.x, y: h.y }, r: h.r || 0.15 });
+        out.circles.push({ layer: 'CUT', c: { x: h.x, y: h.y }, r: h.r || 0.15 });
       }
       return out;
     }
@@ -244,11 +269,13 @@
         oS = cutSign[sl.cut];
       } else if (sl.seg >= nodes.length) continue;
       const line = Geo.slitLine(nds[sl.seg], nds[(sl.seg + 1) % nds.length], sl, oS);
-      out.lines.push({ layer: 'CUT', a: line.a, b: line.b });
+      const pts = Geo.slitContour(line, sl.width);
+        if (pts.length > 2) out.polylines.push({ layer: 'CUT', pts, closed: true });
+        else out.lines.push({ layer: 'CUT', a: line.a, b: line.b });
     }
 
     for (const h of piece.holes || []) {
-      out.circles.push({ layer: 'MARK', c: { x: h.x, y: h.y }, r: h.r || 0.15 });
+      out.circles.push({ layer: 'CUT', c: { x: h.x, y: h.y }, r: h.r || 0.15 });
     }
 
     if (piece.grain) {
