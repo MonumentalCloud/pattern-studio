@@ -1172,12 +1172,12 @@ t('matched re-spacing uses original A when B comes first and is selected', () =>
   const b = {length:10,stitchSlits:[{pair:'p',pairSide:'B'}]};
   const a = {length:20,stitchSlits:[{pair:'p',pairSide:'A'}]};
   const groups = [b,a].map(piece=>({piece,indices:[0]}));
-  const fields = {'sp-run-spacing':{value:'4'},'sp-run-inset':{value:'3'},'sp-slit-inset':{},'status-hint':{}};
+  const fields = {'sp-run-spacing':{value:'4'},'sp-run-inset':{value:'3'},'sp-slit-inset':{},'status-hint':{},'st-spacing':{},'st-off':{}};
   const context = {Geo,$:id=>fields[id],selectedStitchRuns:()=>groups,stitchEditSettings:()=>({len:0.2}),
     stitchRunTargets:piece=>piece,stitchChains:piece=>[{piece,path:[N(0,0),N(piece.length,0)],loop:false}],
     stitchFractions:n=>Array.from({length:n},(_,i)=>i/n),
     stitchPlaceRun:(chain,fractions,len,settings)=>chain.piece.stitchSlits.push(...fractions.map(()=>({...settings}))),
-    beginChange:()=>{},endChange:()=>{},selPiece:()=>b,sel:{},renderAll:()=>{},cancelStitchChange:message=>assert.fail(message)};
+    rememberAppliedStitchSettings:()=>{},beginChange:()=>{},endChange:()=>{},selPiece:()=>b,sel:{},renderAll:()=>{},cancelStitchChange:message=>assert.fail(message)};
   require('vm').runInNewContext(source.slice(start,end)+'; rebuildStitchRuns();',context);
   assert.equal(a.stitchSlits.length,50); assert.equal(b.stitchSlits.length,50);
   assert(a.stitchSlits.every(s=>s.pairSide==='A')); assert(b.stitchSlits.every(s=>s.pairSide==='B'));
@@ -1185,6 +1185,37 @@ t('matched re-spacing uses original A when B comes first and is selected', () =>
   require('vm').runInNewContext(source.slice(noticeStart,noticeEnd),context);
   assert.equal(context.matchedLengthNotice(20,20),'');
   assert(context.matchedLengthNotice(20,10).includes('Original side A determines hole count'));
+});
+
+t('unfold retains iron handedness for edge-relative outline and cutout slots', () => {
+  const piece={path:{closed:true,nodes:[N(0,0),N(10,0),N(10,10),N(0,10)]},foldSeg:1,
+    cutouts:[{nodes:[N(3,3),N(5,3),N(5,5),N(3,5)]}],stitchSlits:[
+      {seg:0,t:0.5,ang:-45,len:0.15,width:0.05,off:0.3},
+      {cut:0,seg:0,t:0.5,ang:-45,len:0.15,width:0.05,off:0.3}]};
+  const unfolded=DXF.unfoldPiece(piece);
+  assert.equal(unfolded.stitchSlits.length,4);
+  assert(unfolded.stitchSlits.every(s=>s.ang===-45));
+});
+
+t('stitch preferences restore validated values and propagate applied edits', () => {
+  const source=require('fs').readFileSync(require.resolve('../js/app.js'),'utf8');
+  const start=source.indexOf('  const STITCH_SETTINGS_KEY'),end=source.indexOf('  // plain-language label',start);
+  const fields={};
+  for (const id of ['st-spacing','st-len','st-width','st-off','st-ang','st-ang-ref','sp-run-spacing','sp-run-inset']) {
+    let value=id==='st-ang-ref'?'edge':'0.3';
+    fields[id]={get value(){return value},set value(v){value=String(v)},checkValidity(){return id==='st-ang-ref'?['edge','page'].includes(value):value!==''&&Number.isFinite(Number(value))&&Math.abs(Number(value))<=180},addEventListener(){}};
+  }
+  let stored=null;
+  const context={$:id=>fields[id],localStorage:{setItem:(key,v)=>{stored=v},getItem:()=>stored},refreshAngEg:()=>{}};
+  require('vm').runInNewContext(source.slice(start,end),context);
+  fields['st-spacing'].value='0.4'; fields['st-width'].value='0.8';fields['st-ang'].value='-45';
+  context.saveStitchSettings(); fields['st-width'].value='0.5';context.restoreStitchSettings();
+  assert.equal(fields['st-width'].value,'0.8');assert.equal(fields['sp-run-spacing'].value,'4');
+  context.rememberAppliedStitchSettings({len:0.2,width:0.06,ang:-30,abs:false});
+  assert.equal(fields['st-len'].value,'0.2');assert.equal(fields['st-width'].value,'0.6');
+  assert.equal(JSON.parse(stored)['st-ang'],'-30');
+  stored=JSON.stringify({'st-ang':'invalid','st-ang-ref':'bogus'});context.restoreStitchSettings();
+  assert.equal(fields['st-ang'].value,'-30');assert.equal(fields['st-ang-ref'].value,'edge');
 });
 
 console.log(`\n${passed} tests passed${process.exitCode ? ' (with failures)' : ''}`);

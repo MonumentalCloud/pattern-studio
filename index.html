@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pattern Studio</title>
-<link rel="stylesheet" href="style.css?v=62">
+<link rel="stylesheet" href="style.css?v=63">
 </head>
 <body>
 <div id="app">
   <header id="topbar">
-    <span id="logo" title="build 62">✂ Pattern Studio</span>
+    <span id="logo" title="build 63">✂ Pattern Studio</span>
     <input id="doc-name" type="text" value="Untitled pattern" spellcheck="false" title="Pattern name">
     <details class="top-menu"><summary>File</summary><div class="menu-panel"><div class="row btns">    <button id="btn-new" title="New document">New</button>
     <button id="btn-open" title="Open .json project or import a .dxf">Open</button>
@@ -157,19 +157,19 @@
             <option value="matched">Matched pair (A → B)</option>
           </select></div>
         <div class="row"><label for="st-spacing">Spacing</label>
-          <input id="st-spacing" type="number" min="0.1" max="2" step="0.05" value="0.3"> <em>cm</em></div>
+          <input id="st-spacing" type="number" min="0.1" max="2" step="any" value="0.3"> <em>cm</em></div>
         <div class="row"><label for="st-len">Slit length</label>
-          <input id="st-len" type="number" min="0.05" max="1" step="0.05" value="0.15"> <em>cm</em></div>
-        <div class="row"><label for="st-width">Slot width</label><input id="st-width" type="number" min="0" max="5" step="0.1" value="0.5"><em>mm</em></div>
+          <input id="st-len" type="number" min="0.05" max="1" step="any" value="0.15"> <em>cm</em></div>
+        <div class="row"><label for="st-width">Slot width</label><input id="st-width" type="number" min="0" max="10" step="any" value="0.5"><em>mm</em></div>
         <div class="row"><label for="st-off">Inset</label>
-          <input id="st-off" type="number" min="-2" max="2" step="0.05" value="0.3" title="Distance from the edge: + moves the slits inside the piece, − outside, 0 centers them on the line"> <em>cm</em></div>
+          <input id="st-off" type="number" min="-2" max="2" step="any" value="0.3" title="Distance from the edge: + moves the slits inside the piece, − outside, 0 centers them on the line"> <em>cm</em></div>
         <div class="row"><label for="st-ang-ref">Slant from</label>
           <select id="st-ang-ref" title="From edge: the angle is measured off the edge each hole sits on, so the slits follow the outline round a curve (traditional saddle stitch). From page: one fixed direction for every hole, so they all stay parallel however the outline turns">
-            <option value="edge">Edge — follows the outline</option>
+            <option value="edge">Follow stitch line — same slant</option>
             <option value="page">Page — all parallel</option>
           </select></div>
         <div class="row"><label for="st-ang">Slant</label>
-          <input id="st-ang" type="number" min="-180" max="180" step="5" value="45" title="From edge: ±45 are the two diagonals, 90 is square across the edge. From page: 0 = horizontal, 90 = vertical, 45 = ＼, −45 = ／"> <em>°</em>
+          <input id="st-ang" type="number" min="-180" max="180" step="any" value="-45" title="From edge: ±45 are the two diagonals, 90 is square across the edge. From page: 0 = horizontal, 90 = vertical, 45 = ＼, −45 = ／"> <em>°</em>
           <span id="st-ang-eg" class="ang-eg"></span></div>
         <p id="st-match-notice" class="seam-notice" role="status" hidden></p>
         <div class="row btns"><button id="st-apply" title="Advance the current mode (Enter): Single stitches the selection; Matched confirms side A, then stitches A + B together">Stitch selected</button></div>
@@ -184,7 +184,7 @@
           <p id="st-edit-notice" class="seam-notice" role="status" hidden></p>
           <div id="st-edit-fields" hidden>
             <div class="row"><label for="sp-slit-len">Slit length</label><input id="sp-slit-len" type="number" min="0.5" max="10" step="0.1"><em>mm</em></div>
-            <div class="row"><label for="sp-slit-width">Slot width</label><input id="sp-slit-width" type="number" min="0" max="5" step="0.1"><em>mm</em></div>
+            <div class="row"><label for="sp-slit-width">Slot width</label><input id="sp-slit-width" type="number" min="0" max="10" step="any"><em>mm</em></div>
             <div class="row"><label for="sp-slit-inset">Inset change</label><input id="sp-slit-inset" type="number" min="-20" max="20" step="0.1" value="0" title="Move inward by this amount, preserving corner offsets. Negative moves outward."><em>mm</em></div>
         <div class="row" id="sel-clear-slits-row" hidden>
           <button id="sp-clear-slits" title="Delete every stitching slit on this edge (zoom in to pick single ones)">Remove stitch holes</button>
@@ -192,7 +192,7 @@
         <div class="row" id="sel-slit-ang-ref-row" hidden>
           <label for="sp-slit-ang-ref">Slant from</label>
           <select id="sp-slit-ang-ref" title="From edge: measured off the edge the hole sits on, so slits follow the outline. From page: one fixed direction for every hole (0 = horizontal, 90 = vertical)">
-            <option value="edge">Edge — follows the outline</option>
+            <option value="edge">Follow stitch line — same slant</option>
             <option value="page">Page — all parallel</option>
           </select>
         </div>
@@ -217,7 +217,7 @@
             </details>
           </div>
         </div>
-        <p class="hint">Width 0 makes a line cut. Positive width cuts a slot. Start with a small paper test to fit your iron.</p>
+        <p class="hint">Follow stitch line keeps the same slant after mirroring. −45° is ／ on a horizontal line. Stitch settings are remembered in this browser. Width 0 makes a line cut. Positive width cuts a slot. Start with a small paper test to fit your iron.</p>
       </section>
 <section id="offset-props" hidden>
         <h3>Offset edges</h3>
@@ -374,10 +374,10 @@
   </div>
 </div>
 <input id="file-input" type="file" accept=".json,.dxf,application/json" hidden>
-<script src="js/geometry.js?v=62"></script>
-<script src="js/strokefont.js?v=62"></script>
-<script src="js/dxf.js?v=62"></script>
-<script src="js/dxfimport.js?v=62"></script>
-<script src="js/app.js?v=62"></script>
+<script src="js/geometry.js?v=63"></script>
+<script src="js/strokefont.js?v=63"></script>
+<script src="js/dxf.js?v=63"></script>
+<script src="js/dxfimport.js?v=63"></script>
+<script src="js/app.js?v=63"></script>
 </body>
 </html>

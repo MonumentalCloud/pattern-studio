@@ -130,13 +130,12 @@
       const m = res.xform(Geo.reflectPoint(h, a, b));
       if (Geo.dist(h, m) > 0.05) holes.push({ x: m.x, y: m.y, r: h.r });
     }
-    // reflecting the half mirrors each slit's diagonal. An edge-referenced
-    // angle just negates (the reflection reverses handedness against the
-    // tangent); a page-referenced one has to mirror about the fold axis itself.
+    // Keep the iron slant relative to each edge when unfolding. Explicit page
+    // angles still reflect geometrically about the fold axis.
     const axisDeg = Math.atan2(b.y - a.y, b.x - a.x) * 180 / Math.PI;
     const mirrorAng = (sl) => {
       const v = sl.ang == null ? 45 : sl.ang;
-      return sl.abs ? 2 * axisDeg - v : -v;
+      return sl.abs ? 2 * axisDeg - v : v;
     };
     const cutouts = [], cutMap = [];
     for (const c of piece.cutouts || []) {

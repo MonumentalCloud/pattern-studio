@@ -3501,9 +3501,43 @@
   // (all holes parallel) instead of off the edge (follows the outline).
   const clampAng = (v, dflt) => (Number.isFinite(v) ? Math.max(-180, Math.min(180, v)) : dflt);
   function stitchAngle() {
-    return clampAng(parseFloat($('st-ang').value), 45);
+    return clampAng(parseFloat($('st-ang').value), -45);
   }
   function stitchAngleAbs() { return $('st-ang-ref').value === 'page'; }
+
+  const STITCH_SETTINGS_KEY = 'patternStudioStitchSettings.v1';
+  const stitchSettingIds = ['st-spacing', 'st-len', 'st-width', 'st-off', 'st-ang', 'st-ang-ref'];
+  function saveStitchSettings() {
+    const values = Object.fromEntries(stitchSettingIds.map(id => [id, $(id).value]));
+    try { localStorage.setItem(STITCH_SETTINGS_KEY, JSON.stringify(values)); } catch (_) { /* storage unavailable */ }
+    $('sp-run-spacing').value = Number($('st-spacing').value) * 10;
+    $('sp-run-inset').value = Number($('st-off').value) * 10;
+  }
+  function restoreStitchSettings() {
+    try {
+      const values = JSON.parse(localStorage.getItem(STITCH_SETTINGS_KEY));
+      for (const id of stitchSettingIds) {
+        if (!values || typeof values[id] !== 'string') continue;
+        const input = $(id), previous = input.value;
+        input.value = values[id];
+        if (!input.value || !input.checkValidity()) input.value = previous;
+      }
+    } catch (_) { /* missing/corrupt preferences: use defaults */ }
+    $('sp-run-spacing').value = Number($('st-spacing').value) * 10;
+    $('sp-run-inset').value = Number($('st-off').value) * 10;
+    refreshAngEg();
+  }
+  for (const id of stitchSettingIds) $(id).addEventListener('input', () => {
+    if (stitchSettingIds.every(key => $(key).value && $(key).checkValidity())) saveStitchSettings();
+  });
+  function rememberAppliedStitchSettings(values) {
+    $('st-len').value = Number(values.len.toFixed(6));
+    $('st-width').value = Number((values.width * 10).toFixed(6));
+    $('st-ang').value = values.ang;
+    $('st-ang-ref').value = values.abs ? 'page' : 'edge';
+    saveStitchSettings();
+    refreshAngEg();
+  }
 
   // plain-language label for an angle, so the number isn't the only clue
   function angLabel(ang, abs) {
@@ -4079,7 +4113,7 @@
           sl.seg = copy.path.closed ? (2 * n - 2 - sl.seg) % n : (n - 2 - sl.seg);
         }
         sl.t = 1 - sl.t;
-        sl.ang = -(sl.ang == null ? 45 : sl.ang); // keep the diagonal mirrored
+        if (sl.abs) sl.ang = -(sl.ang == null ? 45 : sl.ang); // edge-relative iron slant keeps its handedness
         if (sl.toff) sl.toff = -sl.toff; // tangent reverses with the path
       }
       if (copy.foldSeg != null && copy.path.closed) copy.foldSeg = (2 * n - 2 - copy.foldSeg) % n;
@@ -4816,6 +4850,7 @@
       for (const c of changes) c.piece.stitchSlits[c.i] = c.next;
       endChange();
       $('sp-slit-inset').value = 0;
+      rememberAppliedStitchSettings(values);
       renderAll();
       $('status-hint').textContent = `Updated ${changes.length} holes${wholeRun && groups.length > 1 ? ' across linked runs' : ''}`;
     } catch (e) { $('status-hint').textContent = e.message; }
@@ -4888,6 +4923,9 @@
       endChange();
       sel.kind = 'slits'; sel.slits = newSelection; sel.idx = -1;
       $('sp-slit-inset').value = 0;
+      $('st-spacing').value = spacing;
+      $('st-off').value = inset;
+      rememberAppliedStitchSettings(settings);
       renderAll();
       $('status-hint').textContent = `Re-spaced ${plans.length} run(s); matched sides retain equal counts`;
     } catch (e) { cancelStitchChange(e.message); }
@@ -5148,6 +5186,7 @@
 
   // ---------- boot ----------
   (function boot() {
+    restoreStitchSettings();
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
