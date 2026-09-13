@@ -1156,11 +1156,13 @@ t('plural stitch nudges move only chosen holes, including an empty selection', (
   const end = source.indexOf('\n  // Fillet', start);
   const piece = {path:{nodes:[N(0,0),N(10,0)]},stitchSlits:[{seg:0,t:0.2},{seg:0,t:0.5},{seg:0,t:0.8}]};
   const sel = {kind:'slits',slits:[0,2]};
-  const context = {Geo,sel,multiSel:[],selPiece:()=>piece,slitContext:()=>({nodes:piece.path.nodes}),movePiece:()=>assert.fail('moved whole piece')};
+  const other = {path:piece.path,stitchSlits:[{seg:0,t:0.3}]};
+  const context = {Geo,sel,multiSel:[],selPiece:()=>piece,selectedStitchHoles:()=>[{piece,indices:sel.slits},{piece:other,indices:sel.slits.length?[0]:[]}],slitContext:()=>({nodes:piece.path.nodes}),movePiece:()=>assert.fail('moved whole piece')};
   require('vm').runInNewContext(source.slice(start,end)+'; applyMove(0.1,0);',context);
   assert(Math.abs(piece.stitchSlits[0].t-0.21)<1e-8);
   assert.equal(piece.stitchSlits[1].t,0.5);
   assert(Math.abs(piece.stitchSlits[2].t-0.81)<1e-8);
+  assert(Math.abs(other.stitchSlits[0].t-0.31)<1e-8);
   sel.slits=[];
   require('vm').runInNewContext('applyMove(0.1,0)',context);
 });
@@ -1177,7 +1179,7 @@ t('matched re-spacing uses original A when B comes first and is selected', () =>
     stitchRunTargets:piece=>piece,stitchChains:piece=>[{piece,path:[N(0,0),N(piece.length,0)],loop:false}],
     stitchFractions:n=>Array.from({length:n},(_,i)=>i/n),
     stitchPlaceRun:(chain,fractions,len,settings)=>chain.piece.stitchSlits.push(...fractions.map(()=>({...settings}))),
-    rememberAppliedStitchSettings:()=>{},beginChange:()=>{},endChange:()=>{},selPiece:()=>b,sel:{},renderAll:()=>{},cancelStitchChange:message=>assert.fail(message)};
+    selectStitchHoles:()=>{},rememberAppliedStitchSettings:()=>{},beginChange:()=>{},endChange:()=>{},selPiece:()=>b,sel:{},renderAll:()=>{},cancelStitchChange:message=>assert.fail(message)};
   require('vm').runInNewContext(source.slice(start,end)+'; rebuildStitchRuns();',context);
   assert.equal(a.stitchSlits.length,50); assert.equal(b.stitchSlits.length,50);
   assert(a.stitchSlits.every(s=>s.pairSide==='A')); assert(b.stitchSlits.every(s=>s.pairSide==='B'));
@@ -1216,6 +1218,52 @@ t('stitch preferences restore validated values and propagate applied edits', () 
   assert.equal(JSON.parse(stored)['st-ang'],'-30');
   stored=JSON.stringify({'st-ang':'invalid','st-ang-ref':'bogus'});context.restoreStitchSettings();
   assert.equal(fields['st-ang'].value,'-30');assert.equal(fields['st-ang-ref'].value,'edge');
+});
+
+t('Stitch Edit box targets holes under the box instead of the previously selected shape', () => {
+  const source=require('fs').readFileSync(require.resolve('../js/app.js'),'utf8');
+  const start=source.indexOf("        if (drag.mode === 'stitch-edit') {"),end=source.indexOf("        if (drag.mode === 'stitch-add') {",start);
+  const pieces=[{id:'a',stitchSlits:[{x:1,y:1}]},{id:'b',stitchSlits:[{x:11,y:1},{x:12,y:1}]}];
+  const fields={'sp-slit-inset':{},'status-hint':{}};
+  const context={doc:{pieces},Geo,x0:10,x1:13,y0:0,y1:2,drag:{mode:'stitch-edit',prevPieceId:'a'},sel:{pieceId:'a'},
+    pieceById:id=>pieces.find(p=>p.id===id),slitLineFor:(p,s)=>({a:s,b:s}),selectPiece:id=>{context.sel={pieceId:id}},
+    $:id=>fields[id],clearSel:()=>{context.sel={}},renderAll:()=>{}};
+  const helpers=source.slice(source.indexOf('  function selectedStitchHoles()'),source.indexOf('  function selectedStitchRuns('));
+  require('vm').runInNewContext(helpers,context);
+  require('vm').runInNewContext('(function(){'+source.slice(start,end)+'})()',context);
+  assert.equal(context.sel.pieceId,'b');assert.deepEqual(Array.from(context.sel.slits),[0,1]);
+  context.x0=0;context.drag={mode:'stitch-edit'};
+  pieces.push({id:'hidden',visible:false,stitchSlits:[{x:2,y:1}]});
+  require('vm').runInNewContext('(function(){'+source.slice(start,end)+'})()',context);
+  assert.equal(context.sel.slitGroups.length,2);
+  assert.equal(context.selectedStitchHoles().reduce((n,g)=>n+g.indices.length,0),3);
+  context.x0=10;context.drag={mode:'stitch-edit',shift:true};
+  require('vm').runInNewContext('(function(){'+source.slice(start,end)+'})()',context);
+  assert.equal(context.selectedStitchHoles().reduce((n,g)=>n+g.indices.length,0),3);
+  require('vm').runInNewContext(source.slice(source.indexOf('  function selectionIds()'),source.indexOf('  function copySelection()')),context);
+  assert.deepEqual(Array.from(context.selectionIds()),['a','b']);
+  context.x0=30;context.x1=31;context.drag={mode:'stitch-edit'};
+  require('vm').runInNewContext('(function(){'+source.slice(start,end)+'})()',context);
+  assert.equal(context.selectedStitchHoles().length,0);
+
+});
+
+t('Cut copies and removes all shapes containing selected holes in one undo change', () => {
+  const source=require('fs').readFileSync(require.resolve('../js/app.js'),'utf8');
+  const a={id:'a',stitchSlits:[{}]},b={id:'b',stitchSlits:[{}]},c={id:'c',stitchSlits:[]};
+  let copied,changes=0;
+  const context={doc:{pieces:[a,b,c]},sel:{pieceId:'a',kind:'slits',slits:[0],slitGroups:[{pieceId:'a',indices:[0]},{pieceId:'b',indices:[0]}]},multiSel:[],
+    CLIP_KEY:'test',pieceById:id=>context.doc.pieces.find(p=>p.id===id),selPiece:()=>context.doc.pieces.find(p=>p.id===context.sel.pieceId),
+    clearSel:()=>{context.sel={kind:null};context.multiSel=[]},localStorage:{setItem:(k,v)=>{copied=JSON.parse(v)}},$:()=>({}),
+    beginChange:()=>changes++,endChange:()=>{},renderAll:()=>{},ev:{ctrlKey:true,key:'x',preventDefault(){}}};
+  const vm=require('vm');
+  for (const [from,to] of [['  function selectedStitchHoles()','  function selectedStitchRuns('],['  function selectionIds()','  function pasteClipboard()'],['  function deleteSelection()','  // ---------- piece operations']]) {
+    vm.runInNewContext(source.slice(source.indexOf(from),source.indexOf(to)),context);
+  }
+  const start=source.indexOf("    if ((ev.ctrlKey || ev.metaKey) && k === 'x')"),end=source.indexOf("    if ((ev.ctrlKey || ev.metaKey) && k === 'd')",start);
+  vm.runInNewContext("(function(){const k='x';"+source.slice(start,end)+'})()',context);
+  assert.deepEqual(copied.pieces.map(p=>p.id),['a','b']);
+  assert.deepEqual(context.doc.pieces.map(p=>p.id),['c']);assert.equal(changes,1);
 });
 
 console.log(`\n${passed} tests passed${process.exitCode ? ' (with failures)' : ''}`);

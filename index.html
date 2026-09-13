@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pattern Studio</title>
-<link rel="stylesheet" href="style.css?v=63">
+<link rel="stylesheet" href="style.css?v=64">
 </head>
 <body>
 <div id="app">
   <header id="topbar">
-    <span id="logo" title="build 63">✂ Pattern Studio</span>
+    <span id="logo" title="build 64">✂ Pattern Studio</span>
     <input id="doc-name" type="text" value="Untitled pattern" spellcheck="false" title="Pattern name">
     <details class="top-menu"><summary>File</summary><div class="menu-panel"><div class="row btns">    <button id="btn-new" title="New document">New</button>
     <button id="btn-open" title="Open .json project or import a .dxf">Open</button>
@@ -156,8 +156,8 @@
             <option value="single">Single runs</option>
             <option value="matched">Matched pair (A → B)</option>
           </select></div>
-        <div class="row"><label for="st-spacing">Spacing</label>
-          <input id="st-spacing" type="number" min="0.1" max="2" step="any" value="0.3"> <em>cm</em></div>
+        <div class="row"><label for="st-spacing">Center spacing</label>
+          <input id="st-spacing" title="Target center-to-center distance along the stitch line; adjusted to fit a whole number of holes" type="number" min="0.1" max="2" step="any" value="0.3"> <em>cm</em></div>
         <div class="row"><label for="st-len">Slit length</label>
           <input id="st-len" type="number" min="0.05" max="1" step="any" value="0.15"> <em>cm</em></div>
         <div class="row"><label for="st-width">Slot width</label><input id="st-width" type="number" min="0" max="10" step="any" value="0.5"><em>mm</em></div>
@@ -180,6 +180,7 @@
           Set Inset ≈ 0.3 so holes sit inside the cut edge.</div>
       </div>
         <div id="st-edit" hidden>
+          <p class="hint">Boxes select holes across shapes. Copy / Cut / Duplicate act on all containing shapes; Delete removes only selected holes.</p>
           <p id="st-edit-summary" class="hint">Click a hole, or drag a box to select holes.</p>
           <p id="st-edit-notice" class="seam-notice" role="status" hidden></p>
           <div id="st-edit-fields" hidden>
@@ -211,7 +212,7 @@
             <button id="sp-delete-whole" class="danger">Delete whole run (keep partner)</button>
             <details><summary>Re-space whole run</summary>
               <p class="hint">Rebuilds holes on the run’s occupied edges. Replaces manual gaps. Original side A sets the count; side B adjusts its spacing to match.</p>
-              <div class="row"><label for="sp-run-spacing">Spacing</label><input id="sp-run-spacing" type="number" min="1" max="20" step="0.1" value="3"><em>mm</em></div>
+              <div class="row"><label for="sp-run-spacing">Center spacing</label><input id="sp-run-spacing" title="Target center-to-center distance along the stitch line; adjusted to fit a whole number of holes" type="number" min="1" max="20" step="0.1" value="3"><em>mm</em></div>
               <div class="row"><label for="sp-run-inset">Run inset</label><input id="sp-run-inset" type="number" min="-20" max="20" step="0.1" value="3"><em>mm</em></div>
               <button id="sp-run-rebuild">Re-space run / matched pair</button>
             </details>
@@ -374,10 +375,10 @@
   </div>
 </div>
 <input id="file-input" type="file" accept=".json,.dxf,application/json" hidden>
-<script src="js/geometry.js?v=63"></script>
-<script src="js/strokefont.js?v=63"></script>
-<script src="js/dxf.js?v=63"></script>
-<script src="js/dxfimport.js?v=63"></script>
-<script src="js/app.js?v=63"></script>
+<script src="js/geometry.js?v=64"></script>
+<script src="js/strokefont.js?v=64"></script>
+<script src="js/dxf.js?v=64"></script>
+<script src="js/dxfimport.js?v=64"></script>
+<script src="js/app.js?v=64"></script>
 </body>
 </html>

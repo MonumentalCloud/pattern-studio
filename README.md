@@ -19,12 +19,14 @@ can be saved/opened as `.pattern.json` files. In Chrome/Edge, **Save writes stra
 to a file on your computer** (it asks where once, then `Ctrl+S` saves in place;
 `Shift`-click Save = Save As); other browsers fall back to a download.
 
-## Tool inspectors (build 63)
+## Tool inspectors (build 64)
 
 The active tool's controls stay above the Pieces list. File contains local/cloud
 save and open; Export contains DXF/SVG and engraving options. Round, Notch, Hole,
 Pen and Grain expose their own editing controls. Select offers an explicit box
-selection target; Stitch Edit boxes select stitch holes on the selected piece.
+selection target; Stitch Edit boxes select stitch holes across every visible shape, regardless of
+the previous selection. Shift adds; editing, deletion and nudging apply to all
+selected holes. Copy/Cut/Duplicate act on all containing shapes.
 
 New stitching defaults to **Follow stitch line**, at **−45°** (／ on a horizontal
 line). Mirroring and unfolding preserve the edge-relative iron slant. Width,

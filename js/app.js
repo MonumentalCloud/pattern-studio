@@ -200,8 +200,8 @@
   // would fall through to the point and delete the whole thing.
   const sel = { pieceId: null, kind: null, idx: -1, nodes: [], handle: null };
   let multiSel = []; // piece ids from a marquee selection (moves/deletes as a group)
-  function clearSel() { sel.pieceId = null; sel.kind = null; sel.idx = -1; sel.nodes = []; sel.handle = null; multiSel = []; }
-  function selectPiece(id) { sel.pieceId = id; sel.kind = null; sel.idx = -1; sel.nodes = []; sel.handle = null; multiSel = []; }
+  function clearSel() { delete sel.slitGroups; sel.pieceId = null; sel.kind = null; sel.idx = -1; sel.nodes = []; sel.handle = null; multiSel = []; }
+  function selectPiece(id) { delete sel.slitGroups; sel.pieceId = id; sel.kind = null; sel.idx = -1; sel.nodes = []; sel.handle = null; multiSel = []; }
   const selPiece = () => (sel.pieceId ? pieceById(sel.pieceId) : null);
 
   // ---------- snapping ----------
@@ -603,10 +603,9 @@
 
     // selected stitch holes (single or set)
     if (sel.kind === 'slit' || (sel.kind === 'slits' && sel.slits)) {
-      const picked = sel.kind === 'slit' ? [sel.idx] : sel.slits;
-      for (const i of picked) {
-        const sl2 = (piece.stitchSlits || [])[i];
-        const ln = sl2 && slitLineFor(piece, sl2);
+      for (const group of selectedStitchHoles()) for (const i of group.indices) {
+        const sl2 = (group.piece.stitchSlits || [])[i];
+        const ln = sl2 && slitLineFor(group.piece, sl2);
         if (!ln) continue;
         const c = Geo.lerp(ln.a, ln.b, 0.5);
         el('circle', { class: 'snap-dot', cx: c.x, cy: c.y, r: px(5) }, gOverlay);
@@ -899,11 +898,12 @@
           }
           $('st-edit-notice').hidden = !$('st-edit-notice').textContent;
         }
-        $('st-edit-summary').textContent = `${indices.length} hole(s) on ${piece.name}. ` +
-          (sl.pair && groups.length > 1 ? `Linked matched pair (${groups.length} runs).` : 'Unlinked run — edits affect this run only.');
+        const selected = selectedStitchHoles();
+        $('sp-del-run').textContent = `Delete ${selected.reduce((n,g)=>n+g.indices.length,0)} stitch holes`;
+        $('st-edit-summary').textContent = `${selected.reduce((n,g)=>n+g.indices.length,0)} hole(s) across ${selected.length} shape(s). Whole-run action affects ${groups.length} run(s), including linked partners.`;
       }
-    } else $('st-edit-summary').textContent = 'Click a hole or stitched edge to select it. Then drag a box to select holes on that piece.';
-    $('piece-props').hidden = !piece || tool !== 'select';
+    } else $('st-edit-summary').textContent = 'Click a hole or stitched edge, or drag a box to select holes across shapes.';
+    $('piece-props').hidden = !piece || tool !== 'select' || !!editingSlits;
     $('sel-props').hidden = tool !== 'select' || $('sel-props').hidden || !!editingSlits;
     $('notch-props').hidden = !(tool === 'notch' || (tool === 'select' && piece && sel.kind === 'notch'));
     $('pp-notch').disabled = $('pp-notch-style').disabled = !piece;
@@ -927,17 +927,33 @@
     $('tool-title').textContent = tool === 'bool' ? 'Boolean' : tool.charAt(0).toUpperCase() + tool.slice(1);
   }
 
+  function selectedStitchHoles() {
+    if (!['slit', 'slits'].includes(sel.kind)) return [];
+    const groups = sel.slitGroups || [{pieceId:sel.pieceId, indices:sel.kind === 'slit' ? [sel.idx] : sel.slits || []}];
+    return groups.map(g => ({piece:pieceById(g.pieceId), indices:g.indices})).filter(g => g.piece && g.indices.length);
+  }
+  function selectStitchHoles(groups) {
+    groups = groups.filter(g => g.indices.length);
+    clearSel();
+    if (!groups.length) return;
+    sel.pieceId = groups[0].piece.id;
+    sel.kind = 'slits'; sel.slits = groups[0].indices;
+    sel.slitGroups = groups.map(g => ({pieceId:g.piece.id, indices:g.indices}));
+    $('sp-slit-inset').value = 0;
+  }
+
   function selectedStitchRuns(linked) {
     const p = selPiece();
     if (!p) return [];
-    const indices = sel.kind === 'slit' ? [sel.idx] : sel.kind === 'slits' ? sel.slits : [];
-    const chosen = indices.map(i => p.stitchSlits[i]).filter(Boolean);
+    const selected = selectedStitchHoles();
+    const chosen = selected.flatMap(g => g.indices.map(i => g.piece.stitchSlits[i])).filter(Boolean);
     const pairs = new Set(linked ? chosen.map(s => s.pair).filter(Boolean) : []);
     const groups = [];
     for (const piece of doc.pieces) {
+      const localChosen = selected.filter(g => g.piece === piece).flatMap(g => g.indices.map(i => piece.stitchSlits[i])).filter(Boolean);
       const byRun = new Map();
       (piece.stitchSlits || []).forEach((s, i) => {
-        const local = piece === p && chosen.some(c => c.run != null ? c.run === s.run && c.pair === s.pair : s.run == null && c.seg === s.seg && c.cut === s.cut);
+        const local = localChosen.some(c => c.run != null ? c.run === s.run && c.pair === s.pair : s.run == null && c.seg === s.seg && c.cut === s.cut);
         if (!local && !pairs.has(s.pair)) return;
         const key = s.run == null ? `legacy:${s.cut == null ? 'outline' : s.cut}:${s.seg}` : `${s.pair || ''}:${s.run}`;
         if (!byRun.has(key)) byRun.set(key, []);
@@ -953,13 +969,13 @@
       if (p.visible === false) continue;
       const i = hitSlit(p, w);
       if (i < 0) continue;
-      const indices = new Set(ev.shiftKey && sel.pieceId === p.id
-        ? (sel.kind === 'slits' ? sel.slits : sel.kind === 'slit' ? [sel.idx] : []) : []);
+      const groups = ev.shiftKey ? selectedStitchHoles() : [];
+      let group = groups.find(g => g.piece === p);
+      if (!group) { group = {piece:p, indices:[]}; groups.push(group); }
+      const indices = new Set(group.indices);
       if (indices.has(i)) indices.delete(i); else indices.add(i);
-      selectPiece(p.id);
-      sel.kind = 'slits'; sel.slits = [...indices];
-      if (!sel.slits.length) sel.kind = null;
-      $('sp-slit-inset').value = 0;
+      group.indices = [...indices];
+      selectStitchHoles(groups);
       renderAll();
       return;
     }
@@ -976,7 +992,7 @@
         renderAll(); return;
       }
     }
-    drag = {type:'marquee', mode:'stitch-edit', a:w, b:w, prevPieceId:sel.pieceId, shift:ev.shiftKey};
+    drag = {type:'marquee', mode:'stitch-edit', a:w, b:w, shift:ev.shiftKey};
   }
 
   // ---------- tools ----------
@@ -1570,20 +1586,23 @@
           return;
         }
         if (drag.mode === 'stitch-edit') {
-          const p = pieceById(drag.prevPieceId);
-          if (p) {
-            const indices = new Set(drag.shift && sel.kind === 'slits' ? sel.slits : []);
+          const groups = drag.shift ? selectedStitchHoles() : [];
+          for (const p of doc.pieces) {
+            if (p.visible === false) continue;
+            const previous = groups.find(g => g.piece === p);
+            const indices = new Set(previous ? previous.indices : []);
             (p.stitchSlits || []).forEach((sl, i) => {
               const ln = slitLineFor(p, sl);
               if (!ln) return;
               const c = Geo.lerp(ln.a, ln.b, 0.5);
               if (c.x >= x0 && c.x <= x1 && c.y >= y0 && c.y <= y1) indices.add(i);
             });
-            selectPiece(p.id); sel.slits = [...indices]; sel.kind = indices.size ? 'slits' : null;
-            $('sp-slit-inset').value = 0;
+            if (previous) previous.indices = [...indices];
+            else if (indices.size) groups.push({piece:p, indices:[...indices]});
           }
+          selectStitchHoles(groups);
           drag = null; renderAll();
-          $('status-hint').textContent = p ? `${sel.slits.length} stitch holes selected` : 'Click a hole or stitched edge first, then drag a box to select its holes.';
+          $('status-hint').textContent = `${groups.reduce((n,g)=>n+g.indices.length,0)} stitch holes selected across ${groups.length} shape(s)`;
           return;
         }
         if (drag.mode === 'stitch-add') {
@@ -2029,6 +2048,7 @@
       if (nti >= 0) { sel.kind = 'notch'; sel.idx = nti; renderAll(true); renderSidebar(); return; }
       const sli = hitSlit(piece, w);
       if (sli >= 0) {
+        delete sel.slitGroups;
         if (ev.shiftKey || sel.kind === 'slits') {
           // gather several stitch holes; click toggles once a set exists
           const set = new Set(sel.kind === 'slits' ? sel.slits
@@ -3346,7 +3366,7 @@
   function updateStitchUi() {
     $('st-match-notice').hidden = true;
     if ($('st-workflow').value === 'edit') {
-      $('status-hint').textContent = 'Edit stitches: click a hole or stitched edge, then box-select holes on that piece · Shift adds/removes · Del removes selected holes';
+      $('status-hint').textContent = 'Edit stitches: click a hole or stitched edge, box-select holes across shapes · Shift adds/removes · Del removes selected holes';
       return;
     }
     const matched = $('st-mode').value === 'matched';
@@ -3731,7 +3751,12 @@
     if ((ev.ctrlKey || ev.metaKey) && k === 'c') { if (copySelection()) ev.preventDefault(); return; }
     if ((ev.ctrlKey || ev.metaKey) && k === 'v') { pasteClipboard(); ev.preventDefault(); return; }
     if ((ev.ctrlKey || ev.metaKey) && k === 'x') {
-      if (copySelection()) { sel.kind = null; sel.idx = -1; sel.nodes = []; deleteSelection(); }
+      if (copySelection()) {
+        const ids = selectionIds();
+        clearSel(); sel.pieceId = ids[0];
+        if (ids.length > 1) multiSel = ids;
+        deleteSelection();
+      }
       ev.preventDefault();
       return;
     }
@@ -3845,8 +3870,9 @@
     } else if (sel.kind === 'cut' && piece.cutouts && piece.cutouts[sel.idx]) {
       for (const nd of piece.cutouts[sel.idx].nodes) { nd.x += dx; nd.y += dy; }
     } else if (sel.kind === 'notch' || sel.kind === 'slit' || sel.kind === 'slits') {
-      const indices = sel.kind === 'slits' ? (sel.slits || []) : [sel.idx];
-      for (const index of indices) {
+      const groups = sel.kind === 'notch' ? [{piece, indices:[sel.idx]}] : selectedStitchHoles();
+      for (const group of groups) for (const index of group.indices) {
+        const piece = group.piece;
         const arr = sel.kind === 'notch' ? piece.notches : piece.stitchSlits;
         const it = arr && arr[index];
         const ctx = it && (sel.kind !== 'notch'
@@ -3954,6 +3980,8 @@
   const CLIP_KEY = 'patternStudioClipboard.v1';
 
   function selectionIds() {
+    const holes = selectedStitchHoles();
+    if (holes.length) return holes.map(g => g.piece.id);
     return multiSel.length ? multiSel.slice() : sel.pieceId ? [sel.pieceId] : [];
   }
 
@@ -4040,6 +4068,16 @@
       }
     }
     beginChange();
+    if (['slit','slits'].includes(sel.kind)) {
+      const groups = selectedStitchHoles();
+      for (const group of groups) {
+        const drop = new Set(group.indices);
+        group.piece.stitchSlits = group.piece.stitchSlits.filter((s,i)=>!drop.has(i));
+      }
+      clearSel(); endChange(); renderAll();
+      $('status-hint').textContent = `Deleted ${groups.reduce((n,g)=>n+g.indices.length,0)} stitch holes`;
+      return;
+    }
     if (sel.kind === 'node' && piece.path.nodes[sel.idx]) {
       if (piece.path.nodes.length <= (piece.path.closed ? 3 : 2)) {
         doc.pieces = doc.pieces.filter((p) => p.id !== piece.id);
@@ -4061,13 +4099,6 @@
     } else if (sel.kind === 'notch') {
       piece.notches.splice(sel.idx, 1);
       sel.kind = null;
-    } else if (sel.kind === 'slit') {
-      piece.stitchSlits.splice(sel.idx, 1);
-      sel.kind = null;
-    } else if (sel.kind === 'slits' && sel.slits && sel.slits.length) {
-      for (const i of sel.slits.slice().sort((a, b) => b - a)) piece.stitchSlits.splice(i, 1);
-      sel.kind = null;
-      sel.slits = [];
     } else if (sel.kind === 'hole') {
       piece.holes.splice(sel.idx, 1);
       sel.kind = null;
@@ -4836,8 +4867,7 @@
     if (!p) return;
     try {
       const values = stitchEditSettings();
-      const indices = sel.kind === 'slit' ? [sel.idx] : sel.kind === 'slits' ? sel.slits : [];
-      const groups = wholeRun ? selectedStitchRuns(true) : [{piece:p, indices}];
+      const groups = wholeRun ? selectedStitchRuns(true) : selectedStitchHoles();
       const changes = [];
       for (const group of groups) for (const i of group.indices) {
         const s = group.piece.stitchSlits[i];
@@ -4914,14 +4944,15 @@
       const drop = new Set(groups.flatMap(g => g.indices.map(i => g.piece.stitchSlits[i])));
       for (const piece of new Set(groups.map(g => g.piece))) piece.stitchSlits = piece.stitchSlits.filter(s => !drop.has(s));
       const newSelection = [];
-      const selectedPiece = selPiece();
       for (const plan of plans) {
         const from = plan.piece.stitchSlits.length;
         stitchPlaceRun(plan.chain, stitchFractions(plan.count, plan.chain.loop), settings.len, {...settings, pair:plan.pair, pairSide:plan.pairSide});
-        if (plan.piece === selectedPiece) for (let i = from; i < plan.piece.stitchSlits.length; i++) newSelection.push(i);
+        let group = newSelection.find(g=>g.piece===plan.piece);
+        if (!group) { group={piece:plan.piece,indices:[]}; newSelection.push(group); }
+        for (let i = from; i < plan.piece.stitchSlits.length; i++) group.indices.push(i);
       }
       endChange();
-      sel.kind = 'slits'; sel.slits = newSelection; sel.idx = -1;
+      selectStitchHoles(newSelection);
       $('sp-slit-inset').value = 0;
       $('st-spacing').value = spacing;
       $('st-off').value = inset;
@@ -4956,6 +4987,7 @@
   });
 
   $('sp-del-run').addEventListener('click', () => {
+    if (['slit','slits'].includes(sel.kind)) { deleteSelection(); return; }
     const p = selPiece();
     if (!p) return;
     let keep = null;
