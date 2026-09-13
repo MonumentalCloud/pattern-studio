@@ -1321,4 +1321,42 @@ t('regular polygons preserve requested count and every side length', () => {
   for(const [n,s] of [[2,3],[101,3],[3.5,3],[6,0],[6,NaN]]) assert.throws(()=>Geo.regularPolygon(n,s));
 });
 
+t('keep-curve deletion preserves a subdivided cubic, dimensions and surviving anchors', () => {
+  for(const fraction of [.5]) {
+    const a=N(0,0,null,{x:4,y:2}),b=N(10,0,{x:-3,y:5}),s=Geo.splitSeg(a,b,fraction);
+    const p={path:{nodes:[s.a2,s.mid,s.b2,N(10,10),N(0,10)],closed:true},notches:[{seg:1,t:0}],stitchSlits:[{seg:0,t:.4,off:.3,len:.2,ang:-45,sourceSegments:[0,1,2]},{seg:1,t:0,len:.2}],foldSeg:3};
+    const snapshot=JSON.stringify(p),r=Geo.deletePointKeepCurve(p,1);
+    assert(r.exact);assert.equal(JSON.stringify(p),snapshot);assert.equal(r.piece.path.nodes.length,4);assert.equal(r.removed,2);assert.equal(r.piece.foldSeg,2);
+    assert.deepEqual(r.piece.stitchSlits[0].sourceSegments,[0,1]);
+    const old=Geo.slitLine(p.path.nodes[0],p.path.nodes[1],p.stitchSlits[0],1),now=Geo.slitLine(r.piece.path.nodes[0],r.piece.path.nodes[1],r.piece.stitchSlits[0],1);
+    assert(Geo.dist(old.a,now.a)<1e-9);assert(Geo.dist(old.b,now.b)<1e-9);
+    assert(Math.abs(r.oldLength-r.newLength)<1e-8);
+    for(let i=0;i<=100;i++)assert(Geo.dist(Geo.segPoint(a,b,i/100),Geo.segPoint(r.piece.path.nodes[0],r.piece.path.nodes[1],i/100))<1e-9);
+  }
+});
+t('keep-curve deletion handles wraparound and refuses measurement loss', () => {
+  const p={path:{nodes:[N(5,0),N(10,0),N(10,10),N(0,10),N(0,0)],closed:true},notches:[],stitchSlits:[{seg:0,t:.5,len:.2},{seg:4,t:.5,len:.2}]};
+  const r=Geo.deletePointKeepCurve(p,0);assert(r.exact);assert.equal(r.piece.stitchSlits[0].seg,3);assert.equal(r.piece.stitchSlits[1].seg,3);
+  assert.equal(r.piece.stitchSlits[0].t,.75);assert.equal(r.piece.stitchSlits[1].t,.25);
+  assert.throws(()=>Geo.deletePointKeepCurve({...p,foldSeg:4},0),/fold/);
+  assert.throws(()=>Geo.deletePointKeepCurve(p,1));
+  assert.throws(()=>Geo.deletePointKeepCurve({path:{nodes:[N(0,0),N(4,3),N(10,0)],closed:false}},0),/endpoints/);
+  assert.throws(()=>Geo.deletePointKeepCurve({path:{nodes:[N(0,0),N(4,3),N(10,0)],closed:true}},1),/valid shape/);
+});
+t('small approximate join preserves length and dimensions, but refuses moving surviving marks', () => {
+  const s=Geo.splitSeg(N(0,0,null,{x:3,y:3}),N(10,0,{x:-3,y:3}),.5);
+  s.mid.y+=.0001;
+  const p={path:{nodes:[s.a2,s.mid,s.b2,N(10,10),N(0,10)],closed:true}};
+  const r=Geo.deletePointKeepCurve(p,1);assert(!r.exact);assert(Math.abs(r.newLength-r.oldLength)<1e-5);assert(r.deviation<.01);assert.deepEqual(r.before,r.after);
+  assert.throws(()=>Geo.deletePointKeepCurve({...p,notches:[{seg:0,t:.5}]},1),/surviving/);
+  s.mid.y+=.004;
+  const open={path:{nodes:[s.a2,s.mid,s.b2],closed:false}};
+  assert.throws(()=>Geo.deletePointKeepCurve(open,1),/width, height|length estimate/);
+});
+
+t('keep-curve refuses exact joins that alter the existing app length estimate', () => {
+  const a=N(0,0,null,{x:4,y:2}),b=N(10,0,{x:-3,y:5}),s=Geo.splitSeg(a,b,.83);
+  assert.throws(()=>Geo.deletePointKeepCurve({path:{nodes:[s.a2,s.mid,s.b2,N(10,10),N(0,10)],closed:true}},1),/length estimate/);
+});
+
 console.log(`\n${passed} tests passed${process.exitCode ? ' (with failures)' : ''}`);

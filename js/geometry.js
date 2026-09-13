@@ -487,6 +487,123 @@
     return { a2, mid, b2 };
   }
 
+  // Preview-only measurement: integrate speed, including collinear backtracking.
+  function preciseSegLength(a, b) {
+    if (segIsLine(a, b)) return dist(a, b);
+    const {c1, c2} = segCtrl(a, b);
+    const speed = t => {
+      const u = 1 - t;
+      return Math.hypot(3*u*u*(c1.x-a.x)+6*u*t*(c2.x-c1.x)+3*t*t*(b.x-c2.x),
+        3*u*u*(c1.y-a.y)+6*u*t*(c2.y-c1.y)+3*t*t*(b.y-c2.y));
+    };
+    function integrate(l, r, fl, fm, fr, whole, eps, depth) {
+      const m=(l+r)/2, f1=speed((l+m)/2), f2=speed((m+r)/2);
+      const left=(m-l)*(fl+4*f1+fm)/6, right=(r-m)*(fm+4*f2+fr)/6;
+      if (!depth || Math.abs(left+right-whole)<15*eps) return left+right+(left+right-whole)/15;
+      return integrate(l,m,fl,f1,fm,left,eps/2,depth-1)+integrate(m,r,fm,f2,fr,right,eps/2,depth-1);
+    }
+    return integrate(0,1,speed(0),speed(.5),speed(1),(speed(0)+4*speed(.5)+speed(1))/6,1e-9,20);
+  }
+
+  function curveBounds(nodes, closed) {
+    const pts=nodes.map(p=>({x:p.x,y:p.y}));
+    for(let i=0;i<(closed?nodes.length:nodes.length-1);i++) {
+      const a=nodes[i], b=nodes[(i+1)%nodes.length], {c1,c2}=segCtrl(a,b);
+      for(const axis of ['x','y']) {
+        const A=-a[axis]+3*c1[axis]-3*c2[axis]+b[axis], B=2*(a[axis]-2*c1[axis]+c2[axis]), C=c1[axis]-a[axis];
+        const d=B*B-4*A*C;
+        const roots=Math.abs(A)<1e-12 ? (Math.abs(B)<1e-12?[]:[-C/B]) : d<0?[]:[(-B+Math.sqrt(d))/(2*A),(-B-Math.sqrt(d))/(2*A)];
+        for(const t of roots) if(t>0&&t<1) pts.push(segPoint(a,b,t));
+      }
+    }
+    return bbox(pts);
+  }
+
+  // A conservative proposal, never a mutation. Refuse when one cubic cannot
+  // retain the protected measurements; ordinary point deletion stays separate.
+  function deletePointKeepCurve(piece, idx) {
+    const nodes=piece.path.nodes, n=nodes.length, closed=piece.path.closed;
+    if(!Number.isInteger(idx)||idx<0||idx>=n) throw new Error('Select one point first.');
+    if(n<=(closed?3:2)||(!closed&&(idx===0||idx===n-1))) throw new Error('This point cannot be removed while keeping the endpoints and a valid shape.');
+    const prev=(idx+n-1)%n, next=(idx+1)%n, a=nodes[prev], m=nodes[idx], b=nodes[next];
+    if(piece.foldSeg===prev||piece.foldSeg===idx) throw new Error('This point is an endpoint of the fold edge. Keep it to preserve the fold measurements.');
+    const oldLength=preciseSegLength(a,m)+preciseSegLength(m,b);
+    if(!(oldLength>1e-8)||!Number.isFinite(oldLength)) throw new Error('The adjoining edges are too short to merge.');
+    let split=preciseSegLength(a,m)/oldLength, exact=false;
+    let aa={...a}, bb={...b};
+    if(segIsLine(a,m)&&segIsLine(m,b)&&Math.abs(dist(a,b)-oldLength)<1e-9) {
+      aa.hout=null; bb.hin=null; exact=true;
+    } else if(m.hin&&m.hout&&len(m.hin)+len(m.hout)>1e-10) {
+      const t=len(m.hin)/(len(m.hin)+len(m.hout));
+      if(t>1e-8&&t<1-1e-8) {
+        aa.hout=scale(a.hout||{x:0,y:0},1/t); bb.hin=scale(b.hin||{x:0,y:0},1/(1-t));
+        const s=splitSeg(aa,bb,t);
+        const same=(x,y)=>dist(x||{x:0,y:0},y||{x:0,y:0})<1e-9;
+        exact=same(s.mid,m)&&same(s.a2.hout,a.hout)&&same(s.b2.hin,b.hin)&&same(s.mid.hin,m.hin)&&same(s.mid.hout,m.hout);
+        split=t;
+      }
+    }
+    const original=t=>t<=0?a:t>=1?b:t<=split?segPoint(a,m,t/split):segPoint(m,b,(t-split)/(1-split));
+    if(!exact) {
+      if(!(split>1e-8&&split<1-1e-8)) throw new Error('The adjoining edges are too short to merge.');
+      const da=segTangent(a,m,0), db=scale(segTangent(m,b,1),-1);
+      let xx=0,xy=0,yy=0,xz=0,yz=0;
+      for(let i=1;i<64;i++) {
+        const t=i/64,u=1-t, x=scale(da,3*u*u*t), y=scale(db,3*u*t*t);
+        const base=lerp(a,b,3*u*t*t+t*t*t), z=sub(original(t),base);
+        xx+=dot(x,x);xy+=dot(x,y);yy+=dot(y,y);xz+=dot(x,z);yz+=dot(y,z);
+      }
+      const det=xx*yy-xy*xy;
+      const h1=det>1e-12?Math.max(1e-6,(xz*yy-yz*xy)/det):oldLength/3;
+      const h2=det>1e-12?Math.max(1e-6,(yz*xx-xz*xy)/det):oldLength/3;
+      const set=k=>{aa.hout=scale(da,h1*k);bb.hin=scale(db,h2*k);};
+      let lo=0,hi=1;set(hi);
+      while(preciseSegLength(aa,bb)<oldLength&&hi<1024){hi*=2;set(hi);}
+      for(let i=0;i<60;i++){const k=(lo+hi)/2;set(k);if(preciseSegLength(aa,bb)<oldLength)lo=k;else hi=k;}
+      set((lo+hi)/2);
+    }
+    const newLength=preciseSegLength(aa,bb);
+    if(!Number.isFinite(newLength)||Math.abs(newLength-oldLength)>1e-5) throw new Error('Cannot retain the seam length when removing this point.');
+    const oldReadout=segLength(a,m)+segLength(m,b), newReadout=segLength(aa,bb);
+    if(Math.abs(oldReadout-newReadout)>1e-5) throw new Error('The app’s length estimate would change after this merge. Keep the point to preserve the measured value.');
+    // ponytail: bounded sampled deviation, not a general curve constraint solver.
+    let deviation=0;
+    for(let i=0;i<=512;i++) deviation=Math.max(deviation,dist(original(i/512),segPoint(aa,bb,i/512)));
+    if(!exact&&deviation>0.01) throw new Error('Keeping the length would change the curve by more than 0.1 mm. Keep this point.');
+    const result=JSON.parse(JSON.stringify(piece));
+    result.path.nodes[prev]=aa;result.path.nodes[next]=bb;result.path.nodes.splice(idx,1);
+    const before=curveBounds(nodes,closed), after=curveBounds(result.path.nodes,closed);
+    if(Object.keys(before).some(k=>Math.abs(before[k]-after[k])>1e-5) || Math.abs((before.maxX-before.minX)-(after.maxX-after.minX))>1e-5 || Math.abs((before.maxY-before.minY)-(after.maxY-after.minY))>1e-5) throw new Error('Removing this point would change the overall width, height, or position.');
+    const mapped=s=>s===idx?(prev>idx?prev-1:prev):s>idx?s-1:s;
+    const attached=q=>(q.seg===prev&&q.t>1-1e-6)||(q.seg===idx&&q.t<1e-6);
+    let removed=0;
+    for(const key of ['notches','stitchSlits']) {
+      result[key]=(result[key]||[]).filter(q=>{
+        if(q.cut!=null)return true;
+        if(attached(q)){removed++;return false;}return true;
+      }).map(q=>{
+        if(q.cut!=null)return q;
+        const affected=q.seg===prev||q.seg===idx;
+        if(affected&&!exact) throw new Error('This approximation would move a surviving hole or notch. Keep the point to preserve those marks.');
+        const t=affected?(q.seg===prev?q.t*split:split+q.t*(1-split)):q.t;
+        const out={...q,seg:mapped(q.seg),t};
+        if(q.sourceSegments) out.sourceSegments=[...new Set(q.sourceSegments.map(mapped))];
+        return out;
+      });
+    }
+    // V notches walk neighboring edges; verify their actual cuts survive the
+    // changed segment parameterization, including marks outside the joined pair.
+    const sign=outwardSign(pathPolyline(nodes,closed));
+    const surviving=(piece.notches||[]).filter(q=>!attached(q));
+    for(let i=0;i<surviving.length;i++) {
+      const old=notchLinesPath(nodes,closed,surviving[i],sign,piece.notchLength||0.4,piece.notchStyle||'slit');
+      const now=notchLinesPath(result.path.nodes,closed,result.notches[i],sign,piece.notchLength||0.4,piece.notchStyle||'slit');
+      if(old.some((line,j)=>dist(line.a,now[j].a)>1e-5||dist(line.b,now[j].b)>1e-5)) throw new Error('Removing this point would change a surviving notch. Keep this point.');
+    }
+    if(result.foldSeg!=null)result.foldSeg=mapped(result.foldSeg);
+    return {piece:result,exact,oldLength,newLength,before,after,deviation,removed};
+  }
+
   // Rescale segment (a -> b) so its arc length becomes `target` (cm).
   // mode: which endpoint moves — 'start', 'end', or 'both' (split evenly).
   // Uniform scaling about the fixed point, so the curve keeps its shape and
@@ -927,7 +1044,7 @@
     segCtrl, segIsLine, segPoint, segTangent, segFlatten, segLength, segMidpoint, pathMidpoints,
     cubicPoint, cubicTangent, flattenCubic,
     pathPolyline, pathLength, polyArea, bbox, centroid, polyCentroid, labelBox, dedupe,
-    outwardSign, offsetClosed, nearestOnPath, pointInPolygon, splitSeg, setSegLength,
+    outwardSign, offsetClosed, nearestOnPath, pointInPolygon, splitSeg, setSegLength, deletePointKeepCurve,
     reverseNodes, weldClosedPaths, reflectPoint, reflectNodes, segArcParams, slitLine, slitContour, slitFitsPiece, notchLines, notchLinesPath,
     pathArcParams, simplifyPoly, offsetOpen, pathIntersections, sewSlits, clipLoops,
   };

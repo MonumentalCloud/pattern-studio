@@ -145,3 +145,5 @@ outward-normal orientation, curve splitting, and DXF structure/scale/notch geome
 - [ ] Tiled A4/Letter PDF export for home printers
 - [ ] Internal style lines / darts as first-class objects
 - [x] Fold-line pieces (half-drafted, auto-mirrored on export)
+
+Right-click one outline point and choose **Delete and keep curve…** for an Apply/Cancel preview. It protects the joined seam length, the app’s length estimate, endpoints, and overall width/height (numerical tolerance 0.0001 mm). Exact joins are preferred; a small approximation is offered only when those checks pass. Marks anchored at the deleted point disappear; other marks are retained, or the operation is refused if they would move. Some points must remain, including fold endpoints and joins that cannot meet these constraints. Ordinary Delete still reconnects points without preserving curvature. **Shift-click points** to select or deselect them individually; curve-preserving deletion operates on one point at a time.

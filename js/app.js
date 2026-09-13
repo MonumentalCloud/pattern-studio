@@ -2067,6 +2067,14 @@
     if (piece) {
       const ni = hitNode(piece, w);
       if (ni >= 0) {
+        if(ev.shiftKey) {
+          const selected=new Set(sel.kind==='nodes'?sel.nodes:sel.kind==='node'?[sel.idx]:[]);
+          if(selected.has(ni))selected.delete(ni);else selected.add(ni);
+          sel.nodes=[...selected].sort((a,b)=>a-b);sel.handle=null;
+          sel.kind=sel.nodes.length>1?'nodes':sel.nodes.length?'node':null;
+          sel.idx=sel.nodes.length===1?sel.nodes[0]:-1;
+          renderAll(true);renderSidebar();return;
+        }
         if (sel.kind === 'nodes' && sel.nodes.includes(ni)) {
           // drag the whole point selection together
           beginChange();
@@ -2373,6 +2381,46 @@
     closeNodeDialog();
     roundCorner(p, sel.idx, R);
   });
+  let keepCurveProposal=null;
+  $('nd-keep-curve').addEventListener('click', () => {
+    const p=selPiece();
+    if(!p||sel.kind!=='node')return;
+    closeNodeDialog();
+    keepCurveProposal=null;
+    clear($('keep-curve-preview'));
+    try {
+      const plan=Geo.deletePointKeepCurve(p,sel.idx);
+      keepCurveProposal={id:p.id,plan};
+      const bb=plan.before, pad=Math.max(bb.maxX-bb.minX,bb.maxY-bb.minY,.1)*.08;
+      $('keep-curve-preview').setAttribute('viewBox',`${bb.minX-pad} ${bb.minY-pad} ${bb.maxX-bb.minX+2*pad} ${bb.maxY-bb.minY+2*pad}`);
+      el('path',{d:pathD(p.path.nodes,p.path.closed),fill:'none',stroke:'#999','stroke-width':3,'vector-effect':'non-scaling-stroke','stroke-dasharray':'5 4'},$('keep-curve-preview'));
+      el('path',{d:pathD(plan.piece.path.nodes,p.path.closed),fill:'none',stroke:'#168c86','stroke-width':2,'vector-effect':'non-scaling-stroke'},$('keep-curve-preview'));
+      const mm=v=>(v*10).toFixed(4);
+      $('keep-curve-message').textContent=`${plan.exact?'Exact curve retained.':'Small approximation: sampled deviation '+mm(plan.deviation)+' mm.'} ${plan.removed} mark(s) attached to this point will be removed.`;
+      $('keep-curve-measurements').textContent=`Before → after (mm)\nJoined seam: ${mm(plan.oldLength)} → ${mm(plan.newLength)}\nWidth: ${mm(bb.maxX-bb.minX)} → ${mm(plan.after.maxX-plan.after.minX)}\nHeight: ${mm(bb.maxY-bb.minY)} → ${mm(plan.after.maxY-plan.after.minY)}\nEndpoints stay fixed. Measurement tolerance: 0.0001 mm.`;
+    } catch(e) {
+      $('keep-curve-message').textContent=e.message;
+      $('keep-curve-measurements').textContent='No changes made.';
+    }
+    $('keep-curve-apply').disabled=!keepCurveProposal;
+    $('keep-curve-preview').style.display=keepCurveProposal?'':'none';
+    $('keep-curve-legend').hidden=!keepCurveProposal;
+    $('keep-curve-dialog').showModal();
+    $('keep-curve-cancel').focus();
+  });
+  $('keep-curve-apply').addEventListener('click',()=>{
+    if(!keepCurveProposal)return;
+    const i=doc.pieces.findIndex(p=>p.id===keepCurveProposal.id);
+    if(i<0)return;
+    beginChange();
+    doc.pieces[i]=keepCurveProposal.plan.piece;
+    endChange();
+    clearSel();selectPiece(doc.pieces[i].id);
+    $('keep-curve-dialog').close();renderAll();
+  });
+  $('keep-curve-cancel').addEventListener('click',()=>$('keep-curve-dialog').close());
+  $('keep-curve-dialog').addEventListener('close',()=>{keepCurveProposal=null;svg.focus();});
+
   $('nd-del').addEventListener('click', () => {
     closeNodeDialog();
     deleteSelection();
@@ -3794,7 +3842,7 @@
     const t = ev.target;
     if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')) return;
     const k = ev.key.toLowerCase();
-    if ($('shape-size-dialog').open) return;
+    if ($('shape-size-dialog').open || $('keep-curve-dialog').open) return;
     if (k === 'alt' && drag && drag.type === 'shape') { ev.preventDefault(); openShapeSize(); return; }
     if (ev.code === 'Space') { spaceDown = true; svg.classList.add('panning'); ev.preventDefault(); return; }
     if ((ev.ctrlKey || ev.metaKey) && k === 'z') { ev.shiftKey ? redo() : undo(); ev.preventDefault(); return; }
