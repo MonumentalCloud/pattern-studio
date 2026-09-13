@@ -19,7 +19,7 @@ can be saved/opened as `.pattern.json` files. In Chrome/Edge, **Save writes stra
 to a file on your computer** (it asks where once, then `Ctrl+S` saves in place;
 `Shift`-click Save = Save As); other browsers fall back to a download.
 
-## Tool inspectors (build 65)
+## Tool inspectors (build 66)
 
 The active tool's controls stay above the Pieces list. File contains local/cloud
 save and open; Export contains DXF/SVG and engraving options. Round, Notch, Hole,
@@ -45,6 +45,16 @@ when editing a linked pair; side B adjusts its spacing to retain equal counts.
 removed ones. Deleting selected holes or a whole run leaves the partner intact.
 Legacy seams have no pairing information; recreate them to link their sides.
 Copied pieces detach from the original pair.
+
+## Measured shapes
+
+Choose **Shape → Triangle — three sides** or **Regular polygon**, then click the
+starting corner on the canvas. Enter lengths in cm. Triangle A is its horizontal
+base; B and C meet at the third corner. Impossible side combinations show an
+error without creating a piece. Regular polygons use 3–100 equal sides and a side
+length. Both become ordinary editable pattern pieces, with the usual undo,
+rotation, mirroring and exports. General irregular polygons also need angles or
+diagonals to determine a unique shape.
 
 ## Features
 

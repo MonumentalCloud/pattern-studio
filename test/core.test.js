@@ -1270,12 +1270,12 @@ t('exact shape popup pauses drag, preserves anchor/direction and commits once', 
   const source=require('fs').readFileSync(require.resolve('../js/app.js'),'utf8');
   const start=source.indexOf('  function createDraggedShape('),end=source.indexOf("  svg.addEventListener('pointerup'",start);
   const fields={},handlers={};let changes=0,released=false;
-  for (const id of ['sh-kind','shape-width','shape-height','shape-size-dialog','shape-size-form','shape-size-cancel']) {
+  for (const id of ['sh-kind','shape-width','shape-height','shape-size-dialog','shape-size-form','shape-size-cancel','shape-rectangle-fields','shape-triangle-fields','shape-side-a','shape-side-b','shape-side-c','shape-size-title','shape-size-help','shape-size-error','shape-polygon-fields','shape-side-count','shape-side-length']) {
     fields[id]={value:id==='sh-kind'?'rect':'',focus(){},select(){},addEventListener:(name,fn)=>{handlers[id+':'+name]=fn}};
   }
   fields['shape-size-dialog'].showModal=()=>{fields['shape-size-dialog'].open=true};
   fields['shape-size-dialog'].close=()=>{fields['shape-size-dialog'].open=false;handlers['shape-size-dialog:close']()};
-  const context={$:id=>fields[id],drag:{type:'shape',a:{x:20,y:30},b:{x:15,y:26},pointerId:1},doc:{pieces:[]},
+  const context={Geo,$:id=>fields[id],drag:{type:'shape',a:{x:20,y:30},b:{x:15,y:26},pointerId:1},doc:{pieces:[]},
     svg:{hasPointerCapture:()=>true,releasePointerCapture:()=>{released=true},focus(){}},gPreview:{},clear(){},
     beginChange:()=>changes++,endChange(){},newPiece:nodes=>({nodes}),selectPiece(){},renderAll(){}};
   const vm=require('vm');vm.runInNewContext(source.slice(start,end),context);
@@ -1293,7 +1293,32 @@ t('exact shape popup pauses drag, preserves anchor/direction and commits once', 
   const keyStart=source.indexOf("    if (k === 'alt' && drag"),keyEnd=source.indexOf('\n',keyStart);
   vm.runInNewContext("(function(){const k='alt';"+source.slice(keyStart,keyEnd)+'})()',context);
   assert(fields['shape-size-dialog'].open);assert.equal(context.drag,null);assert.equal(fields['shape-width'].value,5);assert.equal(changes,2);
+  handlers['shape-size-cancel:click']();fields['sh-kind'].value='triangle';
+  context.drag={type:'shape',a:{x:10,y:20},b:{x:10,y:20},pointerId:5};context.openShapeSize();
+  fields['shape-side-a'].value=3;fields['shape-side-b'].value=1;fields['shape-side-c'].value=1;
+  handlers['shape-size-form:submit']({preventDefault(){}});assert.equal(changes,2);assert(fields['shape-size-error'].textContent);
+  fields['shape-side-a'].value=5;fields['shape-side-b'].value=4;fields['shape-side-c'].value=3;
+  handlers['shape-size-form:submit']({preventDefault(){}});assert.equal(changes,3);
+  assert.equal(context.doc.pieces[2].nodes.length,3);assert.equal(context.doc.pieces[2].nodes[0].x,10);
 
+
+});
+
+t('three side lengths construct unique triangle dimensions and reject impossible sides', () => {
+  for (const sides of [[5,4,3],[4,8,5],[7.25,6.3,5.5]]) {
+    const nodes=Geo.triangleFromSides(...sides);
+    for(let i=0;i<3;i++) assert(Math.abs(Geo.dist(nodes[i],nodes[(i+1)%3])-sides[i])<1e-9);
+    assert(Geo.polyArea(nodes)>0);
+  }
+  for(const sides of [[1,2,3],[1,2,4],[0,1,1],[-1,2,2],[NaN,2,2],[Infinity,2,2]]) assert.throws(()=>Geo.triangleFromSides(...sides));
+});
+
+t('regular polygons preserve requested count and every side length', () => {
+  for(const n of [3,4,6,12,100]) {
+    const nodes=Geo.regularPolygon(n,2.35);assert.equal(nodes.length,n);
+    for(let i=0;i<n;i++) assert(Math.abs(Geo.dist(nodes[i],nodes[(i+1)%n])-2.35)<1e-9);
+  }
+  for(const [n,s] of [[2,3],[101,3],[3.5,3],[6,0],[6,NaN]]) assert.throws(()=>Geo.regularPolygon(n,s));
 });
 
 console.log(`\n${passed} tests passed${process.exitCode ? ' (with failures)' : ''}`);

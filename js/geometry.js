@@ -901,8 +901,29 @@
     return { outline: built[0].nodes, cutouts: built.slice(1).map((l) => l.nodes), segMap };
   }
 
+  function regularPolygon(count, side) {
+    if (!Number.isInteger(count) || count<3 || count>100 || !Number.isFinite(side) || side<=0) throw new Error('Use 3–100 sides and a positive side length.');
+    const nodes=[{x:0,y:0,hin:null,hout:null}];
+    for(let i=1;i<count;i++) {
+      const prev=nodes[i-1], angle=(i-1)*2*Math.PI/count;
+      nodes.push({x:prev.x+side*Math.cos(angle),y:prev.y+side*Math.sin(angle),hin:null,hout:null});
+    }
+    if (!nodes.every(n=>Number.isFinite(n.x)&&Number.isFinite(n.y))) throw new Error('The polygon dimensions are too large.');
+    return nodes;
+  }
+
+  // Base A runs from the origin to (A, 0); B meets its far end, C its start.
+  function triangleFromSides(a, b, c) {
+    if (![a,b,c].every(v=>Number.isFinite(v)&&v>0)) throw new Error('Enter three positive side lengths.');
+    const m=Math.max(a,b,c), A=a/m, B=b/m, C=c/m;
+    if (A+B<=C || A+C<=B || B+C<=A) throw new Error('The two shorter sides must add up to more than the longest side.');
+    const x=(A*A+C*C-B*B)/(2*A), y=Math.sqrt(Math.max(0,C*C-x*x));
+    if (!(y>0) || !Number.isFinite(x*m) || !Number.isFinite(y*m)) throw new Error('These lengths are too close to a flat triangle.');
+    return [{x:0,y:0,hin:null,hout:null},{x:a,y:0,hin:null,hout:null},{x:x*m,y:y*m,hin:null,hout:null}];
+  }
+
   return {
-    sub, add, scale, dot, len, dist, norm, lerp,
+    sub, add, scale, dot, len, dist, norm, lerp, triangleFromSides, regularPolygon,
     segCtrl, segIsLine, segPoint, segTangent, segFlatten, segLength, segMidpoint, pathMidpoints,
     cubicPoint, cubicTangent, flattenCubic,
     pathPolyline, pathLength, polyArea, bbox, centroid, polyCentroid, labelBox, dedupe,

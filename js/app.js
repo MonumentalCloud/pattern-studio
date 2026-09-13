@@ -1003,7 +1003,7 @@
   const HINTS = {
     select: 'Click to select, then drag to move · Box selection chooses pieces, points, edges or stitch holes explicitly · Shift adds · Del deletes the selected objects',
     pen: 'Click = corner, drag = curve · right-click = type exact length/angle · click the first point to close · Esc finishes open',
-    shape: 'Drag corner to corner · press Option / Alt while dragging for exact width and height',
+    shape: 'Rectangle / ellipse: drag, Option / Alt for exact size · Triangle / polygon: click the starting corner to enter measurements',
     notch: 'Click near a point on an outline — the notch snaps to it · right-click an edge to divide it where you need a point',
     hole: 'Click inside a piece to add a circular cutout',
     grain: 'Drag inside a piece to set the grainline · click (no drag) removes it',
@@ -1144,7 +1144,7 @@
     svg.setPointerCapture(ev.pointerId);
 
     if (tool === 'pen') return penDown(w);
-    if (tool === 'shape') { drag = { type: 'shape', a: snap(w), b: snap(w), pointerId:ev.pointerId }; if (ev.altKey) { ev.preventDefault(); openShapeSize(); } return; }
+    if (tool === 'shape') { drag = { type: 'shape', a: snap(w), b: snap(w), pointerId:ev.pointerId }; if (ev.altKey || ['triangle','polygon'].includes($('sh-kind').value)) { ev.preventDefault(); openShapeSize(); } return; }
     if (tool === 'select') return selectDown(ev, w);
     if (tool === 'notch') return notchDown(w);
     if (tool === 'hole') return holeDown(w);
@@ -1512,10 +1512,11 @@
 
   // Both free dragging and exact dimensions commit through the same geometry path.
   function createDraggedShape(shape) {
-    const x0 = Math.min(shape.a.x, shape.b.x), x1 = Math.max(shape.a.x, shape.b.x);
-    const y0 = Math.min(shape.a.y, shape.b.y), y1 = Math.max(shape.a.y, shape.b.y);
-    if (x1 - x0 >= 0.3 - 1e-9 && y1 - y0 >= 0.3 - 1e-9) {
-      let nodes;
+    let nodes = shape.nodes;
+    if (!nodes) {
+      const x0 = Math.min(shape.a.x, shape.b.x), x1 = Math.max(shape.a.x, shape.b.x);
+      const y0 = Math.min(shape.a.y, shape.b.y), y1 = Math.max(shape.a.y, shape.b.y);
+      if (x1 - x0 < 0.3 - 1e-9 || y1 - y0 < 0.3 - 1e-9) return;
       if (shape.kind === 'ellipse') {
         const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
         const rx = (x1 - x0) / 2, ry = (y1 - y0) / 2;
@@ -1534,13 +1535,13 @@
           { x: x0, y: y1, hin: null, hout: null },
         ];
       }
-      beginChange();
-      const piece = newPiece(nodes, true);
-      doc.pieces.push(piece);
-      endChange();
-      selectPiece(piece.id);
-      renderAll();
     }
+    beginChange();
+    const piece = newPiece(nodes, true);
+    doc.pieces.push(piece);
+    endChange();
+    selectPiece(piece.id);
+    renderAll();
   }
   let exactShape = null;
   function openShapeSize() {
@@ -1550,15 +1551,35 @@
     if (svg.hasPointerCapture(exactShape.pointerId)) svg.releasePointerCapture(exactShape.pointerId);
     $('shape-width').value = Number(Math.max(0.3, Math.abs(exactShape.b.x-exactShape.a.x)).toFixed(4));
     $('shape-height').value = Number(Math.max(0.3, Math.abs(exactShape.b.y-exactShape.a.y)).toFixed(4));
+    const triangle=exactShape.kind==='triangle', polygon=exactShape.kind==='polygon';
+    $('shape-rectangle-fields').hidden=triangle||polygon;
+    $('shape-triangle-fields').hidden=!triangle;
+    for (const id of ['shape-width','shape-height']) $(id).disabled=triangle||polygon;
+    for (const id of ['shape-side-a','shape-side-b','shape-side-c']) $(id).disabled=!triangle;
+    $('shape-polygon-fields').hidden=!polygon;
+    for (const id of ['shape-side-count','shape-side-length']) $(id).disabled=!polygon;
+    $('shape-size-title').textContent=polygon?'Regular polygon':triangle?'Triangle from three sides':'Exact shape size';
+    $('shape-size-help').textContent=polygon?'All sides and angles are equal. The first side starts here and runs horizontally to the right.':triangle?'Side A is the horizontal base. Side B joins its far end to the third corner; side C returns to the start.':'Keeps your starting corner and drag direction. Ellipse values are its full width and height.';
+    $('shape-size-error').textContent='';
     $('shape-size-dialog').showModal();
-    $('shape-width').focus(); $('shape-width').select();
+    const focus=$(polygon?'shape-side-count':triangle?'shape-side-a':'shape-width'); focus.focus(); focus.select();
   }
   $('shape-size-form').addEventListener('submit', ev => {
     ev.preventDefault();
-    const width=Number($('shape-width').value), height=Number($('shape-height').value);
-    if (!exactShape || ![width,height].every(v=>Number.isFinite(v)&&v>=0.3)) return;
+    if (!exactShape) return;
     const {a,b,kind}=exactShape;
-    createDraggedShape({a, b:{x:a.x+(b.x<a.x?-width:width), y:a.y+(b.y<a.y?-height:height)}, kind});
+    try {
+      if (kind==='triangle' || kind==='polygon') {
+        const nodes=kind==='triangle'
+          ? Geo.triangleFromSides(...['shape-side-a','shape-side-b','shape-side-c'].map(id=>Number($(id).value)))
+          : Geo.regularPolygon(Number($('shape-side-count').value),Number($('shape-side-length').value));
+        createDraggedShape({nodes:nodes.map(n=>({...n,x:a.x+n.x,y:a.y+n.y}))});
+      } else {
+        const width=Number($('shape-width').value), height=Number($('shape-height').value);
+        if (![width,height].every(v=>Number.isFinite(v)&&v>=0.3)) return;
+        createDraggedShape({a, b:{x:a.x+(b.x<a.x?-width:width), y:a.y+(b.y<a.y?-height:height)}, kind});
+      }
+    } catch (error) { $('shape-size-error').textContent=error.message; return; }
     $('shape-size-dialog').close();
   });
   $('shape-size-cancel').addEventListener('click', () => $('shape-size-dialog').close());

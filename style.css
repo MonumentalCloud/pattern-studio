@@ -279,3 +279,6 @@ button:focus-visible, summary:focus-visible, input:focus-visible, select:focus-v
 #shape-size-dialog { margin: auto; width: 320px; max-width: calc(100vw - 48px); background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 18px; }
 #shape-size-dialog::backdrop { background: #0008; }
 #shape-size-dialog .hint { font-size: 12px; line-height: 1.5; }
+
+#shape-size-error { color: var(--danger); font-size: 12px; margin: 8px 0; }
+#shape-size-error:empty { display: none; }
