@@ -1003,7 +1003,7 @@
   const HINTS = {
     select: 'Click to select, then drag to move · Box selection chooses pieces, points, edges or stitch holes explicitly · Shift adds · Del deletes the selected objects',
     pen: 'Click = corner, drag = curve · right-click = type exact length/angle · click the first point to close · Esc finishes open',
-    shape: 'Drag corner to corner — the panel picks rectangle or ellipse · snaps to grid and existing points',
+    shape: 'Drag corner to corner · press Option / Alt while dragging for exact width and height',
     notch: 'Click near a point on an outline — the notch snaps to it · right-click an edge to divide it where you need a point',
     hole: 'Click inside a piece to add a circular cutout',
     grain: 'Drag inside a piece to set the grainline · click (no drag) removes it',
@@ -1144,7 +1144,7 @@
     svg.setPointerCapture(ev.pointerId);
 
     if (tool === 'pen') return penDown(w);
-    if (tool === 'shape') { drag = { type: 'shape', a: snap(w), b: snap(w) }; return; }
+    if (tool === 'shape') { drag = { type: 'shape', a: snap(w), b: snap(w), pointerId:ev.pointerId }; if (ev.altKey) { ev.preventDefault(); openShapeSize(); } return; }
     if (tool === 'select') return selectDown(ev, w);
     if (tool === 'notch') return notchDown(w);
     if (tool === 'hole') return holeDown(w);
@@ -1477,6 +1477,7 @@
     }
     if (drag.type === 'shape') {
       drag.b = snap(w);
+      if (ev.altKey) { openShapeSize(); return; }
       clear(gPreview);
       drawAlignGuides(gPreview);
       const x0 = Math.min(drag.a.x, drag.b.x), x1 = Math.max(drag.a.x, drag.b.x);
@@ -1509,6 +1510,62 @@
     }
   });
 
+  // Both free dragging and exact dimensions commit through the same geometry path.
+  function createDraggedShape(shape) {
+    const x0 = Math.min(shape.a.x, shape.b.x), x1 = Math.max(shape.a.x, shape.b.x);
+    const y0 = Math.min(shape.a.y, shape.b.y), y1 = Math.max(shape.a.y, shape.b.y);
+    if (x1 - x0 >= 0.3 - 1e-9 && y1 - y0 >= 0.3 - 1e-9) {
+      let nodes;
+      if (shape.kind === 'ellipse') {
+        const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+        const rx = (x1 - x0) / 2, ry = (y1 - y0) / 2;
+        const k = 0.5522847498;
+        nodes = [
+          { x: cx + rx, y: cy, hin: { x: 0, y: -k * ry }, hout: { x: 0, y: k * ry } },
+          { x: cx, y: cy + ry, hin: { x: k * rx, y: 0 }, hout: { x: -k * rx, y: 0 } },
+          { x: cx - rx, y: cy, hin: { x: 0, y: k * ry }, hout: { x: 0, y: -k * ry } },
+          { x: cx, y: cy - ry, hin: { x: -k * rx, y: 0 }, hout: { x: k * rx, y: 0 } },
+        ];
+      } else {
+        nodes = [
+          { x: x0, y: y0, hin: null, hout: null },
+          { x: x1, y: y0, hin: null, hout: null },
+          { x: x1, y: y1, hin: null, hout: null },
+          { x: x0, y: y1, hin: null, hout: null },
+        ];
+      }
+      beginChange();
+      const piece = newPiece(nodes, true);
+      doc.pieces.push(piece);
+      endChange();
+      selectPiece(piece.id);
+      renderAll();
+    }
+  }
+  let exactShape = null;
+  function openShapeSize() {
+    if (!drag || drag.type !== 'shape') return;
+    exactShape = {...drag, kind:$('sh-kind').value};
+    drag = null;
+    if (svg.hasPointerCapture(exactShape.pointerId)) svg.releasePointerCapture(exactShape.pointerId);
+    $('shape-width').value = Number(Math.max(0.3, Math.abs(exactShape.b.x-exactShape.a.x)).toFixed(4));
+    $('shape-height').value = Number(Math.max(0.3, Math.abs(exactShape.b.y-exactShape.a.y)).toFixed(4));
+    $('shape-size-dialog').showModal();
+    $('shape-width').focus(); $('shape-width').select();
+  }
+  $('shape-size-form').addEventListener('submit', ev => {
+    ev.preventDefault();
+    const width=Number($('shape-width').value), height=Number($('shape-height').value);
+    if (!exactShape || ![width,height].every(v=>Number.isFinite(v)&&v>=0.3)) return;
+    const {a,b,kind}=exactShape;
+    createDraggedShape({a, b:{x:a.x+(b.x<a.x?-width:width), y:a.y+(b.y<a.y?-height:height)}, kind});
+    $('shape-size-dialog').close();
+  });
+  $('shape-size-cancel').addEventListener('click', () => $('shape-size-dialog').close());
+  $('shape-size-dialog').addEventListener('close', () => {
+    exactShape=null; clear(gPreview); svg.focus();
+  });
+
   svg.addEventListener('pointerup', (ev) => {
     if (drag) {
       if (alignGuides.length || snapMarks.length) { alignGuides = []; snapMarks = []; renderAll(true); }
@@ -1516,35 +1573,7 @@
       else if (drag.type === 'measure') clear(gPreview);
       else if (drag.type === 'shape') {
         clear(gPreview);
-        const x0 = Math.min(drag.a.x, drag.b.x), x1 = Math.max(drag.a.x, drag.b.x);
-        const y0 = Math.min(drag.a.y, drag.b.y), y1 = Math.max(drag.a.y, drag.b.y);
-        if (x1 - x0 >= 0.3 && y1 - y0 >= 0.3) {
-          let nodes;
-          if ($('sh-kind').value === 'ellipse') {
-            const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
-            const rx = (x1 - x0) / 2, ry = (y1 - y0) / 2;
-            const k = 0.5522847498;
-            nodes = [
-              { x: cx + rx, y: cy, hin: { x: 0, y: -k * ry }, hout: { x: 0, y: k * ry } },
-              { x: cx, y: cy + ry, hin: { x: k * rx, y: 0 }, hout: { x: -k * rx, y: 0 } },
-              { x: cx - rx, y: cy, hin: { x: 0, y: k * ry }, hout: { x: 0, y: -k * ry } },
-              { x: cx, y: cy - ry, hin: { x: -k * rx, y: 0 }, hout: { x: k * rx, y: 0 } },
-            ];
-          } else {
-            nodes = [
-              { x: x0, y: y0, hin: null, hout: null },
-              { x: x1, y: y0, hin: null, hout: null },
-              { x: x1, y: y1, hin: null, hout: null },
-              { x: x0, y: y1, hin: null, hout: null },
-            ];
-          }
-          beginChange();
-          const piece = newPiece(nodes, true);
-          doc.pieces.push(piece);
-          endChange();
-          selectPiece(piece.id);
-          renderAll();
-        }
+        createDraggedShape({...drag, kind:$('sh-kind').value});
       }
       else if (drag.type === 'grain') {
         const piece = pieceById(drag.pieceId);
@@ -3744,6 +3773,8 @@
     const t = ev.target;
     if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')) return;
     const k = ev.key.toLowerCase();
+    if ($('shape-size-dialog').open) return;
+    if (k === 'alt' && drag && drag.type === 'shape') { ev.preventDefault(); openShapeSize(); return; }
     if (ev.code === 'Space') { spaceDown = true; svg.classList.add('panning'); ev.preventDefault(); return; }
     if ((ev.ctrlKey || ev.metaKey) && k === 'z') { ev.shiftKey ? redo() : undo(); ev.preventDefault(); return; }
     if ((ev.ctrlKey || ev.metaKey) && k === 'y') { redo(); ev.preventDefault(); return; }

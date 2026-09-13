@@ -1266,4 +1266,34 @@ t('Cut copies and removes all shapes containing selected holes in one undo chang
   assert.deepEqual(context.doc.pieces.map(p=>p.id),['c']);assert.equal(changes,1);
 });
 
+t('exact shape popup pauses drag, preserves anchor/direction and commits once', () => {
+  const source=require('fs').readFileSync(require.resolve('../js/app.js'),'utf8');
+  const start=source.indexOf('  function createDraggedShape('),end=source.indexOf("  svg.addEventListener('pointerup'",start);
+  const fields={},handlers={};let changes=0,released=false;
+  for (const id of ['sh-kind','shape-width','shape-height','shape-size-dialog','shape-size-form','shape-size-cancel']) {
+    fields[id]={value:id==='sh-kind'?'rect':'',focus(){},select(){},addEventListener:(name,fn)=>{handlers[id+':'+name]=fn}};
+  }
+  fields['shape-size-dialog'].showModal=()=>{fields['shape-size-dialog'].open=true};
+  fields['shape-size-dialog'].close=()=>{fields['shape-size-dialog'].open=false;handlers['shape-size-dialog:close']()};
+  const context={$:id=>fields[id],drag:{type:'shape',a:{x:20,y:30},b:{x:15,y:26},pointerId:1},doc:{pieces:[]},
+    svg:{hasPointerCapture:()=>true,releasePointerCapture:()=>{released=true},focus(){}},gPreview:{},clear(){},
+    beginChange:()=>changes++,endChange(){},newPiece:nodes=>({nodes}),selectPiece(){},renderAll(){}};
+  const vm=require('vm');vm.runInNewContext(source.slice(start,end),context);
+  context.openShapeSize();assert.equal(context.drag,null);assert(released);assert.equal(changes,0);
+  fields['shape-width'].value='12.25';fields['shape-height'].value='8.5';handlers['shape-size-form:submit']({preventDefault(){}});
+  assert.equal(changes,1);const nodes=context.doc.pieces[0].nodes;
+  assert.equal(Math.min(...nodes.map(n=>n.x)),7.75);assert.equal(Math.max(...nodes.map(n=>n.x)),20);
+  assert.equal(Math.min(...nodes.map(n=>n.y)),21.5);assert.equal(Math.max(...nodes.map(n=>n.y)),30);
+  fields['sh-kind'].value='ellipse';context.drag={type:'shape',a:{x:2,y:2},b:{x:3,y:3},pointerId:2};context.openShapeSize();
+  fields['shape-width'].value='0';handlers['shape-size-form:submit']({preventDefault(){}});assert.equal(changes,1);
+  fields['shape-width'].value='0.3';fields['shape-height'].value='4';handlers['shape-size-form:submit']({preventDefault(){}});
+  assert.equal(changes,2);assert(context.doc.pieces[1].nodes.every(n=>n.hin&&n.hout));
+  context.drag={type:'shape',a:{x:0,y:0},b:{x:1,y:1},pointerId:3};context.openShapeSize();handlers['shape-size-cancel:click']();assert.equal(changes,2);
+  context.drag={type:'shape',a:{x:2,y:2},b:{x:7,y:9},pointerId:4};context.ev={preventDefault(){}};
+  const keyStart=source.indexOf("    if (k === 'alt' && drag"),keyEnd=source.indexOf('\n',keyStart);
+  vm.runInNewContext("(function(){const k='alt';"+source.slice(keyStart,keyEnd)+'})()',context);
+  assert(fields['shape-size-dialog'].open);assert.equal(context.drag,null);assert.equal(fields['shape-width'].value,5);assert.equal(changes,2);
+
+});
+
 console.log(`\n${passed} tests passed${process.exitCode ? ' (with failures)' : ''}`);

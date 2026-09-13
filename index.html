@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pattern Studio</title>
-<link rel="stylesheet" href="style.css?v=64">
+<link rel="stylesheet" href="style.css?v=65">
 </head>
 <body>
 <div id="app">
   <header id="topbar">
-    <span id="logo" title="build 64">✂ Pattern Studio</span>
+    <span id="logo" title="build 65">✂ Pattern Studio</span>
     <input id="doc-name" type="text" value="Untitled pattern" spellcheck="false" title="Pattern name">
     <details class="top-menu"><summary>File</summary><div class="menu-panel"><div class="row btns">    <button id="btn-new" title="New document">New</button>
     <button id="btn-open" title="Open .json project or import a .dxf">Open</button>
@@ -106,6 +106,15 @@
         <g id="layer-preview"></g>
         <g id="layer-overlay"></g>
       </svg>
+      <dialog id="shape-size-dialog" aria-labelledby="shape-size-title">
+        <form id="shape-size-form">
+          <h3 id="shape-size-title">Exact shape size</h3>
+          <p class="hint">Keeps your starting corner and drag direction. Ellipse values are its full width and height.</p>
+          <div class="row"><label for="shape-width">Width</label><input id="shape-width" type="number" min="0.3" step="any" required> <em>cm</em></div>
+          <div class="row"><label for="shape-height">Height</label><input id="shape-height" type="number" min="0.3" step="any" required> <em>cm</em></div>
+          <div class="row btns"><button type="submit">Create shape</button><button id="shape-size-cancel" type="button">Cancel</button></div>
+        </form>
+      </dialog>
       <div id="divide-dialog" hidden>
         <div class="row"><label for="dv-from">From</label>
           <select id="dv-from" title="Which end of the edge measurements count from">
@@ -241,7 +250,7 @@
             <option value="ellipse">Ellipse</option>
           </select></div>
         <div class="row hint">Drag corner to corner — dimensions show live and snap to the grid and
-          existing points.</div>
+          existing points. Press Option / Alt during the drag to enter exact width and height.</div>
       </section>
 <section id="bool-props" hidden>
         <h3>Boolean</h3>
@@ -375,10 +384,10 @@
   </div>
 </div>
 <input id="file-input" type="file" accept=".json,.dxf,application/json" hidden>
-<script src="js/geometry.js?v=64"></script>
-<script src="js/strokefont.js?v=64"></script>
-<script src="js/dxf.js?v=64"></script>
-<script src="js/dxfimport.js?v=64"></script>
-<script src="js/app.js?v=64"></script>
+<script src="js/geometry.js?v=65"></script>
+<script src="js/strokefont.js?v=65"></script>
+<script src="js/dxf.js?v=65"></script>
+<script src="js/dxfimport.js?v=65"></script>
+<script src="js/app.js?v=65"></script>
 </body>
 </html>

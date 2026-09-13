@@ -275,3 +275,7 @@ button:focus-visible, summary:focus-visible, input:focus-visible, select:focus-v
 }
 
 .seam-notice { border: 1px solid #c99a42; border-left-width: 4px; background: #3a3020; color: #ffe0a1; padding: 10px; font-size: 12px; line-height: 1.5; }
+
+#shape-size-dialog { margin: auto; width: 320px; max-width: calc(100vw - 48px); background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 18px; }
+#shape-size-dialog::backdrop { background: #0008; }
+#shape-size-dialog .hint { font-size: 12px; line-height: 1.5; }
