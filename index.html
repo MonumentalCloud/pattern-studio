@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pattern Studio</title>
-<link rel="stylesheet" href="style.css?v=69">
+<link rel="stylesheet" href="style.css?v=70">
 </head>
 <body>
 <div id="app">
   <header id="topbar">
-    <span id="logo" title="build 69">✂ Pattern Studio</span>
+    <span id="logo" title="build 70">✂ Pattern Studio</span>
     <input id="doc-name" type="text" value="Untitled pattern" spellcheck="false" title="Pattern name">
     <details class="top-menu"><summary>File</summary><div class="menu-panel"><div class="row btns">    <button id="btn-new" title="New document">New</button>
     <button id="btn-open" title="Open .json project or import a .dxf">Open</button>
@@ -318,6 +318,10 @@
           <label for="sp-seglen">Length</label>
           <input id="sp-seglen" type="number" min="0.1" step="0.1" title="Edge length (cm)"> <em>cm</em>
         </div>
+        <div class="row" id="sel-segs-total-row" hidden>
+          <label for="sp-segs-total">Total length</label>
+          <output id="sp-segs-total" aria-live="polite" title="Sum of selected edge lengths, measured along curves"></output> <em>cm</em>
+        </div>
         <div class="row" id="sel-seg-anchor-row" hidden>
           <label for="sp-seg-anchor">Move</label>
           <select id="sp-seg-anchor" title="Which end of the edge moves when the length changes">
@@ -407,10 +411,10 @@
   </div>
 </div>
 <input id="file-input" type="file" accept=".json,.dxf,application/json" hidden>
-<script src="js/geometry.js?v=69"></script>
-<script src="js/strokefont.js?v=69"></script>
-<script src="js/dxf.js?v=69"></script>
-<script src="js/dxfimport.js?v=69"></script>
-<script src="js/app.js?v=69"></script>
+<script src="js/geometry.js?v=70"></script>
+<script src="js/strokefont.js?v=70"></script>
+<script src="js/dxf.js?v=70"></script>
+<script src="js/dxfimport.js?v=70"></script>
+<script src="js/app.js?v=70"></script>
 </body>
 </html>

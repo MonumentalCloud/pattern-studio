@@ -796,6 +796,12 @@
     $('sel-handle-row').hidden = true;
     $('sel-seg-row').hidden = !showSeg;
     $('sel-seg-anchor-row').hidden = !showSeg;
+    $('sel-segs-total-row').hidden = !showSegs;
+    if (showSegs) {
+      const nodes = piece.path.nodes;
+      const total = sel.segs.reduce((sum, i) => sum + Geo.segLength(nodes[i], nodes[(i + 1) % nodes.length]), 0);
+      $('sp-segs-total').textContent = total.toFixed(2);
+    }
     $('sel-move-row').hidden = !showMove;
     $('sel-fold-row').hidden = !showSeg;
     $('sel-clear-slits-row').hidden = true;

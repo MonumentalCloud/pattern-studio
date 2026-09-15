@@ -1419,4 +1419,16 @@ t('Boolean handles touching edges, ordinary crossings and preserves cubic source
   assert.throws(()=>Geo.booleanOutline(a,[N(20,0),N(30,0),N(30,10),N(20,10)],'union'),/multiple/);
 });
 
+t('selected-edge total sums only selected arc lengths before rounding', () => {
+  const source=require('fs').readFileSync(require.resolve('../js/app.js'),'utf8'), vm=require('vm');
+  const start=source.indexOf("    $('sel-segs-total-row').hidden"),end=source.indexOf("    $('sel-move-row')",start);
+  const fields={'sel-segs-total-row':{},'sp-segs-total':{}};
+  const nodes=[N(0,0,null,{x:2,y:-2}),N(5,0,{x:-2,y:-2}),N(5,3),N(0,3)];
+  const ctx={Geo,piece:{path:{nodes}},sel:{segs:[0,1]},showSegs:true,$:id=>fields[id]};
+  vm.runInNewContext(source.slice(start,end),ctx);
+  assert.equal(fields['sp-segs-total'].textContent,(Geo.segLength(nodes[0],nodes[1])+3).toFixed(2));
+  ctx.sel.segs=[1,2];vm.runInNewContext(source.slice(start,end),ctx);assert.equal(fields['sp-segs-total'].textContent,'8.00');
+  ctx.showSegs=false;vm.runInNewContext(source.slice(start,end),ctx);assert(fields['sel-segs-total-row'].hidden);
+});
+
 console.log(`\n${passed} tests passed${process.exitCode ? ' (with failures)' : ''}`);
