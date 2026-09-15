@@ -1359,4 +1359,22 @@ t('keep-curve refuses exact joins that alter the existing app length estimate', 
   assert.throws(()=>Geo.deletePointKeepCurve({path:{nodes:[s.a2,s.mid,s.b2,N(10,10),N(0,10)],closed:true}},1),/length estimate/);
 });
 
+t('Notch tool picks existing cuts, adds at new points, and guards deletion', () => {
+  const fs=require('fs'),vm=require('vm'),source=fs.readFileSync(require.resolve('../js/app.js'),'utf8');
+  const p={id:'p',path:{closed:true,nodes:[N(0,0),N(10,0),N(10,10),N(0,10)]},notches:[{seg:0,t:0}],notchLength:1};
+  const handlers={},sel={},fields={'status-hint':{},'notch-delete':{addEventListener:(k,f)=>handlers[k]=f}};
+  let changes=0,deletes=0;
+  const ctx={Geo,doc:{pieces:[p]},sel,$:id=>fields[id],px:()=>.1,fmt:String,renderAll(){},
+    selectPiece:id=>{sel.pieceId=id;sel.kind=null;sel.idx=-1;sel.handle=null},selPiece:()=>p,
+    beginChange:()=>changes++,endChange(){},pickPieceAt:()=>({piece:p}),deleteSelection:()=>deletes++};
+  vm.runInNewContext(source.slice(source.indexOf('  function hitNotch('),source.indexOf('  function hitSlit(')),ctx);
+  vm.runInNewContext(source.slice(source.indexOf('  function notchDown('),source.indexOf('  function holeDown(')),ctx);
+  const line=Geo.notchLinesPath(p.path.nodes,true,p.notches[0],1,1,'slit')[0];
+  ctx.notchDown(line.b);assert.equal(sel.kind,'notch');assert.equal(sel.idx,0);assert.equal(changes,0);assert.equal(p.notches.length,1);
+  handlers.click();assert.equal(deletes,1);sel.kind='node';handlers.click();assert.equal(deletes,1);
+  ctx.notchDown({x:10,y:10});assert.equal(changes,1);assert.equal(p.notches.length,2);assert.equal(sel.kind,'notch');assert.equal(sel.idx,1);
+  ctx.notchDown({x:10,y:10});assert.equal(changes,1);assert.equal(p.notches.length,2);
+  p.notchStyle='v';const v=Geo.notchLinesPath(p.path.nodes,true,p.notches[0],1,1,'v')[0];assert.equal(ctx.hitNotch(p,Geo.lerp(v.a,v.b,.5)),0);
+});
+
 console.log(`\n${passed} tests passed${process.exitCode ? ' (with failures)' : ''}`);

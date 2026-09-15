@@ -557,6 +557,12 @@
     const n = nodes.length;
     const r = px(4);
 
+    if (sel.kind === 'notch' && piece.notches?.[sel.idx]) {
+      const sign = Geo.outwardSign(Geo.pathPolyline(nodes, piece.path.closed, 0.05));
+      for (const ln of Geo.notchLinesPath(nodes, piece.path.closed, piece.notches[sel.idx], sign, piece.notchLength || 0.4, piece.notchStyle)) {
+        el('line', { class: 'seg-highlight', x1: ln.a.x, y1: ln.a.y, x2: ln.b.x, y2: ln.b.y }, gOverlay);
+      }
+    }
     // multi-edge selection highlight
     if (sel.kind === 'segs') {
       for (const i of sel.segs) {
@@ -907,6 +913,7 @@
     $('sel-props').hidden = tool !== 'select' || $('sel-props').hidden || !!editingSlits;
     $('notch-props').hidden = !(tool === 'notch' || (tool === 'select' && piece && sel.kind === 'notch'));
     $('pp-notch').disabled = $('pp-notch-style').disabled = !piece;
+    $('notch-delete').disabled = !piece || sel.kind !== 'notch' || !piece.notches?.[sel.idx];
     $('round-props').hidden = !(tool === 'round' || (tool === 'select' && piece && sel.kind === 'node'));
     $('sel-round-row').hidden = false;
     $('sp-round-btn').disabled = !piece || sel.kind !== 'node';
@@ -1004,7 +1011,7 @@
     select: 'Click to select, then drag to move · Box selection chooses pieces, points, edges or stitch holes explicitly · Shift adds · Del deletes the selected objects',
     pen: 'Click = corner, drag = curve · right-click = type exact length/angle · click the first point to close · Esc finishes open',
     shape: 'Rectangle / ellipse: drag, Option / Alt for exact size · Triangle / polygon: click the starting corner to enter measurements',
-    notch: 'Click near a point on an outline — the notch snaps to it · right-click an edge to divide it where you need a point',
+    notch: 'Click an existing notch to select it · Delete removes the selected notch · Click near another outline point to add one',
     hole: 'Click inside a piece to add a circular cutout',
     grain: 'Drag inside a piece to set the grainline · click (no drag) removes it',
     weld: 'Click an edge, then the matching edge on another piece — the second piece moves; both seam edges disappear',
@@ -2218,13 +2225,15 @@
   }
 
   function hitNotch(piece, w) {
-    if (!piece.path.closed) return -1;
+    if (!piece.path.closed || !piece.notches?.length) return -1;
     const nodes = piece.path.nodes;
     let best = -1, bd = px(8);
+    const sign = Geo.outwardSign(Geo.pathPolyline(nodes, true, 0.05));
     (piece.notches || []).forEach((nt, i) => {
       if (nt.seg >= nodes.length) return;
       const p = Geo.segPoint(nodes[nt.seg], nodes[(nt.seg + 1) % nodes.length], nt.t);
-      const d = Geo.dist(p, w);
+      const lines = Geo.notchLinesPath(nodes, true, nt, sign, piece.notchLength || 0.4, piece.notchStyle);
+      const d = Math.min(Geo.dist(p, w), ...lines.map(ln => Geo.nearestOnPath([ln.a, ln.b], false, w).dist));
       if (d < bd) { bd = d; best = i; }
     });
     return best;
@@ -2583,6 +2592,16 @@
   }
 
   function notchDown(w) {
+    // Existing marks take priority over adding another at the same point.
+    for (const piece of doc.pieces.slice().reverse()) {
+      if (piece.visible === false || piece.guide) continue;
+      const idx = hitNotch(piece, w);
+      if (idx < 0) continue;
+      selectPiece(piece.id); sel.kind = 'notch'; sel.idx = idx;
+      renderAll();
+      $('status-hint').textContent = 'Notch selected — Delete removes only this notch; Undo restores it.';
+      return;
+    }
     const res = pickPieceAt(w, false);
     if (!res || !res.piece.path.closed) return;
     // notches anchor to POINTS only: snap to the outline node nearest the
@@ -2598,10 +2617,16 @@
     res.piece.notches.push({ seg: bi, t: 0 });
     endChange();
     selectPiece(res.piece.id);
+    sel.kind = 'notch'; sel.idx = res.piece.notches.length - 1;
     $('status-hint').textContent =
       `Notch snapped to the point at ${fmt(nodes[bi].x)}, ${fmt(nodes[bi].y)} — divide an edge (right-click it) to add points`;
     renderAll();
   }
+
+  $('notch-delete').addEventListener('click', () => {
+    const p = selPiece();
+    if (p && sel.kind === 'notch' && p.notches?.[sel.idx]) deleteSelection();
+  });
 
   function holeDown(w) {
     const diameter = Number($('hole-diameter').value);
