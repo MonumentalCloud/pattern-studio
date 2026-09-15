@@ -1377,4 +1377,46 @@ t('Notch tool picks existing cuts, adds at new points, and guards deletion', () 
   p.notchStyle='v';const v=Geo.notchLinesPath(p.path.nodes,true,p.notches[0],1,1,'v')[0];assert.equal(ctx.hitNotch(p,Geo.lerp(v.a,v.b,.5)),0);
 });
 
+t('Boolean shared edge supports union, intersection and subtraction without nudging outlines', () => {
+  const a=[N(1,0),N(10,0),N(10,10),N(1,10)],b=[N(0,5),N(10,5),N(10,15),N(0,15)];
+  assert.equal(Geo.pathIntersections(a,true,b,true).length,3);
+  for(const [op,area] of [['union',145],['intersect',45],['subtract',45]]) for(const B of [b,Geo.reverseNodes(b)]) {
+    const r=Geo.booleanOutline(a,B,op);assert(Math.abs(Geo.polyArea(Geo.pathPolyline(r.nodes,true,.0001))-area)<1e-6);
+    assert(r.nodes.every(p=>p.x>=0&&p.x<=10&&p.y>=0&&p.y<=15));assert.equal(r.sources.length,r.nodes.length);
+  }
+});
+
+t('Boolean app commits shared-edge result and retains base boundary marks', () => {
+  const source=require('fs').readFileSync(require.resolve('../js/app.js'),'utf8'),vm=require('vm');
+  const a={id:'a',name:'A',path:{closed:true,nodes:[N(1,0),N(10,0),N(10,10),N(1,10)]},notches:[{seg:0,t:.5}],stitchSlits:[{seg:0,t:.3,len:.2,run:1,sourceSegments:[0]}]},
+    b={id:'b',name:'B',path:{closed:true,nodes:[N(0,5),N(10,5),N(10,15),N(0,15)]}};
+  const snapshot=JSON.stringify(a.path.nodes);let changes=0;const alerts=[];
+  const ctx={Geo,doc:{pieces:[a,b]},beginChange:()=>changes++,endChange(){},selectPiece(){},renderAll(){},setTool(){},$:()=>({}),alert:m=>alerts.push(m)};
+  vm.runInNewContext(source.slice(source.indexOf('  function booleanPieces('),source.indexOf('  // ---- stitch tool ----')),ctx);
+  ctx.booleanPieces(a,b,'union');assert.deepEqual(alerts,[]);assert.equal(changes,1);assert.equal(ctx.doc.pieces.length,1);assert.equal(a.notches.length,1);assert.equal(a.stitchSlits.length,1);
+  const nt=a.notches[0];assert(Geo.dist(Geo.segPoint(a.path.nodes[nt.seg],a.path.nodes[(nt.seg+1)%a.path.nodes.length],nt.t),{x:5.5,y:0})<1e-9);
+  assert.equal(Geo.polyArea(a.path.nodes),145);assert.notEqual(JSON.stringify(a.path.nodes),snapshot);
+});
+
+t('Boolean handles touching edges, ordinary crossings and preserves cubic source segments', () => {
+  const a=[N(0,0),N(10,0),N(10,10),N(0,10)];
+  const touching=[N(10,0),N(20,0),N(20,10),N(10,10)];
+  assert.equal(Geo.polyArea(Geo.booleanOutline(a,touching,'union').nodes),200);
+  assert.equal(Geo.polyArea(Geo.booleanOutline(a,touching,'subtract').nodes),100);
+  assert.throws(()=>Geo.booleanOutline(a,touching,'intersect'),/no remaining/);
+  const cross=[N(5,5),N(15,5),N(15,15),N(5,15)];
+  for(const [op,area] of [['union',175],['intersect',25],['subtract',75]]) {
+    assert(Math.abs(Geo.polyArea(Geo.booleanOutline(a,cross,op).nodes)-area)<1e-9);
+    assert(Math.abs(Geo.polyArea(Geo.booleanOutline(Geo.reverseNodes(a),cross,op).nodes)+area)<1e-9);
+  }
+  const curved=[N(1,0),N(10,0),N(10,10),N(1,10,{x:-2,y:-3},{x:-2,y:-3})];
+  const shared=[N(0,5),N(10,5),N(10,15),N(0,15)];
+  const result=Geo.booleanOutline(curved,shared,'union');assert(result.nodes.some(n=>n.hin||n.hout));
+  for(let i=0;i<result.nodes.length;i++) {
+    const s=result.sources[i],original=s.owner?shared:curved;
+    for(const t of [0,.25,.5,.75,1])assert(Geo.dist(Geo.segPoint(result.nodes[i],result.nodes[(i+1)%result.nodes.length],t),Geo.segPoint(original[s.seg],original[(s.seg+1)%original.length],s.t0+(s.t1-s.t0)*t))<1e-7);
+  }
+  assert.throws(()=>Geo.booleanOutline(a,[N(20,0),N(30,0),N(30,10),N(20,10)],'union'),/multiple/);
+});
+
 console.log(`\n${passed} tests passed${process.exitCode ? ' (with failures)' : ''}`);

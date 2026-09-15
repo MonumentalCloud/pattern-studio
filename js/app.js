@@ -1018,7 +1018,7 @@
     offset: 'Click edges to select them (click again to deselect, drag a box for several) · drag a selected edge to apply the mode live · Apply uses the exact distance · in Guide mode click inside a piece for a full ring · Esc clears',
     knife: 'Click two points to cut a piece in two (they snap to existing points) · or click an open path to cut along it · Esc cancels',
     round: 'Drag outward from a corner point — the drag distance sets the fillet radius, live preview shows the arc',
-    bool: 'Click the base piece (A), then the other (B) — combined with the op from the panel · overlapping outlines must cross exactly twice · Subtract with B fully inside A punches it through as a hole',
+    bool: 'Click the base piece (A), then the other (B) — combined with the op from the panel · shared straight edges are supported; the result must be one outline · Subtract with B fully inside A punches it through as a hole',
     stitch: 'Select edges, guide lines or cutouts (click / Shift-click / drag a box) · Single mode: Enter runs holes along each · Matched mode: pick side A, Enter, pick side B, Enter — both sides get the same holes · Esc cancels',
     measure: 'Drag to measure a distance',
   };
@@ -3357,75 +3357,24 @@
         : 'The two outlines don\'t cross — overlap the pieces first.');
       return;
     }
-    if (hits.length !== 2) {
-      alert(`The outlines cross ${hits.length} times — boolean ops currently need exactly 2 crossings.`);
-      return;
-    }
-    beginChange();
-    const cA = JSON.parse(JSON.stringify(pA));
-    const cB = JSON.parse(JSON.stringify(pB));
-    const rA = resolveCutNodes(cA, hits, 'segA', 'tA');
-    const rB = resolveCutNodes(cB, hits, 'segB', 'tB');
-    if (!rA || !rB) { endChange(); alert('Degenerate crossing — nothing to combine.'); return; }
-
-    // both outlines split into two arcs at the shared crossing points;
-    // classify each arc by whether its midpoint is inside the other piece
-    const mkArc = (piece, from, to) => {
-      const N = piece.path.nodes, n2 = N.length;
-      const nodes = [];
-      for (let k = from; ; k = (k + 1) % n2) {
-        nodes.push(JSON.parse(JSON.stringify(N[k])));
-        if (k === to) break;
-      }
-      return { nodes, from, edges: nodes.length - 1, total: n2 };
+    let result;
+    try { result = Geo.booleanOutline(pA.path.nodes, pB.path.nodes, op); }
+    catch (e) { alert(e.message); return; }
+    const {nodes, sources} = result;
+    const cA = pA, cB = pB;
+    // Keep A's marks only on retained boundary ranges, as before.
+    const remap = mark => {
+      if (mark.cut != null) return null;
+      const seg = sources.findIndex(s => s.owner === 0 && s.seg === mark.seg &&
+        mark.t >= Math.min(s.t0,s.t1)-1e-9 && mark.t <= Math.max(s.t0,s.t1)+1e-9);
+      if (seg < 0) return null;
+      const src = sources[seg];
+      const mapped = {...mark, seg, t: Math.max(0,Math.min(1,(mark.t-src.t0)/(src.t1-src.t0)))};
+      if (mark.sourceSegments) mapped.sourceSegments = sources.flatMap((s,i) => s.owner === 0 && mark.sourceSegments.includes(s.seg) ? [i] : []);
+      return mapped;
     };
-    const arcsA = [mkArc(cA, rA[0], rA[1]), mkArc(cA, rA[1], rA[0])];
-    const arcsB = [mkArc(cB, rB[0], rB[1]), mkArc(cB, rB[1], rB[0])];
-    const polyA = Geo.pathPolyline(pA.path.nodes, true, 0.05);
-    const polyB = Geo.pathPolyline(pB.path.nodes, true, 0.05);
-    const arcInside = (arc, poly) => {
-      const pos = Geo.pathArcParams(arc.nodes, false, [0.5])[0];
-      return Geo.pointInPolygon(poly, Geo.segPoint(arc.nodes[pos.seg], arc.nodes[pos.seg + 1], pos.t));
-    };
-    const aOut = arcsA.find((a) => !arcInside(a, polyB)), aIn = arcsA.find((a) => arcInside(a, polyB));
-    const bOut = arcsB.find((a) => !arcInside(a, polyA)), bIn = arcsB.find((a) => arcInside(a, polyA));
-    const parts = op === 'union' ? [aOut, bOut] : op === 'intersect' ? [aIn, bIn] : [aOut, bIn];
-    if (!parts[0] || !parts[1]) {
-      endChange();
-      alert('Could not classify the overlap — adjust the pieces and try again.');
-      return;
-    }
-
-    // compose: A's arc, then B's arc oriented to close the loop (junction
-    // nodes merge, adopting B's handles at the joins)
-    const arcA = parts[0], arcB = parts[1];
-    let bNodes = arcB.nodes;
-    const aEnd = arcA.nodes[arcA.nodes.length - 1];
-    if (Geo.dist(bNodes[0], aEnd) > Geo.dist(bNodes[bNodes.length - 1], aEnd)) {
-      bNodes = Geo.reverseNodes(bNodes);
-    }
-    const nodes = arcA.nodes.map((nd) => JSON.parse(JSON.stringify(nd)));
-    nodes[nodes.length - 1].hout = bNodes[0].hout ? { x: bNodes[0].hout.x, y: bNodes[0].hout.y } : null;
-    for (let q = 1; q < bNodes.length - 1; q++) nodes.push(JSON.parse(JSON.stringify(bNodes[q])));
-    nodes[0].hin = bNodes[bNodes.length - 1].hin
-      ? { x: bNodes[bNodes.length - 1].hin.x, y: bNodes[bNodes.length - 1].hin.y } : null;
-
-    // A's notches/slits survive on its kept arc; B's boundary marks are
-    // dropped; holes from both stay if inside the result; A's grain if inside
-    const keepSeg = (seg) => {
-      const rel = (seg - arcA.from + arcA.total) % arcA.total;
-      return rel < arcA.edges ? rel : null;
-    };
-    const notches = [], slits = [];
-    for (const nt of cA.notches || []) {
-      const s = keepSeg(nt.seg);
-      if (s != null) notches.push(Object.assign({}, nt, { seg: s }));
-    }
-    for (const sl of cA.stitchSlits || []) {
-      if (sl.cut != null) continue; // cutout indices reshuffle — re-stitch after
-      const s = keepSeg(sl.seg);
-      if (s != null) slits.push(Object.assign({}, sl, { seg: s }));
-    }
+    const notches = (cA.notches || []).map(remap).filter(Boolean);
+    const slits = (cA.stitchSlits || []).map(remap).filter(Boolean);
     const resultPoly = Geo.pathPolyline(nodes, true, 0.05);
     const holes = (cA.holes || []).concat(cB.holes || []).filter((h) => Geo.pointInPolygon(resultPoly, h));
     const cutouts = (cA.cutouts || []).concat(cB.cutouts || []).filter((c) =>
@@ -3436,6 +3385,7 @@
       if (Geo.pointInPolygon(resultPoly, gm)) grain = cA.grain;
     }
 
+    beginChange();
     pA.path = { closed: true, nodes };
     pA.notches = notches;
     pA.stitchSlits = slits;

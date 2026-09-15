@@ -421,6 +421,99 @@
     return out;
   }
 
+  // Split and classify source boundaries; never replace curves by polylines.
+  // One output contour is supported. Multiple islands/holes need a compound
+  // Boolean result model before they can be committed safely by the editor.
+  function booleanOutline(nodesA, nodesB, op) {
+    if(!['union','intersect','subtract'].includes(op)) throw new Error('Unknown Boolean operation.');
+    const paths=[nodesA,nodesB], knots=paths.map(ns=>ns.map(()=>[0,1]));
+    for(const h of pathIntersections(nodesA,true,nodesB,true)) {
+      // Refine the sampled detector's parameters on the original cubics.
+      const a=nodesA[h.segA],b=nodesA[(h.segA+1)%nodesA.length],c=nodesB[h.segB],d=nodesB[(h.segB+1)%nodesB.length];
+      const cross=(u,v)=>u.x*v.y-u.y*v.x;
+      const derivative=(a,b,t)=>{
+        if(segIsLine(a,b))return sub(b,a);
+        const {c1,c2}=segCtrl(a,b),u=1-t;
+        return add(add(scale(sub(c1,a),3*u*u),scale(sub(c2,c1),6*u*t)),scale(sub(b,c2),3*t*t));
+      };
+      for(let k=0;k<16;k++) {
+        const err=sub(segPoint(c,d,h.tB),segPoint(a,b,h.tA));
+        if(len(err)<1e-10)break;
+        const da=derivative(a,b,h.tA),db=derivative(c,d,h.tB),den=cross(da,db);
+        if(Math.abs(den)<1e-14)break;
+        h.tA=Math.max(0,Math.min(1,h.tA+cross(err,db)/den));
+        h.tB=Math.max(0,Math.min(1,h.tB+cross(err,da)/den));
+      }
+      if(dist(segPoint(a,b,h.tA),segPoint(c,d,h.tB))>1e-8)throw new Error('Cannot resolve this curve intersection precisely. No changes made.');
+      knots[0][h.segA].push(h.tA);knots[1][h.segB].push(h.tB);
+    }
+    // Collinear overlap is an interval, not an extra crossing. Its endpoints
+    // split both edges so coincident fragments can be kept or removed once.
+    for(let i=0;i<nodesA.length;i++) for(let j=0;j<nodesB.length;j++) {
+      const a=nodesA[i],b=nodesA[(i+1)%nodesA.length],c=nodesB[j],d=nodesB[(j+1)%nodesB.length];
+      if(!segIsLine(a,b)||!segIsLine(c,d))continue;
+      const u=sub(b,a),v=sub(d,c), uu=dot(u,u),vv=dot(v,v);
+      if(uu<1e-16||vv<1e-16)continue;
+      const cross=(x,y)=>x.x*y.y-x.y*y.x;
+      if(Math.abs(cross(u,v))>1e-9*Math.sqrt(uu*vv)||Math.abs(cross(sub(c,a),u))>1e-8*Math.sqrt(uu))continue;
+      for(const p of [c,d]) {const t=dot(sub(p,a),u)/uu;if(t>0&&t<1)knots[0][i].push(t);}
+      for(const p of [a,b]) {const t=dot(sub(p,c),v)/vv;if(t>0&&t<1)knots[1][j].push(t);}
+    }
+    const polys=paths.map(ns=>pathPolyline(ns,true,.0001));
+    const fragments=paths.map((ns,owner)=>{
+      const out=[],reverse=polyArea(polys[owner])<0;
+      for(let seg=0;seg<ns.length;seg++) {
+        const ts=knots[owner][seg].sort((a,b)=>a-b).filter((t,i,all)=>!i||t-all[i-1]>1e-9);
+        for(let k=1;k<ts.length;k++) {
+          const t0=ts[k-1],t1=ts[k];let a=ns[seg],b=ns[(seg+1)%ns.length];
+          if(t1<1){const s=splitSeg(a,b,t1);a=s.a2;b=s.mid;}
+          if(t0>0){const s=splitSeg(a,b,t0/t1);a=s.mid;b=s.b2;}
+          const edge=reverse?reverseNodes([a,b]):[a,b];
+          out.push({a:edge[0],b:edge[1],owner,seg,t0:reverse?t1:t0,t1:reverse?t0:t1});
+        }
+      }
+      return out;
+    });
+    const close=(a,b)=>dist(a,b)<1e-6;
+    const kept=[];
+    for(let owner=0;owner<2;owner++) for(const f of fragments[owner]) {
+      const middle=segPoint(f.a,f.b,.5);
+      const shared=fragments[1-owner].find(g=>segIsLine(f.a,f.b)&&segIsLine(g.a,g.b)&&
+        ((close(f.a,g.a)&&close(f.b,g.b))||(close(f.a,g.b)&&close(f.b,g.a))));
+      let keep;
+      if(shared) {
+        const same=close(f.a,shared.a);
+        keep=owner===0&&(same?op!=='subtract':op==='subtract');
+      } else {
+        if(nearestOnPath(paths[1-owner],true,middle).dist<1e-7) throw new Error('Coincident curved boundaries cannot yet be combined safely. No changes made.');
+        const inside=pointInPolygon(polys[1-owner],middle);
+        keep=op==='union'?!inside:op==='intersect'?inside:owner===0?!inside:inside;
+      }
+      if(!keep)continue;
+      if(op==='subtract'&&owner===1){const edge=reverseNodes([f.a,f.b]);kept.push({...f,a:edge[0],b:edge[1],t0:f.t1,t1:f.t0});}
+      else kept.push(f);
+    }
+    if(!kept.length)throw new Error('This operation has no remaining outline. No changes made.');
+    const ordered=[kept.shift()];
+    // Intersection parameters are obtained from the existing sampled detector;
+    // refuse gaps rather than stretch source curves to bridge them.
+    while(!close(ordered[ordered.length-1].b,ordered[0].a)) {
+      const end=ordered[ordered.length-1].b;
+      const choices=kept.map((f,i)=>close(f.a,end)?i:-1).filter(i=>i>=0);
+      if(choices.length!==1)throw new Error('The result has touching branches or an unresolved curve intersection. No changes made.');
+      ordered.push(kept.splice(choices[0],1)[0]);
+    }
+    if(kept.length)throw new Error('This operation produces multiple outlines or an internal hole. Use separate operations for now. No changes made.');
+    let nodes=ordered.map((f,i)=>({...f.a,hin:ordered[(i+ordered.length-1)%ordered.length].b.hin||null}));
+    if(nodes.length<3||Math.abs(polyArea(pathPolyline(nodes,true,.0001)))<1e-9)throw new Error('The result has no usable area. No changes made.');
+    let sources=ordered.map(({owner,seg,t0,t1})=>({owner,seg,t0,t1}));
+    if(polyArea(polys[0])<0) {
+      nodes=reverseNodes(nodes);
+      sources=sources.map((_,i)=>{const s=ordered[(ordered.length-2-i+ordered.length)%ordered.length];return {owner:s.owner,seg:s.seg,t0:s.t1,t1:s.t0};});
+    }
+    return {nodes,sources};
+  }
+
   // ---- hit testing ----
   // Nearest point on path to p. Returns { seg, t, dist, point } or null.
   function nearestOnPath(nodes, closed, p) {
@@ -1046,6 +1139,6 @@
     pathPolyline, pathLength, polyArea, bbox, centroid, polyCentroid, labelBox, dedupe,
     outwardSign, offsetClosed, nearestOnPath, pointInPolygon, splitSeg, setSegLength, deletePointKeepCurve,
     reverseNodes, weldClosedPaths, reflectPoint, reflectNodes, segArcParams, slitLine, slitContour, slitFitsPiece, notchLines, notchLinesPath,
-    pathArcParams, simplifyPoly, offsetOpen, pathIntersections, sewSlits, clipLoops,
+    pathArcParams, simplifyPoly, offsetOpen, pathIntersections, booleanOutline, sewSlits, clipLoops,
   };
 });
