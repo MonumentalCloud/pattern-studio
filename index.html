@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pattern Studio</title>
-<link rel="stylesheet" href="style.css?v=72">
+<link rel="stylesheet" href="style.css?v=73">
 </head>
 <body>
 <div id="app">
   <header id="topbar">
-    <span id="logo" title="build 72">✂ Pattern Studio</span>
+    <span id="logo" title="build 73">✂ Pattern Studio</span>
     <input id="doc-name" type="text" value="Untitled pattern" spellcheck="false" title="Pattern name">
     <details class="top-menu"><summary>File</summary><div class="menu-panel"><div class="row btns">    <button id="btn-new" title="New document">New</button>
     <button id="btn-open" title="Open .json project or import a .dxf">Open</button>
@@ -145,11 +145,11 @@
         <div class="row hint" id="dv-hint"></div>
       </div>
       <dialog id="match-seam-dialog" aria-labelledby="match-seam-title">
-        <h3 id="match-seam-title">Match B’s outline length to A</h3>
-        <div class="row"><label for="match-seam-end">Adjust B at</label><select id="match-seam-end"><option value="end">End</option><option value="start">Start</option></select></div>
+        <h3 id="match-seam-title">Match B’s inset length to A</h3>
+        <div class="row"><label for="match-seam-end">Adjust B at</label><select id="match-seam-end"><option value="auto">Automatic — smallest adjustment</option><option value="end">End</option><option value="start">Start</option></select></div>
         <p id="match-seam-message" role="status"></p>
         <svg id="match-seam-preview" role="img" aria-label="B before in dashed grey; proposed B in teal; endpoints labelled Start and End"></svg>
-        <p class="hint">Dashed grey: before · Teal: after. Retained seam curves keep their shape. Extension adds a straight tangent; trimming stays within the chosen end segment. This matches the cutting outline, not the inset hole path.</p>
+        <p class="hint">Dashed grey: before · Teal: after. Retained seam curves keep their shape. Extension adds a straight tangent; trimming stays within the chosen end segment. This adjusts the cutting outline to match the inset stitch-path length. A stays fixed; slit slant is unchanged.</p>
         <div class="row btns"><button id="match-seam-apply">Apply length match</button><button id="match-seam-cancel">Cancel</button></div>
       </dialog>
       <dialog id="keep-curve-dialog" aria-labelledby="keep-curve-title">
@@ -209,7 +209,7 @@
         <div class="row"><label for="st-ang">Slant</label>
           <input id="st-ang" type="number" min="-180" max="180" step="any" value="-45" title="From edge: ±45 are the two diagonals, 90 is square across the edge. From page: 0 = horizontal, 90 = vertical, 45 = ＼, −45 = ／"> <em>°</em>
           <span id="st-ang-eg" class="ang-eg"></span></div>
-        <button id="st-match-length" hidden>Match B’s outline length to A…</button>
+        <button id="st-match-length" hidden>Match B’s inset length to A…</button>
         <p id="st-match-notice" class="seam-notice" role="status" hidden></p>
         <div class="row btns"><button id="st-apply" title="Advance the current mode (Enter): Single stitches the selection; Matched confirms side A, then stitches A + B together">Stitch selected</button></div>
         <div class="row hint">Diagonal slits for hand sewing. Select edges, guide lines or internal
@@ -420,10 +420,10 @@
   </div>
 </div>
 <input id="file-input" type="file" accept=".json,.dxf,application/json" hidden>
-<script src="js/geometry.js?v=72"></script>
-<script src="js/strokefont.js?v=72"></script>
-<script src="js/dxf.js?v=72"></script>
-<script src="js/dxfimport.js?v=72"></script>
-<script src="js/app.js?v=72"></script>
+<script src="js/geometry.js?v=73"></script>
+<script src="js/strokefont.js?v=73"></script>
+<script src="js/dxf.js?v=73"></script>
+<script src="js/dxfimport.js?v=73"></script>
+<script src="js/app.js?v=73"></script>
 </body>
 </html>

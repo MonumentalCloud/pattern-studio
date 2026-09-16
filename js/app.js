@@ -901,8 +901,14 @@
             const lengths = {};
             for (const g of pair) {
               const holes = g.indices.map(i => g.piece.stitchSlits[i]);
-              const chains = stitchChains(stitchRunTargets(g.piece, holes), 0);
-              if (chains.length === 1) lengths[holes[0].pairSide] = Geo.pathLength(chains[0].path, chains[0].loop);
+              const targets = stitchRunTargets(g.piece, holes);
+              const points = holes.map(s=>slitLineFor(g.piece,s)).filter(Boolean).map(l=>Geo.lerp(l.a,l.b,.5));
+              const offsets = [...new Set(holes.map(s=>Math.round((s.off || 0)*100000)/100000))];
+              const paths = offsets.flatMap(off=>stitchChains(targets,off)).filter(ch=>points.every(p=>Geo.nearestOnPath(ch.path,ch.loop,p).dist<.02));
+              if (!paths.length) throw new Error('Inset path unavailable');
+              const measured=paths.map(ch=>Geo.pathLength(ch.path,ch.loop));
+              if(Math.max(...measured)-Math.min(...measured)>.01)throw new Error('Inset path ambiguous');
+              lengths[holes[0].pairSide] = measured[0];
             }
             $('st-edit-notice').textContent = lengths.A == null || lengths.B == null
               ? 'Matched side missing or unavailable. Recreate the pair to restore its original side A reference.'
@@ -3441,16 +3447,33 @@
   // target independently; "matched" gathers side A, confirms, gathers side B,
   // then gives BOTH sides the same number of holes at matching fractions.
   let seamMatchContext=null, seamMatchProposal=null;
-  function outlineChainLength(chain) {
-    return chain.anchor.kind==='outline'
-      ? Geo.selectedEdgeLength(chain.piece.path.nodes,chain.anchor.segs)
-      : Geo.pathLength(chain.path,chain.loop);
+  function matchInsetChainLength(a,b,inset,end) {
+    const measure=(piece,segs)=>Geo.pathLength(edgeGuideNodes(piece,segs,inset),false);
+    const target=measure(a.piece,a.anchor.segs),before=measure(b.piece,b.anchor.segs);
+    if(!Number.isFinite(target)||target<=0||!Number.isFinite(before)||before<=0)throw new Error('This inset does not produce a usable stitch path.');
+    if(Math.abs(target-before)<.0001)throw new Error('These inset stitch lengths already match.');
+    const outline=Geo.selectedEdgeLength(b.piece.path.nodes,b.anchor.segs);
+    let correction=target-before;
+    // ponytail: bounded endpoint correction; refuse if offset geometry cannot converge.
+    for(let i=0;i<24;i++) {
+      const plan=Geo.matchChainLength(b.piece,b.anchor.segs,outline+correction,end);
+      const after=measure(plan.piece,plan.segs),error=target-after;
+      if(!Number.isFinite(after)||after<=0)break;
+      if(Math.abs(error)<.0001)return {...plan,insetTarget:target,insetBefore:before,insetAfter:after,end};
+      correction+=error;
+    }
+    throw new Error('Cannot match this inset path reliably at this endpoint. Try the other end or a smaller inset.');
   }
   function previewSeamMatch() {
     seamMatchProposal=null;clear($('match-seam-preview'));
     try {
-      const {a,b}=seamMatchContext;
-      const plan=Geo.matchChainLength(b.piece,b.anchor.segs,outlineChainLength(a),$('match-seam-end').value);
+      const {a,b,inset}=seamMatchContext;
+      const end=$('match-seam-end').value,plans=[],errors=[];
+      for(const choice of end==='auto'?['end','start']:[end]) {
+        try { plans.push(matchInsetChainLength(a,b,inset,choice)); } catch(e) { errors.push(e.message); }
+      }
+      if(!plans.length)throw new Error([...new Set(errors)].join(' '));
+      const plan=plans.sort((x,y)=>Math.abs(x.delta)-Math.abs(y.delta))[0];
       seamMatchProposal=plan;
       const pts=Geo.pathPolyline(b.piece.path.nodes,b.piece.path.closed,.01).concat(Geo.pathPolyline(plan.piece.path.nodes,plan.piece.path.closed,.01));
       const bb=Geo.bbox(pts),pad=Math.max(bb.maxX-bb.minX,bb.maxY-bb.minY,1)*.1;
@@ -3463,7 +3486,7 @@
         el('text',{x:p.x+pad*.18,y:p.y-pad*.16,fill:'#633900','font-size':pad*.38},$('match-seam-preview')).textContent=label;
       }
       const mm=x=>(x*10).toFixed(4);
-      $('match-seam-message').textContent=`A stays ${mm(plan.target)} mm. B: ${mm(plan.beforeLength)} → ${mm(plan.afterLength)} mm. ${plan.delta<0?'Trim':'Extend'} ${$('match-seam-end').value} by ${mm(Math.abs(plan.delta))} mm. The adjoining edge reconnects to the new endpoint; check its shape below.`;
+      $('match-seam-message').textContent=`Inset stitch path: A stays ${mm(plan.insetTarget)} mm. B: ${mm(plan.insetBefore)} → ${mm(plan.insetAfter)} mm. ${plan.delta<0?'Trim':'Extend'} ${plan.end} by ${mm(Math.abs(plan.delta))} mm. The adjoining edge reconnects to the new endpoint; check its shape below.`;
     } catch(e) { $('match-seam-message').textContent=e.message; }
     $('match-seam-apply').disabled=!seamMatchProposal;
     $('match-seam-preview').style.display=seamMatchProposal?'':'none';
@@ -3474,7 +3497,8 @@
       if(aa.length!==1||bb.length!==1||aa[0].loop||bb[0].loop||aa[0].anchor.kind!=='outline'||bb[0].anchor.kind!=='outline')throw new Error('Select one connected chain of outline edges per side, with two endpoints. Full loops, guides and cutouts cannot use endpoint matching.');
       if(aa[0].piece.id===bb[0].piece.id)throw new Error('Choose B on a different piece so side A stays fixed.');
       if(isFolded(aa[0].piece)||isFolded(bb[0].piece))throw new Error('Unfold these pieces before matching their outlines.');
-      seamMatchContext={a:aa[0],b:bb[0]};
+      if(!$('st-off').checkValidity())throw new Error('Check the inset before matching.');
+      seamMatchContext={a:aa[0],b:bb[0],inset:parseFloat($('st-off').value)||0};
       previewSeamMatch();$('match-seam-dialog').showModal();$('match-seam-end').focus();
     } catch(e){$('status-hint').textContent=e.message;}
   });
@@ -3488,12 +3512,12 @@
     beginChange();doc.pieces[index]=plan.piece;endChange();
     stitchMulti=plan.segs.map(seg=>({pieceId:id,seg}));
     $('match-seam-dialog').close();renderAll();updateStitchUi();
-    $('status-hint').textContent='B’s outline length now matches A. Review your inset and choose Stitch matched when ready.';
+    $('status-hint').textContent='B’s inset stitch length now matches A. Choose Stitch matched when ready.';
   });
 
   function matchedLengthNotice(a, b) {
     if (Math.abs(a - b) < 0.01) return '';
-    return `Unequal seam lengths: side A ${(a * 10).toFixed(1)} mm, side B ${(b * 10).toFixed(1)} mm. Original side A determines hole count; side B’s spacing adjusts to match. Check that this difference is intentional.`;
+    return `Unequal inset stitch lengths: side A ${(a * 10).toFixed(1)} mm, side B ${(b * 10).toFixed(1)} mm. Original side A determines hole count; side B’s spacing adjusts to match. Check that this difference is intentional.`;
   }
   function updateStitchUi() {
     $('st-match-notice').hidden = true;
@@ -3504,9 +3528,10 @@
     }
     const matched = $('st-mode').value === 'matched';
     if (matched && stitchSideA && stitchMulti.length) {
-      const a = stitchChains(stitchSideA, 0), b = stitchChains(stitchMulti, 0);
+      const inset = parseFloat($('st-off').value) || 0;
+      const a = stitchChains(stitchSideA, inset), b = stitchChains(stitchMulti, inset);
       if (a.length === 1 && b.length === 1) {
-        $('st-match-notice').textContent = matchedLengthNotice(outlineChainLength(a[0]), outlineChainLength(b[0]));
+        $('st-match-notice').textContent = matchedLengthNotice(Geo.pathLength(a[0].path,a[0].loop), Geo.pathLength(b[0].path,b[0].loop));
         $('st-match-notice').hidden = !$('st-match-notice').textContent;
       }
     }
@@ -3682,6 +3707,7 @@
   }
   for (const id of stitchSettingIds) $(id).addEventListener('input', () => {
     if (stitchSettingIds.every(key => $(key).value && $(key).checkValidity())) saveStitchSettings();
+    if(id==='st-off' && tool==='stitch')updateStitchUi();
   });
   function rememberAppliedStitchSettings(values) {
     $('st-len').value = Number(values.len.toFixed(6));

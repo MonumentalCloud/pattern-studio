@@ -152,13 +152,15 @@ To remove a notch, use **Notch (N)**, click its anchor or cut line, and choose *
 
 **Selected edge total:** in Select, Shift-click edges on a piece (or box-select edges) to see their combined **Total length** in cm in the selection panel. Curved edges use their arc length; the sum is rounded only after adding all selected lengths.
 
-### Match seam outline lengths
+### Match inset stitch lengths
 In **Stitch → Create runs → Matched pair**, select connected edges for A and confirm
-**Set side A**, then select B on another piece. **Match B’s outline length to A…**
-previews an adjustment at B’s Start or End. A stays fixed; Apply is one undo step.
+**Set side A**, then select B on another piece. **Match B’s inset length to A…**
+measures the same inset path used to place holes. Automatic tries both ends of B
+and previews the smaller valid adjustment; Start or End can also be chosen. A stays fixed; Apply is one undo step.
 Trimming retains the exact remaining curve within the chosen end segment; extending
 adds a straight tangent without reshaping the existing seam. The adjoining edge
 reconnects to the new endpoint, so inspect the preview before applying. Remove
 notches or stitch holes on affected edges first. Full loops, guides, cutouts and
-folded pieces are excluded. This matches cutting-outline lengths; inset stitch
-paths can still differ. Choose **Stitch matched** afterwards to create the holes.
+folded pieces are excluded. The outline is adjusted to match the inset stitch lengths; slit slant is unchanged.
+The unequal-length warning uses the inset too and updates when it changes.
+Choose **Stitch matched** afterwards to create the holes.

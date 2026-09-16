@@ -1494,4 +1494,36 @@ t('undo clears seam targets and refreshes matched controls after a length adjust
   assert.equal(ctx.stitchMulti.length,0);assert.equal(ctx.stitchSideA,null);assert.equal(refreshed,1);
 });
 
+t('matched warning measures the same inset chains used by placement', () => {
+  const source=require('fs').readFileSync(require.resolve('../js/app.js'),'utf8'),vm=require('vm');
+  const start=source.indexOf('    if (matched && stitchSideA && stitchMulti.length)'),end=source.indexOf("    const btn = $('st-apply');",start);
+  const fields={'st-off':{value:'.3'},'st-match-notice':{}};
+  const seen=[];
+  const ctx={Geo,matched:true,stitchSideA:['A'],stitchMulti:['B'],$:id=>fields[id],
+    stitchChains:(targets,inset)=>{seen.push(inset);return [{path:[N(0,0),N(targets[0]==='A'?10-inset:10-2*inset,0)],loop:false}];},
+    matchedLengthNotice:(a,b)=>Math.abs(a-b)<.01?'':`${a}/${b}`};
+  vm.runInNewContext(source.slice(start,end),ctx);
+  assert.deepEqual(seen,[.3,.3]);assert.equal(fields['st-match-notice'].textContent,'9.7/9.4');assert(!fields['st-match-notice'].hidden);
+  fields['st-off'].value='0';vm.runInNewContext(source.slice(start,end),ctx);assert(fields['st-match-notice'].hidden);
+});
+
+t('inset matching adjusts B against the actual stitch path and keeps A unchanged', () => {
+  const source=require('fs').readFileSync(require.resolve('../js/app.js'),'utf8'),vm=require('vm');
+  const ctx={Geo};
+  for(const [start,end] of [['  function edgeGuideNodes(','  function newGuidePiece('],['  function matchInsetChainLength(','  function previewSeamMatch(']])vm.runInNewContext(source.slice(source.indexOf(start),source.indexOf(end,source.indexOf(start))),ctx);
+  const A={piece:{path:{closed:true,nodes:[N(0,0),N(10,0),N(10,5),N(0,5)]}},anchor:{segs:[0,1]}};
+  const saved=JSON.stringify(A);
+  for(const width of [14,15])for(const end of ['start','end']) {
+    const B={piece:{path:{closed:true,nodes:[N(0,0),N(width,0),N(width,5),N(0,5)]}},anchor:{segs:[0]}};
+    const original=JSON.stringify(B),r=ctx.matchInsetChainLength(A,B,.3,end);
+    assert(Math.abs(r.insetTarget-14.4)<1e-8);
+    assert(Math.abs(r.insetAfter-r.insetTarget)<.0001);
+    assert.equal(JSON.stringify(B),original);assert.equal(JSON.stringify(A),saved);
+    assert.equal(Math.sign(r.delta),width===14?1:-1);
+  }
+  const B={piece:{path:{closed:true,nodes:[N(0,0,null,{x:3,y:-1}),N(14,0,{x:-3,y:-1}),N(14,5),N(0,5)]}},anchor:{segs:[0]}};
+  const r=ctx.matchInsetChainLength(A,B,.3,'end');assert(Math.abs(r.insetAfter-r.insetTarget)<.0001);
+  assert.throws(()=>ctx.matchInsetChainLength(A,A,.3,'end'),/already match/);
+});
+
 console.log(`\n${passed} tests passed${process.exitCode ? ' (with failures)' : ''}`);
