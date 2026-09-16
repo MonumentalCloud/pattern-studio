@@ -1526,4 +1526,14 @@ t('inset matching adjusts B against the actual stitch path and keeps A unchanged
   assert.throws(()=>ctx.matchInsetChainLength(A,A,.3,'end'),/already match/);
 });
 
+t('failed stitching restores the document and shows the reason beside the action', () => {
+  const source=require('fs').readFileSync(require.resolve('../js/app.js'),'utf8'),vm=require('vm');
+  const start=source.indexOf('  function cancelStitchChange('),end=source.indexOf("  $('sp-slit-ang-sel')",start);
+  let shown=0;const fields={'status-hint':{},'st-workflow':{value:'create'},'st-match-notice':{hidden:true,scrollIntoView:()=>shown++},'st-edit-notice':{hidden:true,scrollIntoView:()=>shown++}};
+  const ctx={doc:{pieces:['partial']},pendingSnapshot:'{"pieces":[]}',renderAll:()=>{},$:id=>fields[id]};
+  vm.runInNewContext(source.slice(start,end)+`;cancelStitchChange('Slot crosses outline');`,ctx);
+  assert.equal(ctx.doc.pieces.length,0);assert.equal(ctx.pendingSnapshot,null);
+  assert.equal(fields['st-match-notice'].hidden,false);assert.match(fields['st-match-notice'].textContent,/Slot crosses outline/);assert.match(fields['st-match-notice'].textContent,/No changes made/);assert.equal(shown,1);
+});
+
 console.log(`\n${passed} tests passed${process.exitCode ? ' (with failures)' : ''}`);

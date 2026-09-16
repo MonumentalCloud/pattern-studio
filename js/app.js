@@ -3786,7 +3786,7 @@
       if (chain.anchor.segs) slit.sourceSegments = chain.anchor.segs.slice();
       if (isCut) slit.cut = chain.anchor.cut;
       if (Math.abs(tofI) > 1e-6) slit.toff = tofI;
-      if (!Geo.slitFitsPiece(piece, slit)) throw new Error('A slot crosses the outline or a cutout. Increase inset or reduce slit length/width.');
+      if (!Geo.slitFitsPiece(piece, slit)) throw new Error(`A slot on “${piece.name || 'this piece'}” crosses the outline or a cutout. Increase inset or reduce slit length/width.`);
       piece.stitchSlits.push(slit);
       placed++;
     }
@@ -3832,14 +3832,12 @@
     const chainsA = stitchChains(aTargets, off);
     const chainsB = stitchChains(bTargets, off);
     if (chainsA.length !== 1 || chainsB.length !== 1) {
-      $('status-hint').textContent =
-        'Each side must be ONE continuous run — pick connected edges (or a single guide / cutout) per side.';
-      return;
+      throw new Error('Each side must be ONE continuous run — pick connected edges (or a single guide / cutout) per side.');
     }
     const A = chainsA[0], B = chainsB[0];
     const lenA = Geo.pathLength(A.path, A.loop);
     const lenB = Geo.pathLength(B.path, B.loop);
-    if (lenA < 1e-6 || lenB < 1e-6) return;
+    if (!Number.isFinite(lenA) || !Number.isFinite(lenB) || lenA < 1e-6 || lenB < 1e-6) throw new Error('One inset stitch path has no usable length. Reduce the inset or select different edges.');
     const count = Math.max(2, Math.round(lenA / spacing));
     beginChange();
     const settings = {width:Number($('st-width').value) / 10, ang:stitchAngle(), abs:stitchAngleAbs(), pair:uid()};
@@ -5127,6 +5125,10 @@
     if (pendingSnapshot != null) { doc = JSON.parse(pendingSnapshot); pendingSnapshot = null; }
     renderAll();
     $('status-hint').textContent = message;
+    const notice=$($('st-workflow').value==='create'?'st-match-notice':'st-edit-notice');
+    notice.textContent=`Stitching cancelled. ${message} No changes made.`;
+    notice.hidden=false;
+    notice.scrollIntoView({block:'nearest'});
   }
 
   $('sp-slit-ang-sel').addEventListener('click', () => applySlitAngle(false));
