@@ -1536,4 +1536,25 @@ t('failed stitching restores the document and shows the reason beside the action
   assert.equal(fields['st-match-notice'].hidden,false);assert.match(fields['st-match-notice'].textContent,/Slot crosses outline/);assert.match(fields['st-match-notice'].textContent,/No changes made/);assert.equal(shown,1);
 });
 
+t('matched stitching skips the union of unsafe pair indices without moving surviving holes', () => {
+  const source=require('fs').readFileSync(require.resolve('../js/app.js'),'utf8'),vm=require('vm');
+  const a={path:{closed:true,nodes:[N(0,0),N(5,0),N(5,2),N(0,2)]},cutouts:[{nodes:[N(1.2,.1),N(1.4,.1),N(1.4,.4),N(1.2,.4)]}],stitchSlits:[]};
+  const b={path:{closed:true,nodes:[N(0,0),N(5,0),N(5,2),N(0,2)]},holes:[{x:3.7,y:.25,r:.1}],stitchSlits:[]};
+  const fields={'st-spacing':{value:'.5'},'st-len':{value:'.18'},'st-off':{value:'.25'},'st-width':{value:'.5'},'status-hint':{}};
+  let changes=0;const ctx={Geo,$:id=>fields[id],stitchAngle:()=>-45,stitchAngleAbs:()=>false,uid:()=> 'pair',nextStitchRun:()=>1,
+    stitchChains:piece=>[{piece,path:[N(.1,.25),N(4.9,.25)],loop:false,anchor:{kind:'outline',segs:[0]}}],
+    beginChange:()=>changes++,endChange:()=>{},updateStitchUi:()=>{},renderAll:()=>{},fmt:x=>x.toFixed(2)};
+  for(const [start,end] of [['  function stitchPlaceRun(','  // single mode:'],['  function stitchMatched(','  // the panel button / Enter:']])vm.runInNewContext(source.slice(source.indexOf(start),source.indexOf(end,source.indexOf(start))),ctx);
+  ctx.stitchMatched(a,b);
+  assert.equal(changes,1);assert.equal(a.stitchSlits.length,8);assert.equal(b.stitchSlits.length,8);
+  for(const p of [a,b])for(const [i,sl] of p.stitchSlits.entries()) {
+    assert(Geo.slitFitsPiece(p,sl));assert.equal(sl.ang,-45);assert.equal(sl.pair,'pair');
+    const line=Geo.slitLine(p.path.nodes[sl.seg],p.path.nodes[(sl.seg+1)%4],sl,1);
+    assert(Math.abs((line.a.x+line.b.x)/2-[.34,.82,1.78,2.26,2.74,3.22,4.18,4.66][i])<1e-6);
+  }
+  assert.match(fields['status-hint'].textContent,/Skipped 2 pair/);
+  const blocked={...a,cutouts:[{nodes:[N(0,.05),N(5,.05),N(5,.5),N(0,.5)]}],stitchSlits:[]};
+  assert.throws(()=>ctx.stitchMatched(blocked,b),/No safe pairs remain/);assert.equal(changes,1);assert.equal(blocked.stitchSlits.length,0);assert.equal(b.stitchSlits.length,8);
+});
+
 console.log(`\n${passed} tests passed${process.exitCode ? ' (with failures)' : ''}`);

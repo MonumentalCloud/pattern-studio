@@ -164,3 +164,8 @@ notches or stitch holes on affected edges first. Full loops, guides, cutouts and
 folded pieces are excluded. The outline is adjusted to match the inset stitch lengths; slit slant is unchanged.
 The unequal-length warning uses the inset too and updates when it changes.
 Choose **Stitch matched** afterwards to create the holes.
+
+Matched stitching skips a slot pair if either slot crosses an outline or cutout.
+Both sides omit the same pair index; remaining positions, spacing and slant stay
+unchanged. The result reports the number skipped. If no safe pairs remain, the
+operation makes no changes.

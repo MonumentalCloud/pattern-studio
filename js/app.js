@@ -3739,7 +3739,7 @@
 
   // place holes at the given arc-length fractions of a chain's path, anchoring
   // each back into the document (per-hole off/toff keep corner miters exact)
-  function stitchPlaceRun(chain, fractions, slitLen, settings) {
+  function stitchPlaceRun(chain, fractions, slitLen, settings, rejected) {
     settings = settings || {width:Number($('st-width').value) / 10, ang:stitchAngle(), abs:stitchAngleAbs()};
     if (!Number.isFinite(settings.width) || settings.width < 0 || settings.width > slitLen) throw new Error('Slot width must be between 0 and slit length.');
     const piece = chain.piece;
@@ -3764,16 +3764,19 @@
       ? -Geo.outwardSign(Geo.pathPolyline(anchorNodes, true, 0.05))
       : (piece.path.closed ? Geo.outwardSign(Geo.pathPolyline(anchorNodes, true, 0.05)) : 1);
     const piecePoly = !isCut && piece.path.closed ? Geo.pathPolyline(piece.path.nodes, true, 0.05) : null;
-    for (const pos of Geo.pathArcParams(chain.path, chain.loop, fractions)) {
+    for (const [index,pos] of Geo.pathArcParams(chain.path, chain.loop, fractions).entries()) {
       const P = Geo.segPoint(chain.path[pos.seg], chain.path[(pos.seg + 1) % chain.path.length], pos.t);
       if (piecePoly && !Geo.pointInPolygon(piecePoly, P)) {
         // holes on the outline itself sit exactly on the boundary — only
         // reject when a real inset would land outside
         const bhit = Geo.nearestOnPath(piece.path.nodes, piece.path.closed, P);
-        if (!bhit || bhit.dist > 0.05) throw new Error('The stitch run falls outside the piece. Reduce the inset.');
+        if (!bhit || bhit.dist > 0.05) {
+          if(rejected){rejected.add(index);continue;}
+          throw new Error('The stitch run falls outside the piece. Reduce the inset.');
+        }
       }
       const hit = Geo.nearestOnPath(anchorNodes, anchorClosed, P);
-      if (!hit) continue;
+      if (!hit) { if(rejected)rejected.add(index); continue; }
       const a = anchorNodes[hit.seg], b = anchorNodes[(hit.seg + 1) % nA];
       const q = Geo.segPoint(a, b, hit.t);
       const tan = Geo.segTangent(a, b, hit.t);
@@ -3786,7 +3789,10 @@
       if (chain.anchor.segs) slit.sourceSegments = chain.anchor.segs.slice();
       if (isCut) slit.cut = chain.anchor.cut;
       if (Math.abs(tofI) > 1e-6) slit.toff = tofI;
-      if (!Geo.slitFitsPiece(piece, slit)) throw new Error(`A slot on “${piece.name || 'this piece'}” crosses the outline or a cutout. Increase inset or reduce slit length/width.`);
+      if (!Geo.slitFitsPiece(piece, slit)) {
+        if(rejected){rejected.add(index);continue;}
+        throw new Error(`A slot on “${piece.name || 'this piece'}” crosses the outline or a cutout. Increase inset or reduce slit length/width.`);
+      }
       piece.stitchSlits.push(slit);
       placed++;
     }
@@ -3839,16 +3845,22 @@
     const lenB = Geo.pathLength(B.path, B.loop);
     if (!Number.isFinite(lenA) || !Number.isFinite(lenB) || lenA < 1e-6 || lenB < 1e-6) throw new Error('One inset stitch path has no usable length. Reduce the inset or select different edges.');
     const count = Math.max(2, Math.round(lenA / spacing));
-    beginChange();
     const settings = {width:Number($('st-width').value) / 10, ang:stitchAngle(), abs:stitchAngleAbs(), pair:uid()};
-    stitchPlaceRun(A, stitchFractions(count, A.loop), slitLen, {...settings, pairSide:"A"});
-    stitchPlaceRun(B, stitchFractions(count, B.loop), slitLen, {...settings, pairSide:"B"});
+    const rejected=new Set(),fa=stitchFractions(count,A.loop),fb=stitchFractions(count,B.loop);
+    // Probe copies so a rejected slot on either side removes the same pair index.
+    for(const [chain,fractions] of [[A,fa],[B,fb]]) {
+      stitchPlaceRun({...chain,piece:{...chain.piece,stitchSlits:[]}},fractions,slitLen,settings,rejected);
+    }
+    if(rejected.size===count)throw new Error('Every matched slot crosses a boundary. No safe pairs remain; adjust the inset or selected edges.');
+    beginChange();
+    stitchPlaceRun(A, fa.filter((_,i)=>!rejected.has(i)), slitLen, {...settings, pairSide:"A"});
+    stitchPlaceRun(B, fb.filter((_,i)=>!rejected.has(i)), slitLen, {...settings, pairSide:"B"});
     endChange();
     stitchSideA = null;
     stitchMulti = [];
     updateStitchUi();
     $('status-hint').textContent =
-      `${count} matched slits per side (${fmt(lenA)} vs ${fmt(lenB)} cm)`;
+      `${count-rejected.size} matched slits per side (${fmt(lenA)} vs ${fmt(lenB)} cm)${rejected.size ? ` · Skipped ${rejected.size} pair(s) crossing a boundary; remaining positions unchanged` : ''}`;
     renderAll();
   }
 
