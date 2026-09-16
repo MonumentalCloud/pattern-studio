@@ -1431,4 +1431,22 @@ t('selected-edge total sums only selected arc lengths before rounding', () => {
   ctx.showSegs=false;vm.runInNewContext(source.slice(start,end),ctx);assert(fields['sel-segs-total-row'].hidden);
 });
 
+t('Boolean classifies sub-flattening-width curved bulges without creating false branches', () => {
+  const a=[N(.4,-3,null,{x:-.2,y:1}),N(.008,0,{x:.03,y:-1},{x:-.0056,y:.175}),N(0,.5,{x:-.00027,y:-.1575}),N(1,.5),N(2,10),N(12.005,10),N(12.005,-3)];
+  const b=[N(0,0),N(12,0),N(12,20),N(0,20)],before=JSON.stringify([a,b]);
+  const pa=Geo.pathPolyline(a,true,1e-9),pb=Geo.pathPolyline(b,true,1e-9);
+  for(const A of [a,Geo.reverseNodes(a)]) for(const B of [b,Geo.reverseNodes(b)]) for(const op of ['union','intersect']) {
+    const r=Geo.booleanOutline(A,B,op), poly=Geo.pathPolyline(r.nodes,true,1e-9);
+    for(const x of [-.00004,-.00001,-.000005,.000002,.005,.2,1,11.9999,12.004,12.01]) for(const y of [-2,.1,.44,.46,.48,.501,1,9,15,21]) {
+      const p={x,y},ina=Geo.pointInPolygon(pa,p),inb=Geo.pointInPolygon(pb,p);
+      assert.equal(Geo.pointInPolygon(poly,p),op==='union'?ina||inb:ina&&inb,`${op} at ${x},${y}`);
+    }
+    for(let i=0;i<r.nodes.length;i++) {
+      const s=r.sources[i],ns=s.owner?B:A;
+      for(const t of [0,.25,.5,.75,1])assert(Geo.dist(Geo.segPoint(r.nodes[i],r.nodes[(i+1)%r.nodes.length],t),Geo.segPoint(ns[s.seg],ns[(s.seg+1)%ns.length],s.t0+(s.t1-s.t0)*t))<1e-7);
+    }
+  }
+  assert.equal(JSON.stringify([a,b]),before);
+});
+
 console.log(`\n${passed} tests passed${process.exitCode ? ' (with failures)' : ''}`);

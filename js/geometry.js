@@ -421,6 +421,35 @@
     return out;
   }
 
+  // Horizontal-ray test on the actual cubics. Flattening can erase a narrow
+  // bulge and misclassify the neighboring Boolean boundary fragment.
+  function pointInClosedPath(nodes, p) {
+    let inside=false;
+    for(let i=0;i<nodes.length;i++) {
+      const a=nodes[i],b=nodes[(i+1)%nodes.length];
+      if(segIsLine(a,b)) {
+        if((a.y>p.y)!==(b.y>p.y)&&p.x<a.x+(b.x-a.x)*(p.y-a.y)/(b.y-a.y))inside=!inside;
+        continue;
+      }
+      const {c1,c2}=segCtrl(a,b);
+      const A=-a.y+3*c1.y-3*c2.y+b.y,B=2*(a.y-2*c1.y+c2.y),C=c1.y-a.y;
+      const d=B*B-4*A*C;
+      const roots=Math.abs(A)<1e-14?(Math.abs(B)<1e-14?[]:[-C/B]):d<0?[]:[(-B+Math.sqrt(d))/(2*A),(-B-Math.sqrt(d))/(2*A)];
+      const ts=[0,...roots.filter(t=>t>0&&t<1).sort((x,y)=>x-y),1];
+      for(let k=1;k<ts.length;k++) {
+        let lo=ts[k-1],hi=ts[k];
+        const above=segPoint(a,b,lo).y>p.y;
+        if(above===(segPoint(a,b,hi).y>p.y))continue;
+        for(let j=0;j<48;j++) {
+          const mid=(lo+hi)/2;
+          if((segPoint(a,b,mid).y>p.y)===above)lo=mid;else hi=mid;
+        }
+        if(segPoint(a,b,(lo+hi)/2).x>p.x)inside=!inside;
+      }
+    }
+    return inside;
+  }
+
   // Split and classify source boundaries; never replace curves by polylines.
   // One output contour is supported. Multiple islands/holes need a compound
   // Boolean result model before they can be committed safely by the editor.
@@ -486,7 +515,7 @@
         keep=owner===0&&(same?op!=='subtract':op==='subtract');
       } else {
         if(nearestOnPath(paths[1-owner],true,middle).dist<1e-7) throw new Error('Coincident curved boundaries cannot yet be combined safely. No changes made.');
-        const inside=pointInPolygon(polys[1-owner],middle);
+        const inside=pointInClosedPath(paths[1-owner],middle);
         keep=op==='union'?!inside:op==='intersect'?inside:owner===0?!inside:inside;
       }
       if(!keep)continue;
