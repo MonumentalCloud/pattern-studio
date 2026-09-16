@@ -609,7 +609,7 @@
     return { a2, mid, b2 };
   }
 
-  // Preview-only measurement: integrate speed, including collinear backtracking.
+  // Integrate speed, including collinear backtracking.
   function preciseSegLength(a, b) {
     if (segIsLine(a, b)) return dist(a, b);
     const {c1, c2} = segCtrl(a, b);
@@ -625,6 +625,71 @@
       return integrate(l,m,fl,f1,fm,left,eps/2,depth-1)+integrate(m,r,fm,f2,fr,right,eps/2,depth-1);
     }
     return integrate(0,1,speed(0),speed(.5),speed(1),(speed(0)+4*speed(.5)+speed(1))/6,1e-9,20);
+  }
+
+  function selectedEdgeLength(nodes, segs) {
+    return segs.reduce((sum,i)=>sum+preciseSegLength(nodes[i],nodes[(i+1)%nodes.length]),0);
+  }
+
+  // Endpoint-only adjustment. Interior curves are never scaled or refitted.
+  function matchChainLength(piece, segs, target, end) {
+    const nodes=piece.path.nodes,n=nodes.length,closed=piece.path.closed;
+    const count=closed?n:n-1;
+    if(!['start','end'].includes(end)||!Number.isFinite(target)||target<=0)throw new Error('Choose an endpoint and a positive target length.');
+    if(!segs.length||new Set(segs).size!==segs.length||segs.some((s,i)=>!Number.isInteger(s)||s<0||s>=count||(i&&s!==(segs[i-1]+1)%n))||(closed&&segs.length===n))throw new Error('Select one connected chain with two endpoints, not a full loop.');
+    const length=selectedEdgeLength(nodes,segs),delta=target-length;
+    if(Math.abs(delta)<1e-7)throw new Error('These outline lengths already match.');
+    const first=end==='start',seg=first?segs[0]:segs[segs.length-1];
+    const ai=seg,bi=(seg+1)%n,endpoint=first?ai:bi;
+    const neighbor=first?(ai>0?ai-1:closed?n-1:-1):(bi<count?bi:-1);
+    if(piece.foldSeg===seg||piece.foldSeg===neighbor)throw new Error('This endpoint touches a fold edge. Unfold the piece before adjusting it.');
+    const marked=q=>q.cut==null&&(q.seg===seg||q.seg===neighbor);
+    if((piece.notches||[]).some(marked)||(piece.stitchSlits||[]).some(marked))throw new Error('Remove notches or stitch holes from the end edge and its adjoining edge before adjusting this endpoint. Marks elsewhere stay unchanged.');
+    const result=JSON.parse(JSON.stringify(piece)),out=result.path.nodes;
+    const beforePoint={x:nodes[endpoint].x,y:nodes[endpoint].y};
+    let mappedSegs=segs.slice(),afterIndex=endpoint;
+    if(delta<0) {
+      const edgeLength=preciseSegLength(nodes[ai],nodes[bi]),remaining=edgeLength+delta;
+      if(remaining<=1e-6)throw new Error('This adjustment would remove an entire end segment. Choose the other end or select a shorter chain.');
+      let lo=0,hi=1,split;
+      for(let i=0;i<55;i++) {
+        const t=(lo+hi)/2;split=splitSeg(nodes[ai],nodes[bi],t);
+        const len=first?preciseSegLength(split.mid,split.b2):preciseSegLength(split.a2,split.mid);
+        if((len<remaining)!==first)lo=t;else hi=t;
+      }
+      split=splitSeg(nodes[ai],nodes[bi],(lo+hi)/2);
+      if(first){out[ai]={...split.mid,hin:nodes[ai].hin};out[bi]=split.b2;}
+      else {out[ai]=split.a2;out[bi]={...split.mid,hout:nodes[bi].hout};}
+    } else {
+      const tangent=segTangent(nodes[ai],nodes[bi],first?0:1),direction=first?-1:1;
+      const at=nodes[endpoint],point={x:at.x+direction*delta*tangent.x,y:at.y+direction*delta*tangent.y,hin:null,hout:null};
+      // Insert before the old start / after the old end. Wraparound is mapped
+      // explicitly so the last edge of a closed piece remains attached.
+      const insert=first?endpoint:endpoint+1;
+      const mapNode=i=>i>=insert?i+1:i;
+      const mapSeg=i=>!first&&i===endpoint?insert:mapNode(i);
+      if(first){point.hin=at.hin;out[endpoint].hin=null;}
+      else {point.hout=at.hout;out[endpoint].hout=null;}
+      out.splice(insert,0,point);afterIndex=insert;
+      const extension=first?insert:mapNode(endpoint);
+      mappedSegs=segs.map(mapSeg);
+      if(first)mappedSegs.unshift(extension);else mappedSegs.push(extension);
+      for(const key of ['notches','stitchSlits'])for(const mark of result[key]||[]) {
+        if(mark.cut!=null)continue;
+        mark.seg=mapSeg(mark.seg);
+        if(mark.sourceSegments)mark.sourceSegments=mark.sourceSegments.map(mapSeg);
+      }
+      if(result.foldSeg!=null)result.foldSeg=mapSeg(result.foldSeg);
+    }
+    const sign=outwardSign(pathPolyline(nodes,closed));
+    for(let i=0;i<(piece.notches||[]).length;i++) {
+      const before=notchLinesPath(nodes,closed,piece.notches[i],sign,piece.notchLength||.4,piece.notchStyle||'slit');
+      const after=notchLinesPath(out,closed,result.notches[i],sign,piece.notchLength||.4,piece.notchStyle||'slit');
+      if(before.length!==after.length||before.some((line,j)=>dist(line.a,after[j].a)>1e-5||dist(line.b,after[j].b)>1e-5))throw new Error('This adjustment would change a nearby notch. Remove that notch first or choose the other endpoint.');
+    }
+    const afterLength=selectedEdgeLength(out,mappedSegs);
+    if(Math.abs(afterLength-target)>1e-6)throw new Error('Could not match the length precisely. No changes made.');
+    return {piece:result,segs:mappedSegs,beforeLength:length,afterLength,target,delta,beforePoint,afterPoint:{x:out[afterIndex].x,y:out[afterIndex].y}};
   }
 
   function curveBounds(nodes, closed) {
@@ -1166,7 +1231,7 @@
     segCtrl, segIsLine, segPoint, segTangent, segFlatten, segLength, segMidpoint, pathMidpoints,
     cubicPoint, cubicTangent, flattenCubic,
     pathPolyline, pathLength, polyArea, bbox, centroid, polyCentroid, labelBox, dedupe,
-    outwardSign, offsetClosed, nearestOnPath, pointInPolygon, splitSeg, setSegLength, deletePointKeepCurve,
+    outwardSign, offsetClosed, nearestOnPath, pointInPolygon, splitSeg, setSegLength, deletePointKeepCurve, selectedEdgeLength, matchChainLength,
     reverseNodes, weldClosedPaths, reflectPoint, reflectNodes, segArcParams, slitLine, slitContour, slitFitsPiece, notchLines, notchLinesPath,
     pathArcParams, simplifyPoly, offsetOpen, pathIntersections, booleanOutline, sewSlits, clipLoops,
   };

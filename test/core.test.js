@@ -1449,4 +1449,49 @@ t('Boolean classifies sub-flattening-width curved bulges without creating false 
   assert.equal(JSON.stringify([a,b]),before);
 });
 
+t('match seam chains trims exact curves and extends tangentially at either endpoint, including wraparound', () => {
+  const nodes=[N(0,0,null,{x:2,y:-1}),N(6,0,{x:-2,y:-1}),N(6,5),N(0,5)];
+  const piece={path:{nodes,closed:true},notches:[],stitchSlits:[]},before=JSON.stringify(piece);
+  for(const segs of [[0,1],[3,0],[2,3]])for(const end of ['start','end'])for(const delta of [-.01,.01]) {
+    const target=Geo.selectedEdgeLength(nodes,segs)+delta,r=Geo.matchChainLength(piece,segs,target,end);
+    assert(Math.abs(Geo.selectedEdgeLength(r.piece.path.nodes,r.segs)-target)<1e-7);
+    const terminal=end==='start'?0:segs.length-1,ns=r.piece.path.nodes;
+    // Every interior segment retains its exact original control geometry.
+    for(let j=0;j<segs.length;j++)if(delta>0||j!==terminal) {
+      const mapped=r.segs[j+(delta>0&&end==='start'?1:0)],old=segs[j];
+      for(const t of [0,.25,.5,.75,1])assert(Geo.dist(Geo.segPoint(nodes[old],nodes[(old+1)%4],t),Geo.segPoint(ns[mapped],ns[(mapped+1)%ns.length],t))<1e-9);
+    }
+    if(delta<0) {
+      const old=segs[terminal],mapped=r.segs[terminal],a=nodes[old],b=nodes[(old+1)%4];
+      // Find the retained endpoint on the original cubic, then compare its full retained subcurve.
+      let lo=0,hi=1;
+      const endpoint=end==='start'?ns[mapped]:ns[(mapped+1)%ns.length];
+      for(let k=0;k<70;k++) {
+        const l=lo+(hi-lo)/3,h=hi-(hi-lo)/3;
+        if(Geo.dist(Geo.segPoint(a,b,l),endpoint)<Geo.dist(Geo.segPoint(a,b,h),endpoint))hi=h;else lo=l;
+      }
+      const cut=(lo+hi)/2;
+      for(const t of [0,.25,.5,.75,1])assert(Geo.dist(Geo.segPoint(ns[mapped],ns[(mapped+1)%ns.length],t),Geo.segPoint(a,b,end==='start'?cut+(1-cut)*t:cut*t))<1e-7);
+    }
+  }
+  assert.equal(JSON.stringify(piece),before);
+  assert.throws(()=>Geo.matchChainLength(piece,[0,2],5,'end'),/connected/);
+  assert.throws(()=>Geo.matchChainLength(piece,[0,1,2,3],5,'end'),/full loop/);
+  assert.throws(()=>Geo.matchChainLength(piece,[0,1],1,'end'),/entire end segment/);
+  assert.throws(()=>Geo.matchChainLength({...piece,notches:[{seg:1,t:.5}]},[0],7,'end'),/Remove notches/);
+  assert.throws(()=>Geo.matchChainLength({...piece,foldSeg:1},[0],7,'end'),/fold edge/);
+  const marked={...piece,notches:[{seg:2,t:.5}],stitchSlits:[{seg:2,t:.4,sourceSegments:[2]}]};
+  const r=Geo.matchChainLength(marked,[0],7,'start');
+  assert.equal(r.piece.notches[0].seg,3);assert.deepEqual(r.piece.stitchSlits[0].sourceSegments,[3]);
+});
+
+t('undo clears seam targets and refreshes matched controls after a length adjustment', () => {
+  const source=require('fs').readFileSync(require.resolve('../js/app.js'),'utf8'),vm=require('vm');
+  const start=source.indexOf('  function applySnapshot('),end=source.indexOf('  function undo()',start);
+  let refreshed=0;
+  const ctx={doc:null,stitchMulti:[{pieceId:'b',seg:4}],stitchSideA:[{pieceId:'a',seg:0}],sel:{},tool:'stitch',autosave:()=>{},renderAll:()=>{},updateStitchUi:()=>refreshed++};
+  vm.runInNewContext(source.slice(start,end)+`;applySnapshot('{"pieces":[]}');`,ctx);
+  assert.equal(ctx.stitchMulti.length,0);assert.equal(ctx.stitchSideA,null);assert.equal(refreshed,1);
+});
+
 console.log(`\n${passed} tests passed${process.exitCode ? ' (with failures)' : ''}`);

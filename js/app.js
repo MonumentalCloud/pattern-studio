@@ -117,11 +117,13 @@
   }
   function applySnapshot(json) {
     doc = JSON.parse(json);
+    stitchMulti = []; stitchSideA = null;
     // selection may point at removed things
     if (sel.pieceId && !pieceById(sel.pieceId)) clearSel();
     else { sel.kind = null; sel.handle = null; }
     autosave();
     renderAll();
+    if(tool==='stitch')updateStitchUi();
   }
   function undo() {
     if (!undoStack.length) return;
@@ -3438,12 +3440,64 @@
   // Two explicit modes (st-mode): "single" runs holes along every selected
   // target independently; "matched" gathers side A, confirms, gathers side B,
   // then gives BOTH sides the same number of holes at matching fractions.
+  let seamMatchContext=null, seamMatchProposal=null;
+  function outlineChainLength(chain) {
+    return chain.anchor.kind==='outline'
+      ? Geo.selectedEdgeLength(chain.piece.path.nodes,chain.anchor.segs)
+      : Geo.pathLength(chain.path,chain.loop);
+  }
+  function previewSeamMatch() {
+    seamMatchProposal=null;clear($('match-seam-preview'));
+    try {
+      const {a,b}=seamMatchContext;
+      const plan=Geo.matchChainLength(b.piece,b.anchor.segs,outlineChainLength(a),$('match-seam-end').value);
+      seamMatchProposal=plan;
+      const pts=Geo.pathPolyline(b.piece.path.nodes,b.piece.path.closed,.01).concat(Geo.pathPolyline(plan.piece.path.nodes,plan.piece.path.closed,.01));
+      const bb=Geo.bbox(pts),pad=Math.max(bb.maxX-bb.minX,bb.maxY-bb.minY,1)*.1;
+      $('match-seam-preview').setAttribute('viewBox',`${bb.minX-pad} ${bb.minY-pad} ${bb.maxX-bb.minX+2*pad} ${bb.maxY-bb.minY+2*pad}`);
+      el('path',{d:pathD(b.piece.path.nodes,b.piece.path.closed),fill:'none',stroke:'#999','stroke-width':3,'stroke-dasharray':'5 4','vector-effect':'non-scaling-stroke'},$('match-seam-preview'));
+      el('path',{d:pathD(plan.piece.path.nodes,plan.piece.path.closed),fill:'none',stroke:'#168c86','stroke-width':2,'vector-effect':'non-scaling-stroke'},$('match-seam-preview'));
+      const ns=b.piece.path.nodes,segs=b.anchor.segs;
+      for(const [label,p] of [['Start',ns[segs[0]]],['End',ns[(segs[segs.length-1]+1)%ns.length]]]) {
+        el('circle',{cx:p.x,cy:p.y,r:pad*.12,fill:'#b26300'},$('match-seam-preview'));
+        el('text',{x:p.x+pad*.18,y:p.y-pad*.16,fill:'#633900','font-size':pad*.38},$('match-seam-preview')).textContent=label;
+      }
+      const mm=x=>(x*10).toFixed(4);
+      $('match-seam-message').textContent=`A stays ${mm(plan.target)} mm. B: ${mm(plan.beforeLength)} → ${mm(plan.afterLength)} mm. ${plan.delta<0?'Trim':'Extend'} ${$('match-seam-end').value} by ${mm(Math.abs(plan.delta))} mm. The adjoining edge reconnects to the new endpoint; check its shape below.`;
+    } catch(e) { $('match-seam-message').textContent=e.message; }
+    $('match-seam-apply').disabled=!seamMatchProposal;
+    $('match-seam-preview').style.display=seamMatchProposal?'':'none';
+  }
+  $('st-match-length').addEventListener('click',()=>{
+    try {
+      const aa=stitchChains(stitchSideA||[],0),bb=stitchChains(stitchMulti,0);
+      if(aa.length!==1||bb.length!==1||aa[0].loop||bb[0].loop||aa[0].anchor.kind!=='outline'||bb[0].anchor.kind!=='outline')throw new Error('Select one connected chain of outline edges per side, with two endpoints. Full loops, guides and cutouts cannot use endpoint matching.');
+      if(aa[0].piece.id===bb[0].piece.id)throw new Error('Choose B on a different piece so side A stays fixed.');
+      if(isFolded(aa[0].piece)||isFolded(bb[0].piece))throw new Error('Unfold these pieces before matching their outlines.');
+      seamMatchContext={a:aa[0],b:bb[0]};
+      previewSeamMatch();$('match-seam-dialog').showModal();$('match-seam-end').focus();
+    } catch(e){$('status-hint').textContent=e.message;}
+  });
+  $('match-seam-end').addEventListener('change',previewSeamMatch);
+  $('match-seam-cancel').addEventListener('click',()=>$('match-seam-dialog').close());
+  $('match-seam-dialog').addEventListener('close',()=>{seamMatchContext=null;seamMatchProposal=null;svg.focus();});
+  $('match-seam-apply').addEventListener('click',()=>{
+    if(!seamMatchProposal||!seamMatchContext)return;
+    const plan=seamMatchProposal,id=seamMatchContext.b.piece.id,index=doc.pieces.findIndex(p=>p.id===id);
+    if(index<0)return;
+    beginChange();doc.pieces[index]=plan.piece;endChange();
+    stitchMulti=plan.segs.map(seg=>({pieceId:id,seg}));
+    $('match-seam-dialog').close();renderAll();updateStitchUi();
+    $('status-hint').textContent='B’s outline length now matches A. Review your inset and choose Stitch matched when ready.';
+  });
+
   function matchedLengthNotice(a, b) {
     if (Math.abs(a - b) < 0.01) return '';
     return `Unequal seam lengths: side A ${(a * 10).toFixed(1)} mm, side B ${(b * 10).toFixed(1)} mm. Original side A determines hole count; side B’s spacing adjusts to match. Check that this difference is intentional.`;
   }
   function updateStitchUi() {
     $('st-match-notice').hidden = true;
+    $('st-match-length').hidden = $('st-workflow').value !== 'create' || $('st-mode').value !== 'matched' || !stitchSideA || !stitchMulti.length;
     if ($('st-workflow').value === 'edit') {
       $('status-hint').textContent = 'Edit stitches: click a hole or stitched edge, box-select holes across shapes · Shift adds/removes · Del removes selected holes';
       return;
@@ -3452,7 +3506,7 @@
     if (matched && stitchSideA && stitchMulti.length) {
       const a = stitchChains(stitchSideA, 0), b = stitchChains(stitchMulti, 0);
       if (a.length === 1 && b.length === 1) {
-        $('st-match-notice').textContent = matchedLengthNotice(Geo.pathLength(a[0].path, a[0].loop), Geo.pathLength(b[0].path, b[0].loop));
+        $('st-match-notice').textContent = matchedLengthNotice(outlineChainLength(a[0]), outlineChainLength(b[0]));
         $('st-match-notice').hidden = !$('st-match-notice').textContent;
       }
     }
@@ -3823,7 +3877,7 @@
     const t = ev.target;
     if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')) return;
     const k = ev.key.toLowerCase();
-    if ($('shape-size-dialog').open || $('keep-curve-dialog').open) return;
+    if ($('shape-size-dialog').open || $('keep-curve-dialog').open || $('match-seam-dialog').open) return;
     if (k === 'alt' && drag && drag.type === 'shape') { ev.preventDefault(); openShapeSize(); return; }
     if (ev.code === 'Space') { spaceDown = true; svg.classList.add('panning'); ev.preventDefault(); return; }
     if ((ev.ctrlKey || ev.metaKey) && k === 'z') { ev.shiftKey ? redo() : undo(); ev.preventDefault(); return; }
