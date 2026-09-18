@@ -171,3 +171,8 @@ Matched stitching skips a slot pair if either slot crosses an outline or cutout.
 Both sides omit the same pair index; remaining positions, spacing and slant stay
 unchanged. The result reports the number skipped. If no safe pairs remain, the
 operation makes no changes.
+
+End slots follow the selected seam edges (build 77), including new and re-spaced runs.
+For older runs, use **Stitch → Edit holes/runs → Repair existing seam slants**.
+This undoable action preserves centers, counts and dimensions; unverified source
+edges or unsafe rotations are reported and left unchanged.

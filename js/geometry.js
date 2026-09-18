@@ -545,12 +545,13 @@
 
   // ---- hit testing ----
   // Nearest point on path to p. Returns { seg, t, dist, point } or null.
-  function nearestOnPath(nodes, closed, p) {
+  function nearestOnPath(nodes, closed, p, allowedSegments) {
     const n = nodes.length;
     if (n < 2) return null;
     const segs = closed ? n : n - 1;
     let best = null;
     for (let i = 0; i < segs; i++) {
+      if(allowedSegments && !allowedSegments.includes(i))continue;
       const a = nodes[i], b = nodes[(i + 1) % n];
       const SAMPLES = 32;
       let bt = 0, bd = Infinity;
@@ -1022,6 +1023,19 @@
     return [add(line.a, n), add(line.b, n), sub(line.b, n), sub(line.a, n)];
   }
 
+  // Repair a legacy outline anchor without moving its slot center or changing settings.
+  function repairStitchAnchor(piece, sl) {
+    if(sl.abs||sl.cut!=null||piece.guide||!sl.sourceSegments?.length||sl.sourceSegments.includes(sl.seg))return null;
+    const nodes=piece.path.nodes,n=nodes.length,count=piece.path.closed?n:n-1;
+    if(!nodes[sl.seg]||sl.sourceSegments.some(i=>!Number.isInteger(i)||i<0||i>=count))return null;
+    const sign=piece.path.closed?outwardSign(pathPolyline(nodes,true,.05)):1;
+    const line=slitLine(nodes[sl.seg],nodes[(sl.seg+1)%n],sl,sign),p=lerp(line.a,line.b,.5);
+    const hit=nearestOnPath(nodes,piece.path.closed,p,sl.sourceSegments);
+    if(!hit)return null;
+    const q=segPoint(nodes[hit.seg],nodes[(hit.seg+1)%n],hit.t),tan=segTangent(nodes[hit.seg],nodes[(hit.seg+1)%n],hit.t);
+    return {...sl,seg:hit.seg,t:hit.t,off:(q.x-p.x)*sign*tan.y-(q.y-p.y)*sign*tan.x,toff:(p.x-q.x)*tan.x+(p.y-q.y)*tan.y};
+  }
+
   function slitFitsPiece(piece, sl) {
     if (!sl.width || piece.guide || !piece.path.closed) return true;
     const nodes = sl.cut == null ? piece.path.nodes : (piece.cutouts || [])[sl.cut]?.nodes;
@@ -1255,7 +1269,7 @@
     cubicPoint, cubicTangent, flattenCubic,
     pathPolyline, pathLength, polyArea, bbox, centroid, polyCentroid, labelBox, dedupe,
     outwardSign, offsetClosed, nearestOnPath, pointInPolygon, splitSeg, setSegLength, deletePointKeepCurve, selectedEdgeLength, matchChainLength,
-    reverseNodes, weldClosedPaths, reflectPoint, reflectNodes, segArcParams, slitLine, slitContour, slitFitsPiece, notchLines, notchLinesPath,
+    reverseNodes, weldClosedPaths, reflectPoint, reflectNodes, segArcParams, slitLine, slitContour, slitFitsPiece, repairStitchAnchor, notchLines, notchLinesPath,
     pathArcParams, simplifyPoly, offsetOpen, pathIntersections, booleanOutline, sewSlits, clipLoops,
   };
 });

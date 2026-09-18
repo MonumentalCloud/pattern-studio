@@ -1573,4 +1573,41 @@ t('length matching preserves unaffected marks on adjoining collinear edges', () 
   assert.doesNotThrow(()=>Geo.matchChainLength(open,[0],5.3,'start'));
 });
 
+t('new and retroactive end slots follow source edges while preserving centers and settings', () => {
+  const piece={path:{closed:true,nodes:[N(0,0),N(5,0),N(5,5),N(0,5)]},stitchSlits:[]};
+  const old={seg:0,t:.05,off:.15,len:.18,width:.05,ang:-45,run:1,pair:'p',pairSide:'B',sourceSegments:[3]};
+  const fixed=Geo.repairStitchAnchor(piece,old);assert.equal(fixed.seg,3);
+  const before=Geo.slitLine(piece.path.nodes[0],piece.path.nodes[1],old,1),after=Geo.slitLine(piece.path.nodes[3],piece.path.nodes[0],fixed,1);
+  assert(Geo.dist(Geo.lerp(before.a,before.b,.5),Geo.lerp(after.a,after.b,.5))<1e-9);
+  for(const key of ['len','width','ang','run','pair','pairSide'])assert.equal(fixed[key],old[key]);
+  assert(Geo.slitFitsPiece(piece,fixed));assert.equal(Geo.repairStitchAnchor(piece,fixed),null);
+  assert.equal(Geo.repairStitchAnchor(piece,{...old,abs:true}),null);
+  assert.equal(Geo.repairStitchAnchor(piece,{...old,sourceSegments:undefined}),null);
+  const src=require('fs').readFileSync(require.resolve('../js/app.js'),'utf8'),vm=require('vm'),ctx={Geo,nextStitchRun:()=>1};
+  vm.runInNewContext(src.slice(src.indexOf('  function stitchPlaceRun('),src.indexOf('  function stitchFractions(')),ctx);
+  ctx.stitchPlaceRun({piece,path:[N(.25,4.85),N(.25,.15)],loop:false,anchor:{kind:'outline',segs:[3]}},[0,1],.18,{width:.05,ang:-45,abs:false});
+  assert.deepEqual(piece.stitchSlits.map(s=>s.seg),[3,3]);
+  for(const sl of piece.stitchSlits)assert.equal(sl.ang,-45);
+});
+
+t('retroactive repair skips unverified runs and applies one undoable transaction', () => {
+  const src=require('fs').readFileSync(require.resolve('../js/app.js'),'utf8'),vm=require('vm');
+  const good={id:'good',path:{closed:true,nodes:[N(0,0),N(5,0),N(5,5),N(0,5)]},stitchSlits:[{seg:0,t:.05,off:.15,len:.18,width:.05,ang:-45,run:1,sourceSegments:[3]},... [.3,.7].map(t=>({seg:3,t,off:.25,len:.18,width:.05,ang:-45,run:1,sourceSegments:[3]}))]};
+  const stale=JSON.parse(JSON.stringify(good));stale.id='stale';
+  const before=JSON.stringify(stale),notice={scrollIntoView(){}},events={};let begin=0,end=0;
+  const ctx={Geo,doc:{pieces:[good,stale]},Map,$:id=>id==='st-edit-notice'?notice:{addEventListener:(name,fn)=>events[name]=fn},stitchRunTargets:(p)=>[{seg:p.id==='good'?3:1}],beginChange:()=>begin++,endChange:()=>end++,renderAll:()=>{}};
+  vm.runInNewContext(src.slice(src.indexOf("  $('st-repair-slants').addEventListener"),src.indexOf('  function stitchEditSettings')),ctx);
+  events.click();assert.equal(good.stitchSlits[0].seg,3);assert.equal(JSON.stringify(stale),before);assert.equal(begin,1);assert.equal(end,1);assert.match(notice.textContent,/Repaired 1/);assert.match(notice.textContent,/3 hole.*unverified/);
+  events.click();assert.equal(begin,1);assert.match(notice.textContent,/Repaired 0/);
+});
+
+t('mirror copy remaps saved stitch source edges with its anchors', () => {
+  const src=require('fs').readFileSync(require.resolve('../js/app.js'),'utf8'),vm=require('vm');
+  const p={name:'triangle',path:{closed:true,nodes:[N(0,0),N(5,0),N(1,6)]},stitchSlits:[{seg:0,t:.5,off:.3,len:.18,width:.05,ang:-45,sourceSegments:[0]}]};
+  const ctx={Geo,uid:()=> 'copy',decorate:()=> 'copy',movePiece:()=>{},beginChange:()=>{},endChange:()=>{},selectPiece:()=>{},renderAll:()=>{},doc:{pieces:[]}};
+  vm.runInNewContext(src.slice(src.indexOf('  function duplicatePiece('),src.indexOf('  // ---------- file ops')),ctx);
+  ctx.duplicatePiece(p,true);const copy=ctx.doc.pieces[0],sl=copy.stitchSlits[0];
+  assert.equal(sl.seg,1);assert.equal(sl.sourceSegments[0],1);assert.equal(Geo.repairStitchAnchor(copy,sl),null);assert.equal(sl.ang,-45);
+});
+
 console.log(`\n${passed} tests passed${process.exitCode ? ' (with failures)' : ''}`);

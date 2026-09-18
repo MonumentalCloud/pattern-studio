@@ -3775,7 +3775,7 @@
           throw new Error('The stitch run falls outside the piece. Reduce the inset.');
         }
       }
-      const hit = Geo.nearestOnPath(anchorNodes, anchorClosed, P);
+      const hit = Geo.nearestOnPath(anchorNodes, anchorClosed, P, chain.anchor.segs);
       if (!hit) { if(rejected)rejected.add(index); continue; }
       const a = anchorNodes[hit.seg], b = anchorNodes[(hit.seg + 1) % nA];
       const q = Geo.segPoint(a, b, hit.t);
@@ -4313,6 +4313,7 @@
           if (cn) sl.seg = (2 * cn - 2 - sl.seg) % cn; // cutouts reverse too
         } else {
           sl.seg = copy.path.closed ? (2 * n - 2 - sl.seg) % n : (n - 2 - sl.seg);
+          if(sl.sourceSegments)sl.sourceSegments=sl.sourceSegments.map(i=>copy.path.closed?(2*n-2-i)%n:n-2-i);
         }
         sl.t = 1 - sl.t;
         if (sl.abs) sl.ang = -(sl.ang == null ? 45 : sl.ang); // edge-relative iron slant keeps its handedness
@@ -5022,6 +5023,33 @@
     renderAll(); renderSidebar();
   });
   // re-angle existing holes: the selected ones, or every hole of their run(s)
+  $('st-repair-slants').addEventListener('click',()=>{
+    const changes=[];let blocked=0,unknown=0;
+    const verified=new Map();
+    for(const piece of doc.pieces)for(let i=0;i<(piece.stitchSlits||[]).length;i++) {
+      const old=piece.stitchSlits[i];
+      if(old.abs||old.cut!=null||piece.guide)continue;
+      if(!verified.has(old)){
+        const run=(piece.stitchSlits||[]).filter(s=>old.run!=null&&s.run===old.run&&s.cut==null);
+        let valid=false;
+        try {
+          const targets=stitchRunTargets(piece,run);
+          valid=run.length>=3&&old.sourceSegments?.length>0&&targets.length===old.sourceSegments.length&&targets.every(t=>old.sourceSegments.includes(t.seg))&&run.filter(s=>old.sourceSegments.includes(s.seg)).length>=2&&run.every(s=>s.sourceSegments?.length===old.sourceSegments.length&&s.sourceSegments.every(i=>old.sourceSegments.includes(i)));
+        } catch {}
+        for(const sl of run)verified.set(sl,valid);
+      }
+      if(!verified.get(old)){unknown++;continue;}
+      const next=Geo.repairStitchAnchor(piece,old);
+      if(!next)continue;
+      if(!Geo.slitFitsPiece(piece,next)){blocked++;continue;}
+      changes.push({piece,i,next});
+    }
+    if(changes.length){beginChange();for(const c of changes)c.piece.stitchSlits[c.i]=c.next;endChange();renderAll();}
+    const notice=$('st-edit-notice');
+    notice.textContent=`Repaired ${changes.length} end-slot angle(s). Positions and counts unchanged.${blocked?` ${blocked} left unchanged because rotating them would cross a boundary.`:''}${unknown?` ${unknown} hole(s) have unverified source edges and were left unchanged.`:''}`;
+    notice.hidden=false;notice.scrollIntoView({block:'nearest'});
+  });
+
   function stitchEditSettings() {
     const len = Number($('sp-slit-len').value) / 10;
     const width = Number($('sp-slit-width').value) / 10;
