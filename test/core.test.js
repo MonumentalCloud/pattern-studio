@@ -1478,7 +1478,7 @@ t('match seam chains trims exact curves and extends tangentially at either endpo
   assert.throws(()=>Geo.matchChainLength(piece,[0,2],5,'end'),/connected/);
   assert.throws(()=>Geo.matchChainLength(piece,[0,1,2,3],5,'end'),/full loop/);
   assert.throws(()=>Geo.matchChainLength(piece,[0,1],1,'end'),/entire end segment/);
-  assert.throws(()=>Geo.matchChainLength({...piece,notches:[{seg:1,t:.5}]},[0],7,'end'),/Remove notches/);
+  assert.throws(()=>Geo.matchChainLength({...piece,notches:[{seg:1,t:.5}]},[0],7,'end'),/notch/);
   assert.throws(()=>Geo.matchChainLength({...piece,foldSeg:1},[0],7,'end'),/fold edge/);
   const marked={...piece,notches:[{seg:2,t:.5}],stitchSlits:[{seg:2,t:.4,sourceSegments:[2]}]};
   const r=Geo.matchChainLength(marked,[0],7,'start');
@@ -1555,6 +1555,22 @@ t('matched stitching skips the union of unsafe pair indices without moving survi
   assert.match(fields['status-hint'].textContent,/Skipped 2 pair/);
   const blocked={...a,cutouts:[{nodes:[N(0,.05),N(5,.05),N(5,.5),N(0,.5)]}],stitchSlits:[]};
   assert.throws(()=>ctx.stitchMatched(blocked,b),/No safe pairs remain/);assert.equal(changes,1);assert.equal(blocked.stitchSlits.length,0);assert.equal(b.stitchSlits.length,8);
+});
+
+t('length matching preserves unaffected marks on adjoining collinear edges', () => {
+  const p={path:{closed:true,nodes:[N(0,0),N(5,0),N(5,2),N(5,10),N(0,10)]},stitchSlits:[{seg:2,t:.5,off:.25,len:.18,width:.05,ang:-45}],notches:[{seg:2,t:.75}]};
+  const before=JSON.stringify(p),r=Geo.matchChainLength(p,[1],2.3,'end');
+  assert.equal(JSON.stringify(p),before);
+  const old=p.stitchSlits[0],sl=r.piece.stitchSlits[0],ns=r.piece.path.nodes;
+  const a=Geo.slitLine(p.path.nodes[2],p.path.nodes[3],old,1),b=Geo.slitLine(ns[sl.seg],ns[(sl.seg+1)%ns.length],sl,1);
+  assert(Geo.dist(a.a,b.a)<1e-7&&Geo.dist(a.b,b.b)<1e-7);assert.equal(sl.ang,old.ang);assert.equal(sl.off,old.off);
+  const q={...p,stitchSlits:[{seg:1,t:.5,off:.25,len:.18,width:.05,ang:-45}],notches:[]};
+  assert.doesNotThrow(()=>Geo.matchChainLength(q,[1],2.3,'start'));
+  assert.doesNotThrow(()=>Geo.matchChainLength(q,[1],1.8,'end'));
+  const bent={...p,path:{closed:true,nodes:[N(0,0),N(5,0),N(5,2),N(7,10),N(0,10)]},notches:[]};
+  assert.throws(()=>Geo.matchChainLength(bent,[1],2.3,'end'),/move stitch hole 1/);
+  const open={path:{closed:false,nodes:[N(0,0),N(5,0),N(5,1),N(10.1,1)]},stitchSlits:[{seg:1,t:.5,off:.25,len:.18,width:.05,ang:-45}]};
+  assert.doesNotThrow(()=>Geo.matchChainLength(open,[0],5.3,'start'));
 });
 
 console.log(`\n${passed} tests passed${process.exitCode ? ' (with failures)' : ''}`);

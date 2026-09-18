@@ -644,10 +644,9 @@
     const neighbor=first?(ai>0?ai-1:closed?n-1:-1):(bi<count?bi:-1);
     if(piece.foldSeg===seg||piece.foldSeg===neighbor)throw new Error('This endpoint touches a fold edge. Unfold the piece before adjusting it.');
     const marked=q=>q.cut==null&&(q.seg===seg||q.seg===neighbor);
-    if((piece.notches||[]).some(marked)||(piece.stitchSlits||[]).some(marked))throw new Error('Remove notches or stitch holes from the end edge and its adjoining edge before adjusting this endpoint. Marks elsewhere stay unchanged.');
     const result=JSON.parse(JSON.stringify(piece)),out=result.path.nodes;
     const beforePoint={x:nodes[endpoint].x,y:nodes[endpoint].y};
-    let mappedSegs=segs.slice(),afterIndex=endpoint;
+    let mappedSegs=segs.slice(),afterIndex=endpoint,trimT=null;
     if(delta<0) {
       const edgeLength=preciseSegLength(nodes[ai],nodes[bi]),remaining=edgeLength+delta;
       if(remaining<=1e-6)throw new Error('This adjustment would remove an entire end segment. Choose the other end or select a shorter chain.');
@@ -657,7 +656,8 @@
         const len=first?preciseSegLength(split.mid,split.b2):preciseSegLength(split.a2,split.mid);
         if((len<remaining)!==first)lo=t;else hi=t;
       }
-      split=splitSeg(nodes[ai],nodes[bi],(lo+hi)/2);
+      trimT=(lo+hi)/2;
+      split=splitSeg(nodes[ai],nodes[bi],trimT);
       if(first){out[ai]={...split.mid,hin:nodes[ai].hin};out[bi]=split.b2;}
       else {out[ai]=split.a2;out[bi]={...split.mid,hout:nodes[bi].hout};}
     } else {
@@ -681,10 +681,33 @@
       }
       if(result.foldSeg!=null)result.foldSeg=mapSeg(result.foldSeg);
     }
-    const sign=outwardSign(pathPolyline(nodes,closed));
+    // Reparameterize marks only where their original anchor and tangent survive.
+    // A collinear neighboring edge can change length without moving its holes.
+    for(const key of ['notches','stitchSlits'])for(let i=0;i<(piece[key]||[]).length;i++) {
+      const old=piece[key][i],mark=result[key][i];
+      if(!marked(old))continue;
+      const a=nodes[old.seg],b=nodes[(old.seg+1)%n],c=out[mark.seg],d=out[(mark.seg+1)%out.length];
+      if(old.seg===seg&&trimT!=null) {
+        const t=first?(old.t-trimT)/(1-trimT):old.t/trimT;
+        if(t>=0&&t<=1)mark.t=t;
+      } else if(segIsLine(c,d)) {
+        const point=segPoint(a,b,old.t),v=sub(d,c),t=dot(sub(point,c),v)/dot(v,v);
+        if(t>=0&&t<=1&&dist(point,segPoint(c,d,t))<1e-6&&dist(segTangent(a,b,old.t),segTangent(c,d,t))<1e-6)mark.t=t;
+      }
+    }
+    const sign=closed?outwardSign(pathPolyline(nodes,true)):1,afterSign=closed?outwardSign(pathPolyline(out,true)):1;
+    for(let i=0;i<(piece.stitchSlits||[]).length;i++) {
+      const old=piece.stitchSlits[i],mark=result.stitchSlits[i];
+      if(old.cut==null) {
+        const before=slitLine(nodes[old.seg],nodes[(old.seg+1)%n],old,sign);
+        const after=slitLine(out[mark.seg],out[(mark.seg+1)%out.length],mark,afterSign);
+        if(dist(before.a,after.a)>1e-5||dist(before.b,after.b)>1e-5)throw new Error(`This adjustment would move stitch hole ${i+1}. Choose the other endpoint.`);
+      }
+      if(slitFitsPiece(piece,old)&&!slitFitsPiece(result,mark))throw new Error(`This adjustment would make stitch hole ${i+1} cross the outline. Choose the other endpoint.`);
+    }
     for(let i=0;i<(piece.notches||[]).length;i++) {
       const before=notchLinesPath(nodes,closed,piece.notches[i],sign,piece.notchLength||.4,piece.notchStyle||'slit');
-      const after=notchLinesPath(out,closed,result.notches[i],sign,piece.notchLength||.4,piece.notchStyle||'slit');
+      const after=notchLinesPath(out,closed,result.notches[i],afterSign,piece.notchLength||.4,piece.notchStyle||'slit');
       if(before.length!==after.length||before.some((line,j)=>dist(line.a,after[j].a)>1e-5||dist(line.b,after[j].b)>1e-5))throw new Error('This adjustment would change a nearby notch. Remove that notch first or choose the other endpoint.');
     }
     const afterLength=selectedEdgeLength(out,mappedSegs);

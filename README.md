@@ -159,8 +159,10 @@ measures the same inset path used to place holes. Automatic tries both ends of B
 and previews the smaller valid adjustment; Start or End can also be chosen. A stays fixed; Apply is one undo step.
 Trimming retains the exact remaining curve within the chosen end segment; extending
 adds a straight tangent without reshaping the existing seam. The adjoining edge
-reconnects to the new endpoint, so inspect the preview before applying. Remove
-notches or stitch holes on affected edges first. Full loops, guides, cutouts and
+reconnects to the new endpoint, so inspect the preview before applying. Existing marks are allowed when their positions and cuts remain unchanged.
+Marks on retained curves and adjoining collinear edges keep their positions,
+inset and slant; an adjustment that moves a mark or makes a previously safe slot
+cross the outline is refused. Full loops, guides, cutouts and
 folded pieces are excluded. The outline is adjusted to match the inset stitch lengths; slit slant is unchanged.
 The unequal-length warning uses the inset too and updates when it changes.
 Choose **Stitch matched** afterwards to create the holes.
