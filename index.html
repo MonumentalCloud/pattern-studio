@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pattern Studio</title>
-<link rel="stylesheet" href="style.css?v=78">
+<link rel="stylesheet" href="style.css?v=79">
 </head>
 <body>
 <div id="app">
   <header id="topbar">
-    <span id="logo" title="build 78">✂ Pattern Studio</span>
+    <span id="logo" title="build 79">✂ Pattern Studio</span>
     <input id="doc-name" type="text" value="Untitled pattern" spellcheck="false" title="Pattern name">
     <details class="top-menu"><summary>File</summary><div class="menu-panel"><div class="row btns">    <button id="btn-new" title="New document">New</button>
     <button id="btn-open" title="Open .json project or import a .dxf">Open</button>
@@ -205,8 +205,17 @@
           <select id="st-mode" title="Single: every selected target gets its own run. Matched: side A and side B get the SAME number of holes at matching positions (for seams)">
             <option value="single">Single runs</option>
             <option value="matched">Matched pair (A → B)</option>
+            <option value="attachment">Handle outline → body loop</option>
             <option value="free">Free hole — click inside piece</option>
           </select></div>
+        <div id="st-attachment" hidden>
+          <p class="hint">Select the handle’s open outline run as A, then a closed internal guide as B. The first and last handle holes share body hole 1. Each path fits its own spacing.</p>
+          <div class="row"><label for="st-attachment-target">Body panel</label><select id="st-attachment-target"></select></div>
+          <div class="row"><label for="st-attachment-start">Loop start offset</label><input id="st-attachment-start" type="number" step="any" value="0"><em>mm</em></div>
+          <label><input id="st-attachment-reverse" type="checkbox"> Reverse sewing direction on body</label>
+          <label><input id="st-attachment-numbers" type="checkbox" checked> Show matching hole numbers</label>
+          <p class="hint">Inset applies to the handle only. B uses the internal guide itself; generated body holes belong to the panel. Loop offset is measured from the guide’s first point. Numbers are shown on the canvas.</p>
+        </div>
         <div class="row"><label for="st-spacing">Center spacing</label>
           <input id="st-spacing" title="Exact pitch on open paths, with equal end margins. Closed loops fit spacing around the perimeter." type="number" min="0.1" max="2" step="any" value="0.3"> <em>cm</em></div>
         <div class="row"><label for="st-len">Slit length</label>
@@ -435,10 +444,10 @@
   </div>
 </div>
 <input id="file-input" type="file" accept=".json,.dxf,application/json" hidden>
-<script src="js/geometry.js?v=78"></script>
-<script src="js/strokefont.js?v=78"></script>
-<script src="js/dxf.js?v=78"></script>
-<script src="js/dxfimport.js?v=78"></script>
-<script src="js/app.js?v=78"></script>
+<script src="js/geometry.js?v=79"></script>
+<script src="js/strokefont.js?v=79"></script>
+<script src="js/dxf.js?v=79"></script>
+<script src="js/dxfimport.js?v=79"></script>
+<script src="js/app.js?v=79"></script>
 </body>
 </html>

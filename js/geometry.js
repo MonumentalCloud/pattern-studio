@@ -1023,6 +1023,17 @@
     return Array.from({length:count},(_,i)=>loop ? i/count : (margin+i*pitch)/length);
   }
 
+  function attachmentFractions(handleLength, loopLength, spacing, start, reverse) {
+    if (![handleLength,loopLength,spacing,start].every(Number.isFinite) || Math.min(handleLength,loopLength,spacing)<=0) throw new Error('Use usable handle and loop paths and positive spacing.');
+    const count = Math.max(3,Math.round(handleLength/spacing)), intervals = count-1;
+    const phase = ((start/loopLength)%1+1)%1;
+    return {
+      handle:Array.from({length:count},(_,i)=>(i+.5)/count),
+      body:Array.from({length:intervals},(_,i)=>(phase+(reverse?-1:1)*i/intervals+1)%1),
+      handleSpacing:handleLength/count, bodySpacing:loopLength/intervals,
+    };
+  }
+
   // Rigid copies use the first source hole as their placement reference.
   function stampSlits(slits, x, y, degrees) {
     if (!slits.length || ![x,y,degrees].every(Number.isFinite)) throw new Error('Choose source holes and a finite position and rotation.');
@@ -1307,7 +1318,7 @@
     cubicPoint, cubicTangent, flattenCubic,
     pathPolyline, pathLength, polyArea, bbox, centroid, polyCentroid, labelBox, dedupe,
     outwardSign, offsetClosed, nearestOnPath, pointInPolygon, splitSeg, setSegLength, deletePointKeepCurve, selectedEdgeLength, matchChainLength,
-    reverseNodes, weldClosedPaths, reflectPoint, reflectNodes, segArcParams, slitLine, stitchFractions, stampSlits, slitContour, slitFitsPiece, survivingFreeSlits, repairStitchAnchor, notchLines, notchLinesPath,
+    reverseNodes, weldClosedPaths, reflectPoint, reflectNodes, segArcParams, slitLine, stitchFractions, attachmentFractions, stampSlits, slitContour, slitFitsPiece, survivingFreeSlits, repairStitchAnchor, notchLines, notchLinesPath,
     pathArcParams, simplifyPoly, offsetOpen, pathIntersections, booleanOutline, sewSlits, clipLoops,
   };
 });

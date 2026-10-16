@@ -639,6 +639,7 @@
     renderPieces();
     renderOverlay();
     renderPenPreview();
+    if (tool === 'stitch') renderAttachmentPreview();
     if (tool === 'stitch' && $('st-workflow').value === 'stamp') renderStampPreview();
     if (!keepList) renderSidebar();
   }
@@ -891,7 +892,7 @@
     $('st-create').hidden = edit || stamping;
     $('st-edit').hidden = !edit || stamping;
     $('st-stamp').hidden = !stamping;
-    if (stamping) updateStampTargets();
+    if (stamping) updatePanelChoices($('st-stamp-target'));
     $('st-edit-fields').hidden = !editingSlits;
     $('st-edit-notice').hidden = true;
     if (editingSlits) {
@@ -902,7 +903,14 @@
           if (document.activeElement !== $(id)) $(id).value = Math.round(value * 1000) / 1000;
         }
         const groups = selectedStitchRuns(true);
-        if (sl.pair) {
+        if (sl.pair && sl.attachment) {
+          const members = doc.pieces.flatMap(p=>(p.stitchSlits || []).filter(s=>s.pair===sl.pair));
+          const a = members.filter(s=>s.pairSide==='A'), b = members.filter(s=>s.pairSide==='B');
+          const indices = new Set(b.map(s=>s.pairIndex));
+          const complete = a.length===b.length+1 && a.filter(s=>s.pairIndex===0).length===2 && a.every(s=>indices.has(s.pairIndex));
+          $('st-edit-notice').textContent = complete ? `Handle attachment: ${a.length} handle holes → ${b.length} body holes. Both handle ends share body hole 1. Edit individual sides; recreate this pair to re-space it.` : 'Handle attachment correspondence is incomplete after editing or deletion. Recreate the pair before relying on its hole numbers.';
+          $('st-edit-notice').hidden = false;
+        } else if (sl.pair) {
           const pair = groups.filter(g => g.piece.stitchSlits[g.indices[0]].pair === sl.pair);
           try {
             const lengths = {};
@@ -3455,11 +3463,11 @@
   }
 
   // ---- stitch tool ----
-  function updateStampTargets() {
-    const input = $('st-stamp-target'), previous = input.value;
+  function updatePanelChoices(input, excluded = []) {
+    const previous = input.value;
     input.replaceChildren();
     for (const p of doc.pieces) {
-      if (p.guide || p.visible === false || !p.path.closed || isFolded(p)) continue;
+      if (p.guide || p.visible === false || !p.path.closed || isFolded(p) || excluded.includes(p.id)) continue;
       const option = document.createElement('option');
       option.value = p.id; option.textContent = p.name; input.appendChild(option);
     }
@@ -3483,7 +3491,7 @@
       $('st-stamp-x').value = captured[0].x; $('st-stamp-y').value = captured[0].y;
       $('st-stamp-angle').value = 0;
       $('st-stamp-summary').textContent = `${captured.length} hole(s) captured from “${piece.name}”. Reference: first selected hole.`;
-      updateStampTargets();
+      updatePanelChoices($('st-stamp-target'));
       const other = [...$('st-stamp-target').options].find(o=>o.value!==piece.id);
       if (other) $('st-stamp-target').value = other.value;
       $('st-stamp-notice').hidden = true;
@@ -3654,6 +3662,12 @@
   function updateStitchUi() {
     $('st-match-notice').hidden = true;
     $('st-match-length').hidden = $('st-workflow').value !== 'create' || $('st-mode').value !== 'matched' || !stitchSideA || !stitchMulti.length;
+    const attachment = $('st-mode').value === 'attachment';
+    $('st-attachment').hidden = !attachment;
+    $('st-spacing').closest('.row').querySelector('label').textContent = attachment ? 'Target spacing' : 'Center spacing';
+    $('st-spacing').title = attachment ? 'Approximate spacing: handle and body paths fit their own spacing with a shared closure.' : 'Exact pitch on open paths; closed loops fit spacing around the perimeter.';
+    $('st-off').closest('.row').querySelector('label').textContent = attachment ? 'Handle inset' : 'Inset';
+    if (attachment) updatePanelChoices($('st-attachment-target'),(stitchSideA || []).map(t=>t.pieceId));
     if ($('st-workflow').value === 'stamp') {
       $('status-hint').textContent = 'Capture selected stitch holes, choose a target panel, then click to stamp or enter exact coordinates.';
       return;
@@ -3669,8 +3683,15 @@
       $('status-hint').textContent = 'Edit stitches: click a hole or stitched edge, box-select holes across shapes · Shift adds/removes · Del removes selected holes';
       return;
     }
-    const matched = $('st-mode').value === 'matched';
-    if (matched && stitchSideA && stitchMulti.length) {
+    const matched = ['matched','attachment'].includes($('st-mode').value);
+    if (attachment && stitchSideA && stitchMulti.length) {
+      try {
+        const plan = planHandleAttachment(stitchSideA,stitchMulti);
+        $('st-match-notice').textContent = `${plan.handleHoles.length} handle holes → ${plan.bodyHoles.length} body holes. Handle ends share body hole 1. Fitted spacing: handle ${(plan.layout.handleSpacing*10).toFixed(3)} mm; body ${(plan.layout.bodySpacing*10).toFixed(3)} mm.${plan.skipped ? ` Skipped ${plan.skipped} unsafe interior pair(s).` : ''}`;
+      } catch(e) { $('st-match-notice').textContent = e.message; }
+      $('st-match-notice').hidden = false;
+    }
+    if (!attachment && matched && stitchSideA && stitchMulti.length) {
       const inset = parseFloat($('st-off').value) || 0;
       const a = stitchChains(stitchSideA, inset), b = stitchChains(stitchMulti, inset);
       if (a.length === 1 && b.length === 1) {
@@ -3687,14 +3708,14 @@
         ? `${nSel} stitch target${s2} selected — Enter (or "Stitch selected") runs holes along each · click toggles · drag a box adds more · Esc cancels`
         : HINTS.stitch;
     } else if (!stitchSideA) {
-      btn.textContent = 'Set side A \u25b8';
+      btn.textContent = attachment ? 'Set handle outline A ▸' : 'Set side A \u25b8';
       $('status-hint').textContent = nSel
         ? `Side A: ${nSel} target${s2} — Enter (or "Set side A") confirms it, then pick side B`
         : 'Matched mode: select side A (click, Shift-click or drag a box), then Enter to confirm';
     } else {
-      btn.textContent = 'Stitch matched';
+      btn.textContent = attachment ? 'Create handle attachment holes' : 'Stitch matched';
       $('status-hint').textContent = nSel
-        ? `Side B: ${nSel} target${s2} — Enter (or "Stitch matched") gives both sides the same holes`
+        ? (attachment ? `Body loop B: ${nSel} target${s2} — Create handle attachment holes fits both paths; handle ends share body hole 1` : `Side B: ${nSel} target${s2} — Enter (or "Stitch matched") gives both sides the same holes`)
         : `Side A set (${stitchSideA.length} target${stitchSideA.length > 1 ? 's' : ''}) — now select side B · Esc restarts`;
     }
   }
@@ -3947,6 +3968,76 @@
     return placed;
   }
 
+  function planHandleAttachment(aTargets, bTargets) {
+    const a = stitchChains(aTargets,Number($('st-off').value));
+    const b = stitchChains(bTargets,0);
+    if (a.length!==1 || a[0].loop) throw new Error('A must be one open handle outline run or open guide.');
+    if (b.length!==1 || !b[0].loop || !b[0].piece.guide) throw new Error('B must be a closed internal guide, not a cutting outline or cutout.');
+    const A=a[0], B=b[0], body=pieceById($('st-attachment-target').value);
+    if (A.piece.visible===false || B.piece.visible===false || isFolded(A.piece)) throw new Error('Use visible, unfolded handle and guide pieces.');
+    if (!body || body.guide || !body.path.closed || body.visible===false || isFolded(body) || body.id===A.piece.id) throw new Error('Choose a separate visible, closed, unfolded body panel.');
+    if (!$('st-attachment-start').value.trim() || !$('st-attachment-start').checkValidity()) throw new Error('Enter a valid loop start offset.');
+    const layout=Geo.attachmentFractions(Geo.pathLength(A.path,false),Geo.pathLength(B.path,true),Number($('st-spacing').value),Number($('st-attachment-start').value)/10,$('st-attachment-reverse').checked);
+    const settings={width:Number($('st-width').value)/10,ang:stitchAngle(),abs:stitchAngleAbs()};
+    const length=Number($('st-len').value), sourceBad=new Set();
+    const probe={...A.piece,stitchSlits:[]};
+    stitchPlaceRun({...A,piece:probe},layout.handle,length,settings,sourceBad);
+    const bodyHoles=Geo.pathArcParams(B.path,true,layout.body).map((pos,i)=>{
+      const line=Geo.slitLine(B.path[pos.seg],B.path[(pos.seg+1)%B.path.length],{...settings,len:length,t:pos.t},1);
+      return {free:true,...Geo.lerp(line.a,line.b,.5),len:length,width:settings.width,ang:Math.atan2(line.b.y-line.a.y,line.b.x-line.a.x)*180/Math.PI,abs:true,pairIndex:i,attachment:true};
+    });
+    const last=layout.handle.length-1;
+    const rejected=new Set([...sourceBad].map(i=>i===last?0:i));
+    bodyHoles.forEach((sl,i)=>{if(!Geo.slitFitsPiece(body,sl))rejected.add(i);});
+    if (rejected.has(0)) throw new Error('The shared closure hole does not fit on the handle or body. Adjust handle inset, guide placement, or loop start offset. No holes placed.');
+    let index=0;
+    const handleHoles=layout.handle.flatMap((_,i)=>{
+      if (sourceBad.has(i)) return [];
+      const sl=probe.stitchSlits[index++], pairIndex=i===last?0:i;
+      return rejected.has(pairIndex)?[]:[{...sl,pairIndex,attachment:true}];
+    });
+    const keptBody=bodyHoles.filter(sl=>!rejected.has(sl.pairIndex));
+    if (keptBody.length<2) throw new Error('Too few safe attachment holes remain. Adjust the handle inset or body guide.');
+    return {A,B,body,layout,handleHoles,bodyHoles:keptBody,skipped:rejected.size};
+  }
+
+  function stitchHandleAttachment(aTargets,bTargets) {
+    const plan=planHandleAttachment(aTargets,bTargets), pair=uid();
+    const runA=nextStitchRun(plan.A.piece), runB=nextStitchRun(plan.body);
+    beginChange();
+    plan.A.piece.stitchSlits=(plan.A.piece.stitchSlits || []).concat(plan.handleHoles.map(sl=>({...sl,pair,pairSide:'A',run:runA})));
+    plan.body.stitchSlits=(plan.body.stitchSlits || []).concat(plan.bodyHoles.map(sl=>({...sl,pair,pairSide:'B',run:runB})));
+    endChange();
+    stitchSideA=null; stitchMulti=[];
+    updateStitchUi(); renderAll();
+    $('status-hint').textContent=`Created ${plan.handleHoles.length} handle holes and ${plan.bodyHoles.length} body holes. Handle end holes share body hole 1.${plan.skipped?` Skipped ${plan.skipped} unsafe interior pair(s).`:''}`;
+  }
+
+  function renderAttachmentPreview() {
+    const attachment=$('st-workflow').value==='create' && $('st-mode').value==='attachment';
+    const numbers=$('st-attachment-numbers').checked;
+    const draw=(piece,sl,preview)=>{
+      const line=slitLineFor(piece,sl);
+      if(!line)return;
+      const at=Geo.lerp(line.a,line.b,.5);
+      if(preview) {
+        const pts=Geo.slitContour(line,sl.width);
+        el('path',{d:polyD(pts,pts.length>2),fill:'none',stroke:'#168c86','stroke-width':px(1.5),'pointer-events':'none'},gPreview);
+      }
+      if(numbers) el('text',{x:at.x+px(5),y:at.y-px(5),fill:'#b26300','font-size':px(11),'pointer-events':'none'},gPreview).textContent=String(sl.pairIndex+1);
+    };
+    if(attachment && stitchSideA && stitchMulti.length) {
+      try {
+        const plan=planHandleAttachment(stitchSideA,stitchMulti);
+        for(const sl of plan.handleHoles)draw(plan.A.piece,sl,true);
+        for(const sl of plan.bodyHoles)draw(plan.body,sl,true);
+      } catch (_) { /* The selected-path notice explains why creation is unavailable. */ }
+    }
+    if(attachment || selectedStitchHoles().some(g=>g.indices.some(i=>g.piece.stitchSlits[i]?.attachment))) {
+      for(const piece of doc.pieces)if(piece.visible!==false)for(const sl of piece.stitchSlits || [])if(sl.attachment && sl.pair)draw(piece,sl,false);
+    }
+  }
+
   // single mode: every chain gets its own run, spaced from its own length
   function stitchApplySingle() {
     if (!stitchMulti.length) return;
@@ -3976,6 +4067,7 @@
   // matched mode: side A and side B each collapse to ONE chain; both get the
   // same count so hole i on A pairs with hole i on B when sewing
   function stitchMatched(aTargets, bTargets) {
+    if ($('st-mode')?.value === 'attachment') return stitchHandleAttachment(aTargets,bTargets);
     const spacing = Math.max(0.1, parseFloat($('st-spacing').value) || 0.3);
     const slitLen = Math.max(0.05, parseFloat($('st-len').value) || 0.15);
     const off = parseFloat($('st-off').value) || 0;
@@ -4017,7 +4109,7 @@
     } catch (e) { cancelStitchChange(e.message); }
   }
   function stitchApplyUnsafe() {
-    if ($('st-mode').value === 'matched') {
+    if (['matched','attachment'].includes($('st-mode').value)) {
       if (!stitchSideA) {
         if (!stitchMulti.length) {
           $('status-hint').textContent = 'Select side A first — click, Shift-click or drag a box over edges/guides/cutouts.';
@@ -5219,6 +5311,7 @@
     const p = selPiece();
     if (!p) return;
     try {
+      if (wholeRun && selectedStitchRuns(true).some(g=>g.indices.some(i=>g.piece.stitchSlits[i].attachment && g.piece.stitchSlits[i].pair))) throw new Error('For handle attachments, edit selected holes on each side separately.');
       const values = stitchEditSettings();
       const groups = wholeRun ? selectedStitchRuns(true) : selectedStitchHoles();
       const changes = [];
@@ -5279,6 +5372,7 @@
     const groups = selectedStitchRuns(true);
     if (!groups.length) return;
     try {
+      if (groups.some(g=>g.indices.some(i=>g.piece.stitchSlits[i].attachment && g.piece.stitchSlits[i].pair))) throw new Error('Recreate the handle attachment to change its spacing or path; ordinary matched re-spacing does not apply to a shared closure.');
       const settings = stitchEditSettings();
       const spacing = Number($('sp-run-spacing').value) / 10;
       const inset = Number($('sp-run-inset').value) / 10;
@@ -5453,6 +5547,9 @@
   $('st-stamp-apply').addEventListener('click',applyStitchStamp);
   for (const id of ['st-stamp-x','st-stamp-y','st-stamp-angle','st-stamp-target']) {
     $(id).addEventListener('input',()=>{ clear(gPreview); renderStampPreview(); });
+  }
+  for (const id of ['st-attachment-target','st-attachment-start','st-attachment-reverse','st-attachment-numbers']) {
+    $(id).addEventListener('input',()=>{updateStitchUi();renderAll(true);});
   }
   $('st-mode').addEventListener('change', () => {
     stitchMulti = [];

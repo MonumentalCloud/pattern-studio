@@ -1496,10 +1496,10 @@ t('undo clears seam targets and refreshes matched controls after a length adjust
 
 t('matched warning measures the same inset chains used by placement', () => {
   const source=require('fs').readFileSync(require.resolve('../js/app.js'),'utf8'),vm=require('vm');
-  const start=source.indexOf('    if (matched && stitchSideA && stitchMulti.length)'),end=source.indexOf("    const btn = $('st-apply');",start);
+  const start=source.indexOf('    if (!attachment && matched && stitchSideA && stitchMulti.length)'),end=source.indexOf("    const btn = $('st-apply');",start);
   const fields={'st-off':{value:'.3'},'st-match-notice':{}};
   const seen=[];
-  const ctx={Geo,matched:true,stitchSideA:['A'],stitchMulti:['B'],$:id=>fields[id],
+  const ctx={Geo,attachment:false,matched:true,stitchSideA:['A'],stitchMulti:['B'],$:id=>fields[id],
     stitchChains:(targets,inset)=>{seen.push(inset);return [{path:[N(0,0),N(targets[0]==='A'?10-inset:10-2*inset,0)],loop:false}];},
     matchedLengthNotice:(a,b)=>Math.abs(a-b)<.01?'':`${a}/${b}`};
   vm.runInNewContext(source.slice(start,end),ctx);
@@ -1732,6 +1732,55 @@ t('single runs skip unsafe holes without shifting surviving pitch positions', ()
   assert(piece.stitchSlits.every(sl=>Geo.slitFitsPiece(piece,sl)));
   piece.cutouts=[{nodes:[N(0,.05),N(5,.05),N(5,.5),N(0,.5)]}];piece.stitchSlits=[];
   ctx.stitchMulti=[{}];assert.throws(()=>ctx.stitchApplySingle(),/No safe/);assert.equal(piece.stitchSlits.length,0);
+});
+
+t('handle attachment layout shares one closure hole and fits each path independently', () => {
+  const layout=Geo.attachmentFractions(10,8,.3,0,false);
+  assert.equal(layout.handle.length,layout.body.length+1);
+  assert(layout.handle[0]>0);assert(layout.handle.at(-1)<1);assert(Math.abs(layout.handle[0]-(1-layout.handle.at(-1)))<1e-10);
+  assert.equal(layout.body[0],0);assert(layout.body.every(f=>f>=0&&f<1));
+  assert.equal(new Set(layout.body).size,layout.body.length);
+  assert(Math.abs(layout.handleSpacing*layout.handle.length-10)<1e-10);
+  assert(Math.abs(layout.bodySpacing*layout.body.length-8)<1e-10);
+  const reverse=Geo.attachmentFractions(10,8,.3,2,true);
+  assert.equal(reverse.body[0],.25);assert(reverse.body[1]<.25);
+  assert.throws(()=>Geo.attachmentFractions(0,8,.3,0,false),/usable/);
+});
+
+t('attachment caller creates N handle holes and N-1 free body holes, preserving body guide and ordinary runs', () => {
+  const source=require('fs').readFileSync(require.resolve('../js/app.js'),'utf8'),vm=require('vm');
+  const handle={id:'handle',visible:true,path:{closed:true,nodes:[N(0,0),N(10,0),N(10,3),N(0,3)]},stitchSlits:[]};
+  const body={id:'body',visible:true,path:{closed:true,nodes:[N(20,0),N(30,0),N(30,10),N(20,10)]},stitchSlits:[]};
+  const guide={id:'guide',guide:true,visible:true,path:{closed:true,nodes:[N(23,3),N(25,3),N(25,5),N(23,5)]},stitchSlits:[]};
+  const fields={'st-off':{value:'.3'},'st-spacing':{value:'1'},'st-len':{value:'.18'},'st-width':{value:'.5'},'st-attachment-target':{value:'body'},'st-attachment-start':{value:'0',checkValidity:()=>true},'st-attachment-reverse':{checked:false},'status-hint':{}};
+  let changes=0;const doc={pieces:[handle,body,guide]};
+  const ctx={Geo,doc,$:id=>fields[id],stitchAngle:()=>-45,stitchAngleAbs:()=>false,isFolded:()=>false,pieceById:id=>doc.pieces.find(p=>p.id===id),nextStitchRun:p=>p.stitchSlits.reduce((m,s)=>Math.max(m,s.run || 0),0)+1,uid:()=> 'attachment',
+    stitchChains:(targets,off)=>targets==='A'?[{piece:handle,path:[N(.3,.3),N(9.7,.3)],loop:false,anchor:{kind:'outline',segs:[0]}}]:[{piece:guide,path:guide.path.nodes,loop:true,anchor:{kind:'guide'}}],beginChange:()=>changes++,endChange(){},updateStitchUi(){},renderAll(){}};
+  vm.runInNewContext(source.slice(source.indexOf('  function stitchPlaceRun('),source.indexOf('  // single mode:')),ctx);
+  vm.runInNewContext(source.slice(source.indexOf('  function edgeGuideNodes('),source.indexOf('  function newGuidePiece(')),ctx);
+  vm.runInNewContext(source.slice(source.indexOf('  function stitchChains('),source.indexOf('  // Slant for holes about to be placed.')),ctx);
+  const realChains=ctx.stitchChains;
+  ctx.stitchChains=(targets,off)=>realChains(targets==='A'?[{pieceId:'handle',seg:0}]:[{pieceId:'guide',seg:0}],off);
+  const originalGuide=JSON.stringify(guide),originalOutline=JSON.stringify(handle.path);
+  ctx.stitchHandleAttachment('A','B');
+  assert.equal(changes,1);assert.equal(JSON.stringify(guide),originalGuide);assert.equal(JSON.stringify(handle.path),originalOutline);
+  assert.equal(handle.stitchSlits.length,body.stitchSlits.length+1);
+  assert.equal(handle.stitchSlits[0].pairIndex,0);assert.equal(handle.stitchSlits.at(-1).pairIndex,0);
+  assert.equal(body.stitchSlits.filter(s=>s.pairIndex===0).length,1);
+  assert(body.stitchSlits.every(s=>s.free&&s.seg==null&&s.pair==='attachment'&&s.pairSide==='B'&&Geo.slitFitsPiece(body,s)));
+  assert(handle.stitchSlits.every(s=>s.pairSide==='A'&&s.attachment));
+  const saved=JSON.parse(JSON.stringify(doc));assert.equal(saved.pieces[1].stitchSlits.length,body.stitchSlits.length);
+  const out=DXF.pieceShapes(body);assert.equal(out.polylines.filter(p=>p.layer==='CUT').length,body.stitchSlits.length+1);
+  // Interior rejection drops matching indices from both sides, retaining the closure.
+  handle.stitchSlits=[];body.stitchSlits=[];
+  body.holes=[{x:25,y:3+2/3,r:.15}];ctx.stitchHandleAttachment('A','B');
+  assert.equal(handle.stitchSlits.length,body.stitchSlits.length+1);
+  assert(body.stitchSlits.length<9);assert.match(fields['status-hint'].textContent,/Skipped/);
+  // A rejected shared closure cannot be silently dropped or doubled.
+  handle.stitchSlits=[];body.stitchSlits=[];body.holes=[{x:23,y:3,r:.2}];
+  assert.throws(()=>ctx.stitchHandleAttachment('A','B'),/shared closure/);assert.equal(body.stitchSlits.length,0);assert.equal(handle.stitchSlits.length,0);
+  guide.path.closed=false;ctx.stitchChains=targets=>targets==='A'?[{piece:handle,path:[N(.3,.3),N(9.7,.3)],loop:false}]:[{piece:guide,path:guide.path.nodes,loop:false}];
+  assert.throws(()=>ctx.stitchHandleAttachment('A','B'),/closed internal guide/);
 });
 
 console.log(`\n${passed} tests passed${process.exitCode ? ' (with failures)' : ''}`);

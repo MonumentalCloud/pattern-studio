@@ -19,7 +19,7 @@ can be saved/opened as `.pattern.json` files. In Chrome/Edge, **Save writes stra
 to a file on your computer** (it asks where once, then `Ctrl+S` saves in place;
 `Shift`-click Save = Save As); other browsers fall back to a download.
 
-## Tool inspectors (build 78)
+## Tool inspectors (build 79)
 
 The active tool's controls stay above the Pieces list. File contains local/cloud
 save and open; Export contains DXF/SVG and engraving options. Round, Notch, Hole,
@@ -45,6 +45,16 @@ when editing a linked pair; open paths retain exact pitch and centre their holes
 removed ones. Deleting selected holes or a whole run leaves the partner intact.
 Legacy seams have no pairing information; recreate them to link their sides.
 Copied pieces detach from the original pair.
+
+## Rolled handle outline to an internal body loop
+
+Use **Stitch → Create runs / free holes → Handle outline → body loop**. Select the connected outline edges forming the handle’s open stitch run and press **Set handle outline A**. Select a **closed guide** inside the body, choose the body panel, and press **Create handle attachment holes**. Use Offset → Guide line to make a MARK guide; the body loop must be a guide, not a cutting outline or cutout. If you use a separate footprint shape to draw the guide, hide or delete that helper cutting piece before export.
+
+The first and last handle holes share body hole **1**, so N handle holes correspond to N−1 distinct body holes. Handle holes retain equal end margins; body holes sit on the internal guide itself, with no additional inset. **Target spacing** chooses an approximate hole count: each path fits its own spacing, which the preview reports. This mode does not force equal path lengths or resize either piece. Ordinary Single and Matched modes keep their existing rules.
+
+Use **Loop start offset** (mm from the guide’s first point) and **Reverse sewing direction on body** to choose the correspondence. Matching numbers are shown on the canvas, including **1** at both handle ends; these numbers are not exported. Body holes belong to the panel and move with it. The guide stays a MARK line and gets no stitch holes. Unsafe interior hole pairs are skipped on both sides without shifting remaining positions. If the shared closure cannot fit, creation stops without changing either side.
+
+This creates new stitch runs. Remove an older run first if replacing it. Save/reload and undo/redo preserve the pair and correspondence numbers. Edit individual holes on each side with the existing controls; recreate the attachment pair to change its paths or spacing. Ordinary matched re-spacing and whole-pair dimension updates are blocked for shared-closure pairs. This is a 2D sewing correspondence, not a 3D folding or material-thickness simulation; confirm the actual rolled attachment with a physical sample.
 
 ## Handle attachment stamps and free stitch holes
 
