@@ -3987,7 +3987,7 @@
     stitchPlaceRun({...A,piece:probe},layout.handle,length,settings,sourceBad);
     const bodyHoles=Geo.pathArcParams(loopPath,true,layout.body).map((pos,i)=>{
       const line=Geo.slitLine(loopPath[pos.seg],loopPath[(pos.seg+1)%loopPath.length],{...settings,len:length,t:pos.t},1);
-      return {free:true,...Geo.lerp(line.a,line.b,.5),len:length,width:settings.width,ang:Math.atan2(line.b.y-line.a.y,line.b.x-line.a.x)*180/Math.PI,abs:true,pairIndex:i,attachment:true};
+      return {free:true,...Geo.lerp(line.a,line.b,.5),len:length,width:settings.width,ang:Math.atan2(line.b.y-line.a.y,line.b.x-line.a.x)*180/Math.PI,abs:true,...(!settings.abs ? {curveSlant:settings.ang} : {}),pairIndex:i,attachment:true};
     });
     const last=layout.handle.length-1;
     const rejected=new Set([...sourceBad].map(i=>i===last?0:i));
@@ -4554,7 +4554,13 @@
         nt.t = 1 - nt.t;
       }
       for (const sl of copy.stitchSlits || []) {
-        if (sl.free) { sl.x = 2*cx-sl.x; sl.ang = Math.atan2(Math.sin(sl.ang*Math.PI/180),-Math.cos(sl.ang*Math.PI/180))*180/Math.PI; continue; }
+        // A reflected curve needs the same iron angle, rather than a reflected iron.
+        if (sl.free) {
+          sl.x = 2*cx-sl.x;
+          sl.ang = Math.atan2(Math.sin(sl.ang*Math.PI/180),-Math.cos(sl.ang*Math.PI/180))*180/Math.PI;
+          if (sl.curveSlant != null) sl.ang = ((sl.ang + 2*sl.curveSlant + 180)%360 + 360)%360 - 180;
+          continue;
+        }
         if (sl.cut != null) {
           const cn = ((copy.cutouts || [])[sl.cut] || { nodes: [] }).nodes.length;
           if (cn) sl.seg = (2 * cn - 2 - sl.seg) % cn; // cutouts reverse too
@@ -4576,6 +4582,10 @@
       if (copy.grain) {
         copy.grain.x1 = 2 * cx - copy.grain.x1;
         copy.grain.x2 = 2 * cx - copy.grain.x2;
+      }
+      if ((copy.stitchSlits || []).some(sl=>sl.free && sl.curveSlant != null && !Geo.slitFitsPiece(copy,sl))) {
+        alert('A mirrored attachment slot crosses the outline or a cutout. Increase the attachment inset or reduce slit size before mirroring. No copy created.');
+        return;
       }
       movePiece(copy, bb.maxX - bb.minX + 3, 0);
     } else {
@@ -5322,6 +5332,7 @@
         const s = group.piece.stitchSlits[i];
         if (s.free && (values.inset !== 0 || !values.abs)) throw new Error("Free holes use page angles and have no edge inset. Use arrow keys to position them, or stamp at exact coordinates.");
         const next = {...s, len:values.len, width:values.width, ang:values.ang, abs:values.abs};
+        if (values.abs && (!s.abs || values.ang !== s.ang)) delete next.curveSlant;
         if (!s.free) next.off = (s.off || 0) + values.inset;
         if (!Geo.slitFitsPiece(group.piece, next)) throw new Error('A slot crosses the cutting outline or a cutout. Increase inset or reduce length/width.');
         changes.push({piece:group.piece, i, next});

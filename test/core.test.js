@@ -1771,6 +1771,23 @@ t('attachment caller creates N handle holes and N-1 free body holes, preserving 
   assert(handle.stitchSlits.every(s=>s.pairSide==='A'&&s.attachment));
   const saved=JSON.parse(JSON.stringify(doc));assert.equal(saved.pieces[1].stitchSlits.length,body.stitchSlits.length);
   const out=DXF.pieceShapes(body);assert.equal(out.polylines.filter(p=>p.layer==='CUT').length,body.stitchSlits.length+1);
+  const mirrorCtx={Geo,uid:()=> 'copy',decorate:()=> 'copy',movePiece:()=>{},beginChange:()=>{},endChange:()=>{},selectPiece:()=>{},renderAll:()=>{},doc:{pieces:[]}};
+  vm.runInNewContext(source.slice(source.indexOf('  function duplicatePiece('),source.indexOf('  // ---------- file ops')),mirrorCtx);
+  mirrorCtx.duplicatePiece(JSON.parse(JSON.stringify(body)),true);
+  const mirrored=mirrorCtx.doc.pieces[0];
+  const sameAxis=(a,b)=>Math.abs(Math.sin((a-b)*Math.PI/180))<1e-9;
+  body.stitchSlits.forEach((sl,i)=>assert(sameAxis(mirrored.stitchSlits[i].ang,180-sl.ang+2*(-45))));
+  mirrorCtx.duplicatePiece(mirrored,true);
+  body.stitchSlits.forEach((sl,i)=>assert(sameAxis(mirrorCtx.doc.pieces[1].stitchSlits[i].ang,sl.ang)));
+  const exportLines=DXF.pieceShapes(mirrored).polylines.filter(p=>p.layer==='CUT').slice(1);
+  assert.equal(exportLines.length,body.stitchSlits.length);
+  exportLines.forEach((poly,i)=>{
+    const [a,b]=poly.pts,angle=Math.atan2(b.y-a.y,b.x-a.x)*180/Math.PI;
+    assert(sameAxis(angle,mirrored.stitchSlits[i].ang));
+  });
+  ctx.stitchAngleAbs=()=>true;
+  assert(ctx.planHandleAttachment('A','B').bodyHoles.every(s=>s.curveSlant===undefined));
+  ctx.stitchAngleAbs=()=>false;
   const originalBodyHoles=JSON.stringify(body.stitchSlits), originalHandleHoles=JSON.stringify(handle.stitchSlits);
   for (const inset of [2,-2]) {
     fields['st-attachment-inset'].value=String(inset);
@@ -1793,6 +1810,31 @@ t('attachment caller creates N handle holes and N-1 free body holes, preserving 
   assert.throws(()=>ctx.stitchHandleAttachment('A','B'),/shared closure/);assert.equal(body.stitchSlits.length,0);assert.equal(handle.stitchSlits.length,0);
   guide.path.closed=false;ctx.stitchChains=targets=>targets==='A'?[{piece:handle,path:[N(.3,.3),N(9.7,.3)],loop:false}]:[{piece:guide,path:guide.path.nodes,loop:false}];
   assert.throws(()=>ctx.stitchHandleAttachment('A','B'),/closed internal guide/);
+});
+
+t('curve-following attachment mirrors preserve iron slant after rotation and reject unsafe copies', () => {
+  const src=require('fs').readFileSync(require.resolve('../js/app.js'),'utf8'),vm=require('vm');
+  const sameAxis=(a,b)=>Math.abs(Math.sin((a-b)*Math.PI/180))<1e-9;
+  const p={id:'p',path:{closed:true,nodes:[N(0,0),N(10,0),N(10,10),N(0,10)]},stitchSlits:[0,25,90,140].map((t,i)=>({free:true,x:3+i,y:4,ang:t-45,curveSlant:-45,len:.18,width:.05,abs:true,attachment:true}))};
+  const ctx={Geo,uid:()=> 'copy',decorate:()=> 'copy',movePiece:()=>{},beginChange:()=>{},endChange:()=>{},selectPiece:()=>{},renderAll:()=>{},doc:{pieces:[]},pieceById:()=>p,alert:()=>assert.fail('safe copy rejected')};
+  vm.runInNewContext(src.slice(src.indexOf('  function duplicatePiece('),src.indexOf('  // ---------- file ops')),ctx);
+  vm.runInNewContext(src.slice(src.indexOf('  function rotatePieces('),src.indexOf('  function selectionCentre(')),ctx);
+  ctx.rotatePieces(['p'],5,5,.37);
+  const saved=JSON.parse(JSON.stringify(p));ctx.duplicatePiece(saved,true);
+  saved.stitchSlits.forEach((sl,i)=>assert(sameAxis(ctx.doc.pieces[0].stitchSlits[i].ang,180-sl.ang-90)));
+  assert(ctx.doc.pieces[0].stitchSlits.every(sl=>sl.ang>=-180 && sl.ang<=180));
+  assert.equal(JSON.stringify(p),JSON.stringify(saved));
+  // Explicit page edits discard the curve reference, without affecting other slots.
+  const fields={'sp-slit-len':{value:'1.8'},'sp-slit-width':{value:'.5'},'sp-slit-inset':{value:'0'},'sp-slit-ang':{value:'30'},'sp-slit-ang-ref':{value:'page'},'status-hint':{}};
+  Object.assign(ctx,{$:id=>fields[id],selPiece:()=>p,selectedStitchHoles:()=>[{piece:p,indices:[0]}],rememberAppliedStitchSettings(){}});
+  vm.runInNewContext(src.slice(src.indexOf('  function stitchEditSettings('),src.indexOf('  function stitchRunTargets(')),ctx);
+  fields['sp-slit-ang'].value=String(p.stitchSlits[0].ang);fields['sp-slit-len'].value='2';
+  ctx.applySlitAngle(false);assert.equal(p.stitchSlits[0].curveSlant,-45);assert.equal(p.stitchSlits[0].len,.2);
+  fields['sp-slit-ang'].value='30';
+  ctx.applySlitAngle(false);assert.equal(p.stitchSlits[0].curveSlant,undefined);assert.equal(p.stitchSlits[0].ang,30);assert.equal(p.stitchSlits[1].curveSlant,-45);
+  const unsafe={path:{closed:true,nodes:[N(0,0),N(10,0),N(10,10),N(0,10)]},stitchSlits:[{free:true,x:5,y:.02,ang:0,curveSlant:-45,len:.18,width:.01,abs:true}]};
+  let message='';ctx.alert=m=>message=m;const count=ctx.doc.pieces.length;ctx.duplicatePiece(unsafe,true);
+  assert.match(message,/No copy created/);assert.equal(ctx.doc.pieces.length,count);
 });
 
 t('attachment body inset preserves zero curves, offsets either winding and rejects collapsed loops', () => {
