@@ -3977,13 +3977,16 @@
     if (A.piece.visible===false || B.piece.visible===false || isFolded(A.piece)) throw new Error('Use visible, unfolded handle and guide pieces.');
     if (!body || body.guide || !body.path.closed || body.visible===false || isFolded(body) || body.id===A.piece.id) throw new Error('Choose a separate visible, closed, unfolded body panel.');
     if (!$('st-attachment-start').value.trim() || !$('st-attachment-start').checkValidity()) throw new Error('Enter a valid loop start offset.');
-    const layout=Geo.attachmentFractions(Geo.pathLength(A.path,false),Geo.pathLength(B.path,true),Number($('st-spacing').value),Number($('st-attachment-start').value)/10,$('st-attachment-reverse').checked);
+    const insetInput=$('st-attachment-inset');
+    if (!insetInput.value.trim() || !insetInput.checkValidity()) throw new Error('Use a body loop inset between -20 and 20 mm.');
+    const loopPath=Geo.attachmentLoopPath(B.path,Number(insetInput.value)/10);
+    const layout=Geo.attachmentFractions(Geo.pathLength(A.path,false),Geo.pathLength(loopPath,true),Number($('st-spacing').value),Number($('st-attachment-start').value)/10,$('st-attachment-reverse').checked);
     const settings={width:Number($('st-width').value)/10,ang:stitchAngle(),abs:stitchAngleAbs()};
     const length=Number($('st-len').value), sourceBad=new Set();
     const probe={...A.piece,stitchSlits:[]};
     stitchPlaceRun({...A,piece:probe},layout.handle,length,settings,sourceBad);
-    const bodyHoles=Geo.pathArcParams(B.path,true,layout.body).map((pos,i)=>{
-      const line=Geo.slitLine(B.path[pos.seg],B.path[(pos.seg+1)%B.path.length],{...settings,len:length,t:pos.t},1);
+    const bodyHoles=Geo.pathArcParams(loopPath,true,layout.body).map((pos,i)=>{
+      const line=Geo.slitLine(loopPath[pos.seg],loopPath[(pos.seg+1)%loopPath.length],{...settings,len:length,t:pos.t},1);
       return {free:true,...Geo.lerp(line.a,line.b,.5),len:length,width:settings.width,ang:Math.atan2(line.b.y-line.a.y,line.b.x-line.a.x)*180/Math.PI,abs:true,pairIndex:i,attachment:true};
     });
     const last=layout.handle.length-1;
@@ -5548,7 +5551,7 @@
   for (const id of ['st-stamp-x','st-stamp-y','st-stamp-angle','st-stamp-target']) {
     $(id).addEventListener('input',()=>{ clear(gPreview); renderStampPreview(); });
   }
-  for (const id of ['st-attachment-target','st-attachment-start','st-attachment-reverse','st-attachment-numbers']) {
+  for (const id of ['st-attachment-target','st-attachment-inset','st-attachment-start','st-attachment-reverse','st-attachment-numbers']) {
     $(id).addEventListener('input',()=>{updateStitchUi();renderAll(true);});
   }
   $('st-mode').addEventListener('change', () => {

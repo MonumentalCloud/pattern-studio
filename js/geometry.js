@@ -1023,6 +1023,16 @@
     return Array.from({length:count},(_,i)=>loop ? i/count : (margin+i*pitch)/length);
   }
 
+  function attachmentLoopPath(nodes, inset) {
+    if (!Number.isFinite(inset)) throw new Error('Enter a finite body loop inset.');
+    if (inset===0) return nodes;
+    const base=dedupe(pathPolyline(nodes,true,.001)), pts=offsetClosed(base,-inset);
+    if (pts.length<3 || Math.abs(polyArea(pts))<EPS || (inset>0 && pts.some(p=>!pointInPolygon(base,p) || nearestOnPath(base,true,p).dist<inset-.001))) {
+      throw new Error('Body loop inset collapses or inverts this guide. Use a smaller inset.');
+    }
+    return pts.map(p=>({x:p.x,y:p.y,hin:null,hout:null}));
+  }
+
   function attachmentFractions(handleLength, loopLength, spacing, start, reverse) {
     if (![handleLength,loopLength,spacing,start].every(Number.isFinite) || Math.min(handleLength,loopLength,spacing)<=0) throw new Error('Use usable handle and loop paths and positive spacing.');
     const count = Math.max(3,Math.round(handleLength/spacing)), intervals = count-1;
@@ -1318,7 +1328,7 @@
     cubicPoint, cubicTangent, flattenCubic,
     pathPolyline, pathLength, polyArea, bbox, centroid, polyCentroid, labelBox, dedupe,
     outwardSign, offsetClosed, nearestOnPath, pointInPolygon, splitSeg, setSegLength, deletePointKeepCurve, selectedEdgeLength, matchChainLength,
-    reverseNodes, weldClosedPaths, reflectPoint, reflectNodes, segArcParams, slitLine, stitchFractions, attachmentFractions, stampSlits, slitContour, slitFitsPiece, survivingFreeSlits, repairStitchAnchor, notchLines, notchLinesPath,
+    reverseNodes, weldClosedPaths, reflectPoint, reflectNodes, segArcParams, slitLine, stitchFractions, attachmentLoopPath, attachmentFractions, stampSlits, slitContour, slitFitsPiece, survivingFreeSlits, repairStitchAnchor, notchLines, notchLinesPath,
     pathArcParams, simplifyPoly, offsetOpen, pathIntersections, booleanOutline, sewSlits, clipLoops,
   };
 });

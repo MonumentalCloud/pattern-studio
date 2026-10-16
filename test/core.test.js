@@ -1752,7 +1752,7 @@ t('attachment caller creates N handle holes and N-1 free body holes, preserving 
   const handle={id:'handle',visible:true,path:{closed:true,nodes:[N(0,0),N(10,0),N(10,3),N(0,3)]},stitchSlits:[]};
   const body={id:'body',visible:true,path:{closed:true,nodes:[N(20,0),N(30,0),N(30,10),N(20,10)]},stitchSlits:[]};
   const guide={id:'guide',guide:true,visible:true,path:{closed:true,nodes:[N(23,3),N(25,3),N(25,5),N(23,5)]},stitchSlits:[]};
-  const fields={'st-off':{value:'.3'},'st-spacing':{value:'1'},'st-len':{value:'.18'},'st-width':{value:'.5'},'st-attachment-target':{value:'body'},'st-attachment-start':{value:'0',checkValidity:()=>true},'st-attachment-reverse':{checked:false},'status-hint':{}};
+  const fields={'st-off':{value:'.3'},'st-spacing':{value:'1'},'st-len':{value:'.18'},'st-width':{value:'.5'},'st-attachment-target':{value:'body'},'st-attachment-inset':{value:'0',checkValidity:()=>true},'st-attachment-start':{value:'0',checkValidity:()=>true},'st-attachment-reverse':{checked:false},'status-hint':{}};
   let changes=0;const doc={pieces:[handle,body,guide]};
   const ctx={Geo,doc,$:id=>fields[id],stitchAngle:()=>-45,stitchAngleAbs:()=>false,isFolded:()=>false,pieceById:id=>doc.pieces.find(p=>p.id===id),nextStitchRun:p=>p.stitchSlits.reduce((m,s)=>Math.max(m,s.run || 0),0)+1,uid:()=> 'attachment',
     stitchChains:(targets,off)=>targets==='A'?[{piece:handle,path:[N(.3,.3),N(9.7,.3)],loop:false,anchor:{kind:'outline',segs:[0]}}]:[{piece:guide,path:guide.path.nodes,loop:true,anchor:{kind:'guide'}}],beginChange:()=>changes++,endChange(){},updateStitchUi(){},renderAll(){}};
@@ -1771,6 +1771,18 @@ t('attachment caller creates N handle holes and N-1 free body holes, preserving 
   assert(handle.stitchSlits.every(s=>s.pairSide==='A'&&s.attachment));
   const saved=JSON.parse(JSON.stringify(doc));assert.equal(saved.pieces[1].stitchSlits.length,body.stitchSlits.length);
   const out=DXF.pieceShapes(body);assert.equal(out.polylines.filter(p=>p.layer==='CUT').length,body.stitchSlits.length+1);
+  const originalBodyHoles=JSON.stringify(body.stitchSlits), originalHandleHoles=JSON.stringify(handle.stitchSlits);
+  for (const inset of [2,-2]) {
+    fields['st-attachment-inset'].value=String(inset);
+    const plan=ctx.planHandleAttachment('A','B');
+    assert.equal(plan.handleHoles.length,handle.stitchSlits.length);assert.equal(plan.bodyHoles.length,body.stitchSlits.length);
+    assert(Math.abs(plan.bodyHoles[0].x-(23+inset/10))<1e-8);
+    assert(Math.abs(plan.bodyHoles[0].y-(3+inset/10))<1e-8);
+    assert.equal(JSON.stringify(guide),originalGuide);assert.equal(JSON.stringify(body.stitchSlits),originalBodyHoles);assert.equal(JSON.stringify(handle.stitchSlits),originalHandleHoles);
+  }
+  fields['st-attachment-inset'].value='15';assert.throws(()=>ctx.planHandleAttachment('A','B'),/collapses/);
+  fields['st-attachment-inset'].value='';assert.throws(()=>ctx.planHandleAttachment('A','B'),/body loop inset/);
+  fields['st-attachment-inset'].value='0';
   // Interior rejection drops matching indices from both sides, retaining the closure.
   handle.stitchSlits=[];body.stitchSlits=[];
   body.holes=[{x:25,y:3+2/3,r:.15}];ctx.stitchHandleAttachment('A','B');
@@ -1781,6 +1793,28 @@ t('attachment caller creates N handle holes and N-1 free body holes, preserving 
   assert.throws(()=>ctx.stitchHandleAttachment('A','B'),/shared closure/);assert.equal(body.stitchSlits.length,0);assert.equal(handle.stitchSlits.length,0);
   guide.path.closed=false;ctx.stitchChains=targets=>targets==='A'?[{piece:handle,path:[N(.3,.3),N(9.7,.3)],loop:false}]:[{piece:guide,path:guide.path.nodes,loop:false}];
   assert.throws(()=>ctx.stitchHandleAttachment('A','B'),/closed internal guide/);
+});
+
+t('attachment body inset preserves zero curves, offsets either winding and rejects collapsed loops', () => {
+  const nodes=[N(0,0),N(2,0),N(2,2),N(0,2)], before=JSON.stringify(nodes);
+  assert.strictEqual(Geo.attachmentLoopPath(nodes,0),nodes);
+  for(const ring of [nodes,Geo.reverseNodes(nodes)]) {
+    const inner=Geo.attachmentLoopPath(ring,.2),outer=Geo.attachmentLoopPath(ring,-.2);
+    assert.deepEqual(Geo.bbox(inner),{minX:.2,minY:.2,maxX:1.8,maxY:1.8});
+    assert.deepEqual(Geo.bbox(outer),{minX:-.2,minY:-.2,maxX:2.2,maxY:2.2});
+    for(const inset of [1,1.5])assert.throws(()=>Geo.attachmentLoopPath(ring,inset),/collapses/);
+  }
+  assert.equal(JSON.stringify(nodes),before);assert.throws(()=>Geo.attachmentLoopPath(nodes,NaN),/finite/);
+});
+
+t('body inset follows a curved guide without moving its control points', () => {
+  const k=1.1045695, nodes=[N(2,0,{x:0,y:-k},{x:0,y:k}),N(0,2,{x:k,y:0},{x:-k,y:0}),N(-2,0,{x:0,y:k},{x:0,y:-k}),N(0,-2,{x:-k,y:0},{x:k,y:0})];
+  const before=JSON.stringify(nodes);assert.strictEqual(Geo.attachmentLoopPath(nodes,0),nodes);
+  for(const [inset,radius] of [[.2,1.8],[-.2,2.2]]) {
+    const path=Geo.attachmentLoopPath(nodes,inset),bb=Geo.bbox(path);
+    for(const value of Object.values(bb))assert(Math.abs(Math.abs(value)-radius)<.005);
+  }
+  assert.equal(JSON.stringify(nodes),before);
 });
 
 console.log(`\n${passed} tests passed${process.exitCode ? ' (with failures)' : ''}`);
