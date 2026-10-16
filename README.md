@@ -19,7 +19,7 @@ can be saved/opened as `.pattern.json` files. In Chrome/Edge, **Save writes stra
 to a file on your computer** (it asks where once, then `Ctrl+S` saves in place;
 `Shift`-click Save = Save As); other browsers fall back to a download.
 
-## Tool inspectors (build 66)
+## Tool inspectors (build 78)
 
 The active tool's controls stay above the Pieces list. File contains local/cloud
 save and open; Export contains DXF/SVG and engraving options. Round, Notch, Hole,
@@ -40,11 +40,19 @@ and dimension editing.
 New matched seams save their pairing, so whole-run dimension edits and re-spacing
 update both sides. Original side A determines the hole count, regardless of which
 side is selected. An amber notice flags unequal seam lengths before matching and
-when editing a linked pair; side B adjusts its spacing to retain equal counts.
+when editing a linked pair; open paths retain exact pitch and centre their holes with equal end margins. Side B retains the same count and pitch; if it is too short, adjust its path with **Match B’s inset length to A**. Closed loops retain fitted spacing around the perimeter.
 **Re-space whole run** regenerates holes, including manually
 removed ones. Deleting selected holes or a whole run leaves the partner intact.
 Legacy seams have no pairing information; recreate them to link their sides.
 Copied pieces detach from the original pair.
+
+## Handle attachment stamps and free stitch holes
+
+Use **Stitch → Edit holes / runs** to select the handle attachment holes (Shift-click or box-select), then **Stamp selected holes onto a panel…**. Choose the body panel, preview on the canvas and click to stamp, or enter exact X/Y in cm and rotation in degrees (positive = counter-clockwise) and press **Stamp holes**. The first selected hole is the placement reference, marked with a ring. All source offsets, slot lengths, widths and slants are copied by a rigid transform. The source stays unchanged; copies belong to the panel and move, rotate and mirror with it, without edge anchors or extra cut outlines. A later source edit does not update existing stamps. Escape cancels the captured stamp. Targets must be visible, closed and unfolded; unfold the source before capture too. Boolean operations preserve free holes from both pieces wherever their full slots fit the surviving material. Knife and Boolean cuts remove free slots crossed by the cut; edge-based stitch behavior stays unchanged.
+
+Use **Create runs / free holes → Free hole** to click individual stitch slots inside a piece. The slant is measured from the page. Free holes support selection, deletion, arrow-key movement and length/width/page-slant edits. They have no edge inset or path to re-space. Capture them again to place a copy at precise coordinates. A whole stamp is rejected if any slot crosses the panel boundary, a cutout or a circular hole, including zero-width line cuts.
+
+Open runs keep the entered iron pitch measured along the stitch path and use equal end margins. Single runs skip unsafe slots without shifting the remaining hole positions and report the skipped count. If no slots fit, the operation is cancelled. Existing holes stay as saved until explicitly re-spaced. Closed-loop layout is unchanged. Patterns containing free holes require build 78 or later; save a separate copy before opening one in an older build. Exported DXF/SVG includes free holes on CUT, without a body stitch guide. Check output scale and iron fit on a small physical sample before cutting leather.
 
 ## Measured shapes
 

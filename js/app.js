@@ -24,7 +24,7 @@
 
   // ---------- document state ----------
   const STORAGE_KEY = 'patternStudioDoc.v1';
-  const DOC_VERSION = 2; // 2: stitch slant is user-set (see migrateDoc)
+  const DOC_VERSION = 3; // 2: user-set slant; 3: free-coordinate stitch holes
   let doc = newDoc();
   let uidCounter = 1;
 
@@ -320,6 +320,7 @@
     };
   }
   function slitLineFor(piece, sl) {
+    if (sl.free) return Geo.slitLine(null, null, sl);
     const ctx = slitContext(piece, sl);
     if (!ctx) return null;
     return Geo.slitLine(ctx.nodes[sl.seg], ctx.nodes[(sl.seg + 1) % ctx.nodes.length], sl, ctx.outS);
@@ -437,7 +438,9 @@
         const cutS = {}; // outward sign per cutout, cached
         for (const sl of rp.stitchSlits) {
           let ln;
-          if (sl.cut != null) {
+          if (sl.free) {
+            ln = Geo.slitLine(null,null,sl);
+          } else if (sl.cut != null) {
             const c = (rp.cutouts || [])[sl.cut];
             if (!c || sl.seg >= c.nodes.length) continue;
             if (cutS[sl.cut] === undefined) {
@@ -636,6 +639,7 @@
     renderPieces();
     renderOverlay();
     renderPenPreview();
+    if (tool === 'stitch' && $('st-workflow').value === 'stamp') renderStampPreview();
     if (!keepList) renderSidebar();
   }
 
@@ -883,8 +887,11 @@
     $('stitch-props').hidden = !stitchVisible;
     const edit = tool !== 'stitch' || $('st-workflow').value === 'edit';
     if (tool === 'select' && editingSlits) $('st-workflow').value = 'edit';
-    $('st-create').hidden = edit;
-    $('st-edit').hidden = !edit;
+    const stamping = tool === 'stitch' && $('st-workflow').value === 'stamp';
+    $('st-create').hidden = edit || stamping;
+    $('st-edit').hidden = !edit || stamping;
+    $('st-stamp').hidden = !stamping;
+    if (stamping) updateStampTargets();
     $('st-edit-fields').hidden = !editingSlits;
     $('st-edit-notice').hidden = true;
     if (editingSlits) {
@@ -1020,6 +1027,7 @@
   let tool = 'select';
   let weldFirst = null; // weld tool: { pieceId, seg } of the first picked edge
   let stitchMulti = []; // stitch tool: [{pieceId, seg|cut}] targets being gathered
+  let stampPattern = null;
   let stitchSideA = null; // matched mode: the confirmed side-A target set
   const HINTS = {
     select: 'Click to select, then drag to move · Box selection chooses pieces, points, edges or stitch holes explicitly · Shift adds · Del deletes the selected objects',
@@ -1049,7 +1057,10 @@
     }
     if (t !== 'pen') finishDraft(false);
     if (t !== 'weld') weldFirst = null;
-    if (t !== 'stitch') { stitchMulti = []; stitchSideA = null; }
+    if (t !== 'stitch') {
+      stitchMulti = []; stitchSideA = null; stampPattern = null;
+      $('st-stamp-summary').textContent = 'No source holes captured.';
+    }
     if (t !== 'offset') insetChain = null;
     if (t !== 'knife') knifeFirst = null;
     if (t !== 'bool') boolFirst = null;
@@ -1194,6 +1205,12 @@
       dblPending = null;
     }
 
+    if (tool === 'stitch' && $('st-workflow').value === 'stamp' && stampPattern && !drag) {
+      const at = snap(w);
+      $('st-stamp-x').value = at.x; $('st-stamp-y').value = at.y;
+      clear(gPreview); renderStampPreview();
+      return;
+    }
     if (tool === 'pen' && draft) {
       draft.mouse = snap(w);
       if (drag && drag.type === 'pen-handle') {
@@ -1878,7 +1895,7 @@
   function remapAfterInsert(piece, seg, t) {
     for (const arr of [piece.notches || [], piece.stitchSlits || []]) {
       for (const nt of arr) {
-        if (nt.cut != null) continue; // cutout-anchored: outline splits don't touch it
+        if (nt.free || nt.cut != null) continue; // cutout-anchored: outline splits don't touch it
         if (nt.seg > seg) nt.seg += 1;
         else if (nt.seg === seg) {
           if (nt.t <= t) nt.t = t > 0 ? nt.t / t : 0;
@@ -1955,6 +1972,7 @@
   function movePiece(piece, dx, dy) {
     for (const nd of piece.path.nodes) { nd.x += dx; nd.y += dy; }
     for (const h of piece.holes || []) { h.x += dx; h.y += dy; }
+    for (const sl of piece.stitchSlits || []) if (sl.free) { sl.x += dx; sl.y += dy; }
     for (const c of piece.cutouts || []) {
       for (const nd of c.nodes) { nd.x += dx; nd.y += dy; }
     }
@@ -2709,11 +2727,17 @@
     const cutBase = (pA.cutouts || []).length;
     const stitchSlits = [];
     for (const sl of pA.stitchSlits || []) {
+      if (sl.free) { stitchSlits.push({...sl}); continue; }
       if (sl.cut != null) { stitchSlits.push(Object.assign({}, sl)); continue; }
       const s = res.segMapA[sl.seg];
       if (s != null) stitchSlits.push(Object.assign({}, sl, { seg: s }));
     }
     for (const sl of pB.stitchSlits || []) {
+      if (sl.free) {
+        const ln = slitLineFor(pB,sl), a = res.xform(ln.a), b = res.xform(ln.b);
+        stitchSlits.push({...sl,...Geo.lerp(a,b,.5),ang:Math.atan2(b.y-a.y,b.x-a.x)*180/Math.PI});
+        continue;
+      }
       if (sl.cut != null) { stitchSlits.push(Object.assign({}, sl, { cut: sl.cut + cutBase })); continue; }
       const s = res.segMapB[sl.seg];
       if (s != null) stitchSlits.push(Object.assign({}, sl, { seg: s, t: res.flipT ? 1 - sl.t : sl.t }));
@@ -2749,7 +2773,7 @@
       outline = sew.outline;
       for (const c of sew.cutouts) cutouts.push({ nodes: c });
       const remap = (arr) => arr.filter((m) => {
-        if (m.cut != null) return true; // cutout-anchored: outline sewing is irrelevant
+        if (m.free || m.cut != null) return true; // cutout-anchored: outline sewing is irrelevant
         const to = sew.segMap[m.seg];
         if (!to || to.loop !== -1) return false; // died with the slit / on a cutout
         m.seg = to.seg;
@@ -3227,6 +3251,7 @@
     }
     const sA = [], sB = [];
     for (const sl of clone.stitchSlits || []) {
+      if (sl.free) continue;
       if (sl.cut != null) { // cutout slits follow their cutout to its half
         const m = cutMap[sl.cut];
         if (m) (m.side === 'A' ? sA : sB).push(Object.assign({}, sl, { cut: m.idx }));
@@ -3235,6 +3260,9 @@
       const m = sideOf(sl.seg);
       (m.side === 'A' ? sA : sB).push(Object.assign({}, sl, { seg: m.seg }));
     }
+    sA.push(...Geo.survivingFreeSlits([clone],{path:{closed:true,nodes:nodesA},holes:hA,cutouts:cA,stitchSlits:sA}));
+    sB.push(...Geo.survivingFreeSlits([clone],{path:{closed:true,nodes:nodesB},holes:hB,cutouts:cB,stitchSlits:sB}));
+    const removedFree = (clone.stitchSlits || []).filter(sl=>sl.free).length - sA.concat(sB).filter(sl=>sl.free).length;
     let gA = null, gB = null;
     if (clone.grain) {
       const gm = { x: (clone.grain.x1 + clone.grain.x2) / 2, y: (clone.grain.y1 + clone.grain.y2) / 2 };
@@ -3264,7 +3292,7 @@
     selectPiece(target.id);
     renderAll();
     $('status-hint').textContent = `Cut "${base}" into "${target.name}" and "${pieceB.name}"` +
-      (sourcePiece ? ' (cut path consumed)' : '');
+      (sourcePiece ? ' (cut path consumed)' : '') + (removedFree ? ` · Removed ${removedFree} free slot(s) crossed by the cut` : '');
   }
 
   // ---- round tool: drag outward from a corner, distance = radius ----
@@ -3333,6 +3361,8 @@
         pA.cutouts = (pA.cutouts || []).concat(
           [{ nodes: pB.path.nodes.map((nd) => JSON.parse(JSON.stringify(nd))) }],
           (pB.cutouts || []).map((c) => ({ nodes: JSON.parse(JSON.stringify(c.nodes)) })));
+        const free = Geo.survivingFreeSlits([pA],pA);
+        pA.stitchSlits = (pA.stitchSlits || []).filter(sl=>!sl.free).concat(free);
         doc.pieces = doc.pieces.filter((q) => q.id !== pB.id);
         endChange();
         boolFirst = null;
@@ -3345,6 +3375,9 @@
       if (op === 'intersect' && (bInA || aInB)) {
         // the contained piece IS the intersection
         beginChange();
+        const kept = bInA ? pB : pA;
+        const free = Geo.survivingFreeSlits([pA,pB],kept);
+        kept.stitchSlits = (kept.stitchSlits || []).filter(sl=>!sl.free).concat(free);
         doc.pieces = doc.pieces.filter((q) => q.id !== (bInA ? pA.id : pB.id));
         endChange();
         boolFirst = null;
@@ -3357,6 +3390,9 @@
       if (op === 'union' && (bInA || aInB)) {
         // the containing piece IS the union
         beginChange();
+        const kept = bInA ? pA : pB;
+        const free = Geo.survivingFreeSlits([pA,pB],kept);
+        kept.stitchSlits = (kept.stitchSlits || []).filter(sl=>!sl.free).concat(free);
         doc.pieces = doc.pieces.filter((q) => q.id !== (bInA ? pB.id : pA.id));
         endChange();
         boolFirst = null;
@@ -3378,6 +3414,7 @@
     const cA = pA, cB = pB;
     // Keep A's marks only on retained boundary ranges, as before.
     const remap = mark => {
+      if (mark.free) return null;
       if (mark.cut != null) return null;
       const seg = sources.findIndex(s => s.owner === 0 && s.seg === mark.seg &&
         mark.t >= Math.min(s.t0,s.t1)-1e-9 && mark.t <= Math.max(s.t0,s.t1)+1e-9);
@@ -3393,6 +3430,8 @@
     const holes = (cA.holes || []).concat(cB.holes || []).filter((h) => Geo.pointInPolygon(resultPoly, h));
     const cutouts = (cA.cutouts || []).concat(cB.cutouts || []).filter((c) =>
       Geo.pointInPolygon(resultPoly, Geo.centroid(Geo.pathPolyline(c.nodes, true, 0.1))));
+    slits.push(...Geo.survivingFreeSlits([cA,cB],{path:{closed:true,nodes},holes,cutouts,stitchSlits:slits}));
+    const removedFree = [cA,cB].reduce((n,p)=>n+(p.stitchSlits || []).filter(sl=>sl.free).length,0)-slits.filter(sl=>sl.free).length;
     let grain = null;
     if (cA.grain) {
       const gm = { x: (cA.grain.x1 + cA.grain.x2) / 2, y: (cA.grain.y1 + cA.grain.y2) / 2 };
@@ -3412,10 +3451,103 @@
     selectPiece(pA.id);
     renderAll();
     const opName = { union: 'Union', subtract: 'Subtract', intersect: 'Intersect' }[op];
-    $('status-hint').textContent = `${opName}: "${pA.name}" ${op === 'subtract' ? '−' : op === 'union' ? '+' : '∩'} "${pB.name}"`;
+    $('status-hint').textContent = `${opName}: "${pA.name}" ${op === 'subtract' ? '−' : op === 'union' ? '+' : '∩'} "${pB.name}"` + (removedFree ? ` · Removed ${removedFree} free slot(s) outside the surviving material` : '');
   }
 
   // ---- stitch tool ----
+  function updateStampTargets() {
+    const input = $('st-stamp-target'), previous = input.value;
+    input.replaceChildren();
+    for (const p of doc.pieces) {
+      if (p.guide || p.visible === false || !p.path.closed || isFolded(p)) continue;
+      const option = document.createElement('option');
+      option.value = p.id; option.textContent = p.name; input.appendChild(option);
+    }
+    if ([...input.options].some(o=>o.value===previous)) input.value = previous;
+  }
+
+  function captureStitchStamp() {
+    try {
+      const groups = selectedStitchHoles();
+      if (groups.length !== 1) throw new Error('Select stitch holes on one source piece in Edit first.');
+      const {piece, indices} = groups[0];
+      if (isFolded(piece)) throw new Error('Unfold the source piece before capturing its holes.');
+      const captured = indices.map(i => {
+        const sl = piece.stitchSlits[i], line = slitLineFor(piece,sl);
+        if (!line) throw new Error('A source hole is unavailable. Select the holes again.');
+        return {free:true,...Geo.lerp(line.a,line.b,.5),len:sl.len || .15,width:sl.width || 0,
+          ang:Math.atan2(line.b.y-line.a.y,line.b.x-line.a.x)*180/Math.PI,abs:true};
+      });
+      stampPattern = captured;
+      $('st-workflow').value = 'stamp';
+      $('st-stamp-x').value = captured[0].x; $('st-stamp-y').value = captured[0].y;
+      $('st-stamp-angle').value = 0;
+      $('st-stamp-summary').textContent = `${captured.length} hole(s) captured from “${piece.name}”. Reference: first selected hole.`;
+      updateStampTargets();
+      const other = [...$('st-stamp-target').options].find(o=>o.value!==piece.id);
+      if (other) $('st-stamp-target').value = other.value;
+      $('st-stamp-notice').hidden = true;
+      updateStitchUi(); renderAll();
+    } catch(e) { $('status-hint').textContent = e.message; }
+  }
+
+  function stitchStampPlacement() {
+    if (!stampPattern) throw new Error('Capture selected source holes first.');
+    const piece = pieceById($('st-stamp-target').value);
+    if (!piece || piece.guide || piece.visible === false || !piece.path.closed || isFolded(piece)) throw new Error('Choose a visible, unfolded, closed target panel.');
+    const inputs = ['st-stamp-x','st-stamp-y','st-stamp-angle'].map(id=>$(id));
+    if (inputs.some(input=>input.value.trim()==='' || !input.checkValidity())) throw new Error('Enter a valid X, Y and rotation.');
+    const [x,y,angle] = inputs.map(input=>Number(input.value));
+    const slits = Geo.stampSlits(stampPattern,x,y,-angle);
+    return {piece,slits};
+  }
+
+  function renderStampPreview() {
+    if (!stampPattern) return;
+    try {
+      const {piece,slits} = stitchStampPlacement();
+      const valid = slits.every(sl=>Geo.slitFitsPiece(piece,sl));
+      for (const sl of slits) {
+        const pts = Geo.slitContour(Geo.slitLine(null,null,sl),sl.width);
+        el('path',{d:polyD(pts,pts.length>2),fill:'none',stroke:valid?'#168c86':'#cc3300',
+          'stroke-width':px(1.5),'pointer-events':'none'},gPreview);
+      }
+      el('circle',{cx:slits[0].x,cy:slits[0].y,r:px(5),fill:'none',stroke:'#b26300','stroke-width':px(1),'pointer-events':'none'},gPreview);
+    } catch(e) { $('status-hint').textContent = e.message; }
+  }
+
+  function applyStitchStamp() {
+    try {
+      const {piece,slits} = stitchStampPlacement();
+      if (slits.some(sl=>!Geo.slitFitsPiece(piece,sl))) throw new Error('A stamped slot crosses the panel outline, a cutout or a circular hole. No holes placed.');
+      const run = nextStitchRun(piece);
+      beginChange();
+      piece.stitchSlits = (piece.stitchSlits || []).concat(slits.map(sl=>({...sl,run})));
+      endChange(); renderAll();
+      $('st-stamp-notice').hidden = true;
+      $('status-hint').textContent = `Stamped ${slits.length} independent holes on “${piece.name}”. Spacing, size and slant preserved.`;
+    } catch(e) {
+      $('st-stamp-notice').textContent = e.message; $('st-stamp-notice').hidden = false;
+      $('status-hint').textContent = e.message;
+    }
+  }
+
+  function placeFreeStitch(w) {
+    try {
+      const at = snap(w), piece = boolPieceAt(at);
+      if (!piece || isFolded(piece)) throw new Error('Click inside a visible, unfolded pattern piece.');
+      const len = Number($('st-len').value), width = Number($('st-width').value)/10;
+      if (!$('st-len').checkValidity() || !$('st-width').checkValidity() || !$('st-ang').checkValidity() || !Number.isFinite(len) || len<=0 || width>len) throw new Error('Check slit length, width and page angle.');
+      const sl = {free:true,...at,len,width,ang:stitchAngle(),abs:true,run:nextStitchRun(piece)};
+      if (!Geo.slitFitsPiece(piece,sl)) throw new Error('The whole slot must fit inside the piece, clear of cutouts and circular holes.');
+      beginChange(); piece.stitchSlits = (piece.stitchSlits || []).concat(sl); endChange();
+      renderAll(); $('status-hint').textContent = 'Free stitch hole placed. No edge anchor; slant is measured from the page.';
+    } catch(e) {
+      $('st-match-notice').textContent = e.message; $('st-match-notice').hidden = false;
+      $('status-hint').textContent = e.message;
+    }
+  }
+
   // each generated run gets an id so a whole stitch line can be picked and
   // deleted as one object (slits stay separate marks until DXF export)
   function nextStitchRun(piece) {
@@ -3517,11 +3649,22 @@
 
   function matchedLengthNotice(a, b) {
     if (Math.abs(a - b) < 0.01) return '';
-    return `Unequal inset stitch lengths: side A ${(a * 10).toFixed(1)} mm, side B ${(b * 10).toFixed(1)} mm. Original side A determines hole count; side B’s spacing adjusts to match. Check that this difference is intentional.`;
+    return `Unequal inset stitch lengths: side A ${(a * 10).toFixed(1)} mm, side B ${(b * 10).toFixed(1)} mm. Original side A determines hole count; open paths retain the fixed pitch with different end margins. Use length matching if these seams must be equal.`;
   }
   function updateStitchUi() {
     $('st-match-notice').hidden = true;
     $('st-match-length').hidden = $('st-workflow').value !== 'create' || $('st-mode').value !== 'matched' || !stitchSideA || !stitchMulti.length;
+    if ($('st-workflow').value === 'stamp') {
+      $('status-hint').textContent = 'Capture selected stitch holes, choose a target panel, then click to stamp or enter exact coordinates.';
+      return;
+    }
+    const free = $('st-mode').value === 'free';
+    for (const id of ['st-spacing','st-off','st-ang-ref']) $(id).closest('.row').hidden = free;
+    $('st-apply').hidden = free;
+    if (free && $('st-workflow').value === 'create') {
+      $('status-hint').textContent = 'Free stitch hole: click inside a piece. Slant is measured from the page; no edge or inset is needed.';
+      return;
+    }
     if ($('st-workflow').value === 'edit') {
       $('status-hint').textContent = 'Edit stitches: click a hole or stitched edge, box-select holes across shapes · Shift adds/removes · Del removes selected holes';
       return;
@@ -3557,6 +3700,11 @@
   }
 
   function stitchDown(ev, w) {
+    if ($('st-workflow').value === 'stamp') {
+      const at = snap(w); $('st-stamp-x').value = at.x; $('st-stamp-y').value = at.y;
+      return applyStitchStamp();
+    }
+    if ($('st-workflow').value === 'create' && $('st-mode').value === 'free') return placeFreeStitch(w);
     if ($('st-workflow').value === 'edit') return stitchEditDown(ev, w);
     const res = nearestEdgeAt(w, true);
     const co = cutoutAt(w);
@@ -3799,12 +3947,6 @@
     return placed;
   }
 
-  function stitchFractions(count, loop) {
-    const fr = [];
-    for (let i = 0; i < count; i++) fr.push(loop ? i / count : (i + 0.5) / count);
-    return fr;
-  }
-
   // single mode: every chain gets its own run, spaced from its own length
   function stitchApplySingle() {
     if (!stitchMulti.length) return;
@@ -3814,18 +3956,20 @@
     const chains = stitchChains(stitchMulti, off);
     if (!chains.length) return;
     beginChange();
-    let total = 0, runs = 0;
+    let total = 0, runs = 0, skipped = 0;
     for (const ch of chains) {
       const L = Geo.pathLength(ch.path, ch.loop);
       if (L < 1e-6) continue;
-      const count = Math.max(2, Math.round(L / spacing));
-      total += stitchPlaceRun(ch, stitchFractions(count, ch.loop), slitLen);
+      const rejected = new Set();
+      total += stitchPlaceRun(ch, Geo.stitchFractions(L, spacing, ch.loop), slitLen, undefined, rejected);
+      skipped += rejected.size;
       runs++;
     }
+    if (!total) throw new Error('No safe stitch slots remain. Adjust the selected path, inset or slot dimensions.');
     endChange();
     stitchMulti = [];
     updateStitchUi();
-    $('status-hint').textContent = `${total} stitching slits over ${runs} run${runs > 1 ? 's' : ''}`;
+    $('status-hint').textContent = `${total} stitching slits over ${runs} run${runs > 1 ? 's' : ''}${skipped ? ` · Skipped ${skipped} unsafe hole(s); remaining positions unchanged` : ''}`;
     renderAll();
   }
 
@@ -3844,9 +3988,10 @@
     const lenA = Geo.pathLength(A.path, A.loop);
     const lenB = Geo.pathLength(B.path, B.loop);
     if (!Number.isFinite(lenA) || !Number.isFinite(lenB) || lenA < 1e-6 || lenB < 1e-6) throw new Error('One inset stitch path has no usable length. Reduce the inset or select different edges.');
-    const count = Math.max(2, Math.round(lenA / spacing));
+    const fa = Geo.stitchFractions(lenA,spacing,A.loop), count = fa.length;
+    const fb = Geo.stitchFractions(lenB,spacing,B.loop,count);
     const settings = {width:Number($('st-width').value) / 10, ang:stitchAngle(), abs:stitchAngleAbs(), pair:uid()};
-    const rejected=new Set(),fa=stitchFractions(count,A.loop),fb=stitchFractions(count,B.loop);
+    const rejected=new Set();
     // Probe copies so a rejected slot on either side removes the same pair index.
     for(const [chain,fractions] of [[A,fa],[B,fb]]) {
       stitchPlaceRun({...chain,piece:{...chain.piece,stitchSlits:[]}},fractions,slitLen,settings,rejected);
@@ -3932,12 +4077,17 @@
       return;
     }
     if ((ev.ctrlKey || ev.metaKey) && k === 'd') { duplicateSelection(); ev.preventDefault(); return; }
+    if (k === 'enter' && tool === 'stitch' && $('st-workflow').value === 'stamp') { applyStitchStamp(); ev.preventDefault(); return; }
     if (k === 'enter' && tool === 'stitch' && $('st-workflow').value === 'create' && (stitchMulti.length || stitchSideA)) {
       stitchApply();
       ev.preventDefault();
       return;
     }
     if (k === 'escape') {
+      if (tool === 'stitch' && $('st-workflow').value === 'stamp') {
+        stampPattern = null; $('st-stamp-summary').textContent = 'No source holes captured.';
+        $('st-workflow').value = 'edit'; clear(gPreview); updateStitchUi(); renderAll(); return;
+      }
       if (tool === 'pen' && draft) finishDraft(false);
       else if (tool === 'weld' && weldFirst) {
         weldFirst = null;
@@ -3964,7 +4114,7 @@
       return;
     }
     if (k === 'enter' && tool === 'pen' && draft) { finishDraft(false); return; }
-    if (k === 'delete' || k === 'backspace') { if (tool === 'stitch' && $('st-workflow').value === 'edit' && !['slit','slits'].includes(sel.kind)) { $('status-hint').textContent = 'No stitch holes selected.'; ev.preventDefault(); return; } if (tool === 'stitch' && $('st-workflow').value === 'create') { stitchMulti = []; stitchSideA = null; updateStitchUi(); renderAll(); ev.preventDefault(); return; } deleteSelection(); ev.preventDefault(); return; }
+    if (k === 'delete' || k === 'backspace') { if (tool === 'stitch' && $('st-workflow').value === 'stamp') { ev.preventDefault(); return; } if (tool === 'stitch' && $('st-workflow').value === 'edit' && !['slit','slits'].includes(sel.kind)) { $('status-hint').textContent = 'No stitch holes selected.'; ev.preventDefault(); return; } if (tool === 'stitch' && $('st-workflow').value === 'create') { stitchMulti = []; stitchSideA = null; updateStitchUi(); renderAll(); ev.preventDefault(); return; } deleteSelection(); ev.preventDefault(); return; }
     if (k === 'arrowleft' || k === 'arrowright' || k === 'arrowup' || k === 'arrowdown') {
       if (tool === 'stitch' && ($('st-workflow').value !== 'edit' || !['slit','slits'].includes(sel.kind))) { ev.preventDefault(); return; }
       if (!selPiece() && !multiSel.length) return;
@@ -4046,6 +4196,7 @@
         const piece = group.piece;
         const arr = sel.kind === 'notch' ? piece.notches : piece.stitchSlits;
         const it = arr && arr[index];
+        if (it && it.free) { it.x += dx; it.y += dy; continue; }
         const ctx = it && (sel.kind !== 'notch'
           ? slitContext(piece, it)
           : (it.seg < piece.path.nodes.length ? { nodes: piece.path.nodes } : null));
@@ -4308,6 +4459,7 @@
         nt.t = 1 - nt.t;
       }
       for (const sl of copy.stitchSlits || []) {
+        if (sl.free) { sl.x = 2*cx-sl.x; sl.ang = Math.atan2(Math.sin(sl.ang*Math.PI/180),-Math.cos(sl.ang*Math.PI/180))*180/Math.PI; continue; }
         if (sl.cut != null) {
           const cn = ((copy.cutouts || [])[sl.cut] || { nodes: [] }).nodes.length;
           if (cn) sl.seg = (2 * cn - 2 - sl.seg) % cn; // cutouts reverse too
@@ -4863,6 +5015,7 @@
         for (const nd of c.nodes) { sp(nd); sh(nd.hin); sh(nd.hout); }
       }
       for (const sl of p.stitchSlits || []) {
+        if (sl.free) { sp(sl); continue; }
         // positions scale with the piece; the slit length is a tooling choice
         if (sl.off) sl.off *= f;
         if (sl.toff) sl.toff *= f;
@@ -4895,6 +5048,7 @@
       if (!p) continue;
       for (const nd of p.path.nodes) { rp(nd); rh(nd.hin); rh(nd.hout); }
       for (const h of p.holes || []) rp(h);
+      for (const sl of p.stitchSlits || []) if (sl.free) { rp(sl); sl.ang = Math.atan2(Math.sin(sl.ang*Math.PI/180+rad),Math.cos(sl.ang*Math.PI/180+rad))*180/Math.PI; }
       for (const c of p.cutouts || []) {
         for (const nd of c.nodes) { rp(nd); rh(nd.hin); rh(nd.hout); }
       }
@@ -5070,7 +5224,9 @@
       const changes = [];
       for (const group of groups) for (const i of group.indices) {
         const s = group.piece.stitchSlits[i];
-        const next = {...s, len:values.len, width:values.width, ang:values.ang, abs:values.abs, off:(s.off || 0) + values.inset};
+        if (s.free && (values.inset !== 0 || !values.abs)) throw new Error("Free holes use page angles and have no edge inset. Use arrow keys to position them, or stamp at exact coordinates.");
+        const next = {...s, len:values.len, width:values.width, ang:values.ang, abs:values.abs};
+        if (!s.free) next.off = (s.off || 0) + values.inset;
         if (!Geo.slitFitsPiece(group.piece, next)) throw new Error('A slot crosses the cutting outline or a cutout. Increase inset or reduce length/width.');
         changes.push({piece:group.piece, i, next});
       }
@@ -5086,6 +5242,7 @@
   }
 
   function stitchRunTargets(piece, holes) {
+    if (holes.some(s=>s.free)) throw new Error("Free holes have no stitch path to re-space. Edit or stamp their positions instead.");
     if (piece.guide) return [{pieceId:piece.id, seg:0}];
     const cuts = new Set(holes.map(s => s.cut));
     if (cuts.size !== 1) throw new Error('This run spans multiple boundaries. Recreate it from its source edges.');
@@ -5136,7 +5293,8 @@
       for (const plan of plans) {
         const reference = plan.pair ? plans.find(p => p.pair === plan.pair && p.pairSide === 'A') : plan;
         if (!reference) throw new Error('Original side A is unavailable. Recreate the matched pair before re-spacing.');
-        plan.count = Math.max(2, Math.round(Geo.pathLength(reference.chain.path, reference.chain.loop) / spacing));
+        plan.count = Geo.stitchFractions(Geo.pathLength(reference.chain.path,reference.chain.loop),spacing,reference.chain.loop).length;
+        plan.fractions = Geo.stitchFractions(Geo.pathLength(plan.chain.path,plan.chain.loop),spacing,plan.chain.loop,plan.count);
       }
       beginChange();
       // Remove by object identity: multiple paired runs may share one piece.
@@ -5145,7 +5303,7 @@
       const newSelection = [];
       for (const plan of plans) {
         const from = plan.piece.stitchSlits.length;
-        stitchPlaceRun(plan.chain, stitchFractions(plan.count, plan.chain.loop), settings.len, {...settings, pair:plan.pair, pairSide:plan.pairSide});
+        stitchPlaceRun(plan.chain, plan.fractions, settings.len, {...settings, pair:plan.pair, pairSide:plan.pairSide});
         let group = newSelection.find(g=>g.piece===plan.piece);
         if (!group) { group={piece:plan.piece,indices:[]}; newSelection.push(group); }
         for (let i = from; i < plan.piece.stitchSlits.length; i++) group.indices.push(i);
@@ -5290,6 +5448,12 @@
     ev.stopPropagation();
   });
   $('st-apply').addEventListener('click', stitchApply);
+  $('st-stamp-start').addEventListener('click',captureStitchStamp);
+  $('st-stamp-capture').addEventListener('click',captureStitchStamp);
+  $('st-stamp-apply').addEventListener('click',applyStitchStamp);
+  for (const id of ['st-stamp-x','st-stamp-y','st-stamp-angle','st-stamp-target']) {
+    $(id).addEventListener('input',()=>{ clear(gPreview); renderStampPreview(); });
+  }
   $('st-mode').addEventListener('change', () => {
     stitchMulti = [];
     stitchSideA = null;
@@ -5410,6 +5574,10 @@
   $('pen-finish').addEventListener('click', () => finishDraft(false));
   $('tool-cancel').addEventListener('click', () => {
     stitchMulti = []; stitchSideA = null; weldFirst = null; knifeFirst = null; boolFirst = null; insetChain = null;
+    if (tool === 'stitch' && $('st-workflow').value === 'stamp') {
+      stampPattern = null; $('st-stamp-summary').textContent = 'No source holes captured.';
+      $('st-workflow').value = 'edit';
+    }
     if (tool === 'pen') finishDraft(false);
     clearSel(); renderAll(); $('status-hint').textContent = HINTS[tool];
   });

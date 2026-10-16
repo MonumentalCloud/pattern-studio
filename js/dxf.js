@@ -164,6 +164,14 @@
       return mirrored;
     }
     for (const sl of piece.stitchSlits || []) {
+      if (sl.free) {
+        stitchSlits.push({...sl});
+        const line = Geo.slitLine(null,null,sl);
+        const ma = res.xform(Geo.reflectPoint(line.a,a,b)), mb = res.xform(Geo.reflectPoint(line.b,a,b));
+        const center = Geo.lerp(ma,mb,.5);
+        if (Geo.dist(sl,center) > 1e-7) stitchSlits.push(mirrorSlit(sl,{...center,ang:Math.atan2(mb.y-ma.y,mb.x-ma.x)*180/Math.PI}));
+        continue;
+      }
       if (sl.cut != null) {
         const mapping = cutMap[sl.cut];
         if (!mapping) continue;
@@ -258,7 +266,7 @@
     const cutSign = {};
     for (const sl of piece.stitchSlits || []) {
       let nds = nodes, oS = outS;
-      if (sl.cut != null) {
+      if (!sl.free && sl.cut != null) {
         const c = (piece.cutouts || [])[sl.cut];
         if (!c || sl.seg >= c.nodes.length) continue;
         nds = c.nodes;
@@ -266,7 +274,7 @@
           cutSign[sl.cut] = -Geo.outwardSign(Geo.pathPolyline(c.nodes, true, 0.1));
         }
         oS = cutSign[sl.cut];
-      } else if (sl.seg >= nodes.length) continue;
+      } else if (!sl.free && sl.seg >= nodes.length) continue;
       const line = Geo.slitLine(nds[sl.seg], nds[(sl.seg + 1) % nds.length], sl, oS);
       const pts = Geo.slitContour(line, sl.width);
         if (pts.length > 2) out.polylines.push({ layer: 'CUT', pts, closed: true });

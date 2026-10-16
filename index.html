@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pattern Studio</title>
-<link rel="stylesheet" href="style.css?v=77">
+<link rel="stylesheet" href="style.css?v=78">
 </head>
 <body>
 <div id="app">
   <header id="topbar">
-    <span id="logo" title="build 77">✂ Pattern Studio</span>
+    <span id="logo" title="build 78">✂ Pattern Studio</span>
     <input id="doc-name" type="text" value="Untitled pattern" spellcheck="false" title="Pattern name">
     <details class="top-menu"><summary>File</summary><div class="menu-panel"><div class="row btns">    <button id="btn-new" title="New document">New</button>
     <button id="btn-open" title="Open .json project or import a .dxf">Open</button>
@@ -187,15 +187,28 @@
 <section id="select-props"><h3>Box selection</h3><div class="row"><label for="select-box">Select</label><select id="select-box"><option value="pieces">Pieces</option><option value="points">Points on selected piece</option><option value="edges">Edges on selected piece</option><option value="holes">Stitch holes on selected piece</option></select></div><p class="hint">Choose exactly what a drag box selects. Shift adds to the selection.</p></section>
 <section id="stitch-props" hidden>
         <h3>Stitch</h3>
-        <div class="row"><label for="st-workflow">Action</label><select id="st-workflow"><option value="create">Create runs</option><option value="edit">Edit holes / runs</option></select></div>
+        <div class="row"><label for="st-workflow">Action</label><select id="st-workflow"><option value="create">Create runs / free holes</option><option value="edit">Edit holes / runs</option><option value="stamp">Stamp onto panel</option></select></div>
+        <div id="st-stamp" hidden>
+          <p class="hint">Select holes in Edit, then capture them. Copies keep the exact spacing, size and slant. The first selected hole is the placement reference. Copies belong to the target panel, without edge anchors.</p>
+          <button id="st-stamp-capture">Capture selected holes</button>
+          <p id="st-stamp-summary" class="hint">No source holes captured.</p>
+          <div class="row"><label for="st-stamp-target">Target panel</label><select id="st-stamp-target"></select></div>
+          <div class="row"><label for="st-stamp-x">Reference X</label><input id="st-stamp-x" type="number" step="any" value="0"><em>cm</em></div>
+          <div class="row"><label for="st-stamp-y">Reference Y</label><input id="st-stamp-y" type="number" step="any" value="0"><em>cm</em></div>
+          <div class="row"><label for="st-stamp-angle">Rotate</label><input id="st-stamp-angle" type="number" step="any" value="0"><em>° CCW</em></div>
+          <p class="hint">Move over the canvas to preview; click to stamp on the chosen panel. Or enter exact coordinates and use Stamp holes. Escape cancels.</p>
+          <button id="st-stamp-apply">Stamp holes</button>
+          <p id="st-stamp-notice" class="seam-notice" role="status" hidden></p>
+        </div>
         <div id="st-create">
         <div class="row"><label for="st-mode">Mode</label>
           <select id="st-mode" title="Single: every selected target gets its own run. Matched: side A and side B get the SAME number of holes at matching positions (for seams)">
             <option value="single">Single runs</option>
             <option value="matched">Matched pair (A → B)</option>
+            <option value="free">Free hole — click inside piece</option>
           </select></div>
         <div class="row"><label for="st-spacing">Center spacing</label>
-          <input id="st-spacing" title="Target center-to-center distance along the stitch line; adjusted to fit a whole number of holes" type="number" min="0.1" max="2" step="any" value="0.3"> <em>cm</em></div>
+          <input id="st-spacing" title="Exact pitch on open paths, with equal end margins. Closed loops fit spacing around the perimeter." type="number" min="0.1" max="2" step="any" value="0.3"> <em>cm</em></div>
         <div class="row"><label for="st-len">Slit length</label>
           <input id="st-len" type="number" min="0.05" max="1" step="any" value="0.15"> <em>cm</em></div>
         <div class="row"><label for="st-width">Slot width</label><input id="st-width" type="number" min="0" max="10" step="any" value="0.5"><em>mm</em></div>
@@ -216,10 +229,11 @@
           cutouts — click, Shift-click or drag a box; contiguous edges chain into one run.
           <b>Single</b>: Enter runs holes along every selection. <b>Matched</b>: select side A,
           Enter, select side B, Enter — both sides get the same holes for seam pairing.
-          Set Inset ≈ 0.3 so holes sit inside the cut edge.</div>
+          Set Inset ≈ 0.3 so holes sit inside the cut edge. <b>Free hole</b>: click inside a piece; slant is measured from the page, without an edge or inset.</div>
       </div>
         <div id="st-edit" hidden>
           <button id="st-repair-slants" title="Repair known end-slot angle errors throughout this pattern. Keeps positions and counts; undoable.">Repair existing seam slants</button>
+          <button id="st-stamp-start">Stamp selected holes onto a panel…</button>
           <p class="hint">Boxes select holes across shapes. Copy / Cut / Duplicate act on all containing shapes; Delete removes only selected holes.</p>
           <p id="st-edit-summary" class="hint">Click a hole, or drag a box to select holes.</p>
           <p id="st-edit-notice" class="seam-notice" role="status" hidden></p>
@@ -251,8 +265,8 @@
         </div>
             <button id="sp-delete-whole" class="danger">Delete whole run (keep partner)</button>
             <details><summary>Re-space whole run</summary>
-              <p class="hint">Rebuilds holes on the run’s occupied edges. Replaces manual gaps. Original side A sets the count; side B adjusts its spacing to match.</p>
-              <div class="row"><label for="sp-run-spacing">Center spacing</label><input id="sp-run-spacing" title="Target center-to-center distance along the stitch line; adjusted to fit a whole number of holes" type="number" min="1" max="20" step="0.1" value="3"><em>mm</em></div>
+              <p class="hint">Rebuilds holes on the run’s occupied edges. Replaces manual gaps. Original side A sets the count. Open paths keep exact pitch with equal end margins; closed loops retain fitted spacing. Free holes have no path to rebuild.</p>
+              <div class="row"><label for="sp-run-spacing">Center spacing</label><input id="sp-run-spacing" title="Exact pitch for open paths; closed loops fit spacing around the perimeter" type="number" min="1" max="20" step="0.1" value="3"><em>mm</em></div>
               <div class="row"><label for="sp-run-inset">Run inset</label><input id="sp-run-inset" type="number" min="-20" max="20" step="0.1" value="3"><em>mm</em></div>
               <button id="sp-run-rebuild">Re-space run / matched pair</button>
             </details>
@@ -421,10 +435,10 @@
   </div>
 </div>
 <input id="file-input" type="file" accept=".json,.dxf,application/json" hidden>
-<script src="js/geometry.js?v=77"></script>
-<script src="js/strokefont.js?v=77"></script>
-<script src="js/dxf.js?v=77"></script>
-<script src="js/dxfimport.js?v=77"></script>
-<script src="js/app.js?v=77"></script>
+<script src="js/geometry.js?v=78"></script>
+<script src="js/strokefont.js?v=78"></script>
+<script src="js/dxf.js?v=78"></script>
+<script src="js/dxfimport.js?v=78"></script>
+<script src="js/app.js?v=78"></script>
 </body>
 </html>

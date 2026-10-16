@@ -676,7 +676,7 @@
       mappedSegs=segs.map(mapSeg);
       if(first)mappedSegs.unshift(extension);else mappedSegs.push(extension);
       for(const key of ['notches','stitchSlits'])for(const mark of result[key]||[]) {
-        if(mark.cut!=null)continue;
+        if(mark.free||mark.cut!=null)continue;
         mark.seg=mapSeg(mark.seg);
         if(mark.sourceSegments)mark.sourceSegments=mark.sourceSegments.map(mapSeg);
       }
@@ -699,7 +699,7 @@
     const sign=closed?outwardSign(pathPolyline(nodes,true)):1,afterSign=closed?outwardSign(pathPolyline(out,true)):1;
     for(let i=0;i<(piece.stitchSlits||[]).length;i++) {
       const old=piece.stitchSlits[i],mark=result.stitchSlits[i];
-      if(old.cut==null) {
+      if(!old.free&&old.cut==null) {
         const before=slitLine(nodes[old.seg],nodes[(old.seg+1)%n],old,sign);
         const after=slitLine(out[mark.seg],out[(mark.seg+1)%out.length],mark,afterSign);
         if(dist(before.a,after.a)>1e-5||dist(before.b,after.b)>1e-5)throw new Error(`This adjustment would move stitch hole ${i+1}. Choose the other endpoint.`);
@@ -790,10 +790,10 @@
     let removed=0;
     for(const key of ['notches','stitchSlits']) {
       result[key]=(result[key]||[]).filter(q=>{
-        if(q.cut!=null)return true;
+        if(q.free||q.cut!=null)return true;
         if(attached(q)){removed++;return false;}return true;
       }).map(q=>{
-        if(q.cut!=null)return q;
+        if(q.free||q.cut!=null)return q;
         const affected=q.seg===prev||q.seg===idx;
         if(affected&&!exact) throw new Error('This approximation would move a surviving hole or notch. Keep the point to preserve those marks.');
         const t=affected?(q.seg===prev?q.t*split:split+q.t*(1-split)):q.t;
@@ -987,14 +987,14 @@
   }
 
   function slitLine(a, b, sl, outSign) {
-    let p = segPoint(a, b, sl.t);
-    const tan = segTangent(a, b, sl.t);
-    if (sl.off) {
+    let p = sl.free ? {x:sl.x, y:sl.y} : segPoint(a, b, sl.t);
+    const tan = sl.free ? {x:1, y:0} : segTangent(a, b, sl.t);
+    if (!sl.free && sl.off) {
       const os = outSign == null ? 1 : outSign;
       const n = { x: os * tan.y, y: -os * tan.x }; // outward normal
       p = { x: p.x - n.x * sl.off, y: p.y - n.y * sl.off };
     }
-    if (sl.toff) {
+    if (!sl.free && sl.toff) {
       // tangential offset: lets a hole anchored at a corner sit exactly on a
       // mitred inset line (the pure-normal model can't express that)
       p = { x: p.x + tan.x * sl.toff, y: p.y + tan.y * sl.toff };
@@ -1012,6 +1012,26 @@
       a: { x: p.x - d.x * h, y: p.y - d.y * h },
       b: { x: p.x + d.x * h, y: p.y + d.y * h },
     };
+  }
+
+  function stitchFractions(length, pitch, loop, count) {
+    if (![length,pitch].every(Number.isFinite) || length<=0 || pitch<=0) throw new Error('Use a positive stitch path length and pitch.');
+    count = count == null ? Math.max(2, loop ? Math.round(length/pitch) : Math.floor(length/pitch+1e-9)) : count;
+    if (!Number.isInteger(count) || count<2) throw new Error('A stitch run needs at least two holes.');
+    if (!loop && (count-1)*pitch>length+1e-8) throw new Error('This path is too short for the fixed pitch and hole count. Use Match B’s inset length to A or adjust the path.');
+    const margin = (length-(count-1)*pitch)/2;
+    return Array.from({length:count},(_,i)=>loop ? i/count : (margin+i*pitch)/length);
+  }
+
+  // Rigid copies use the first source hole as their placement reference.
+  function stampSlits(slits, x, y, degrees) {
+    if (!slits.length || ![x,y,degrees].every(Number.isFinite)) throw new Error('Choose source holes and a finite position and rotation.');
+    const rad = degrees * Math.PI / 180, c = Math.cos(rad), s = Math.sin(rad);
+    return slits.map(sl => {
+      if (!sl.free || ![sl.x,sl.y,sl.len,sl.ang].every(Number.isFinite)) throw new Error('Invalid source stitch hole.');
+      const dx = sl.x - slits[0].x, dy = sl.y - slits[0].y;
+      return {free:true, x:x+dx*c-dy*s, y:y+dx*s+dy*c, len:sl.len, width:sl.width || 0, ang:((sl.ang+degrees+180)%360+360)%360-180, abs:true};
+    });
   }
 
   // Physical slot boundary, in cm. A zero-width legacy slit stays a line.
@@ -1037,21 +1057,39 @@
   }
 
   function slitFitsPiece(piece, sl) {
-    if (!sl.width || piece.guide || !piece.path.closed) return true;
+    if ((!sl.free && !sl.width) || piece.guide || !piece.path.closed) return true;
     const nodes = sl.cut == null ? piece.path.nodes : (piece.cutouts || [])[sl.cut]?.nodes;
-    if (!nodes || !nodes[sl.seg]) return false;
+    if (!nodes || (!sl.free && !nodes[sl.seg])) return false;
     const sign = outwardSign(pathPolyline(nodes, true, 0.01)) * (sl.cut == null ? 1 : -1);
     const pts = slitContour(slitLine(nodes[sl.seg], nodes[(sl.seg + 1) % nodes.length], sl, sign), sl.width);
+    const closed = pts.length > 2;
     const outer = pathPolyline(piece.path.nodes, true, 0.01);
-    if (pts.some(p => !pointInPolygon(outer, p)) || pathIntersections(piece.path.nodes, true, pts, true).length) return false;
+    if (pts.some(p => !pointInPolygon(outer, p)) || pathIntersections(piece.path.nodes, true, pts, closed).length) return false;
     for (const c of piece.cutouts || []) {
       const ring = pathPolyline(c.nodes, true, 0.01);
-      if (pts.some(p => pointInPolygon(ring, p)) || pathIntersections(c.nodes, true, pts, true).length || pointInPolygon(pts, ring[0])) return false;
+      if (pts.some(p => pointInPolygon(ring, p)) || pathIntersections(c.nodes, true, pts, closed).length || (closed && pointInPolygon(pts, ring[0]))) return false;
     }
     for (const h of piece.holes || []) {
-      if (pointInPolygon(pts, h) || nearestOnPath(pts, true, h).dist <= (h.r || 0.15)) return false;
+      if ((closed && pointInPolygon(pts, h)) || nearestOnPath(pts, closed, h).dist <= (h.r || 0.15)) return false;
     }
     return true;
+  }
+
+  // Shape edits retain only complete slots in surviving material. Re-key runs
+  // per source so two independent stamps never merge just because their ids match.
+  function survivingFreeSlits(sources, target) {
+    let run = (target.stitchSlits || []).reduce((m,sl)=>Math.max(m,sl.run || 0),0);
+    const kept = [];
+    for (const source of sources) {
+      const runs = new Map();
+      for (const sl of source.stitchSlits || []) {
+        if (!sl.free || !slitFitsPiece(target,sl)) continue;
+        const key = sl.run == null ? sl : sl.run;
+        if (!runs.has(key)) runs.set(key,++run);
+        kept.push({...sl,run:runs.get(key)});
+      }
+    }
+    return kept;
   }
 
   // Reflect point p across the line through a and b.
@@ -1269,7 +1307,7 @@
     cubicPoint, cubicTangent, flattenCubic,
     pathPolyline, pathLength, polyArea, bbox, centroid, polyCentroid, labelBox, dedupe,
     outwardSign, offsetClosed, nearestOnPath, pointInPolygon, splitSeg, setSegLength, deletePointKeepCurve, selectedEdgeLength, matchChainLength,
-    reverseNodes, weldClosedPaths, reflectPoint, reflectNodes, segArcParams, slitLine, slitContour, slitFitsPiece, repairStitchAnchor, notchLines, notchLinesPath,
+    reverseNodes, weldClosedPaths, reflectPoint, reflectNodes, segArcParams, slitLine, stitchFractions, stampSlits, slitContour, slitFitsPiece, survivingFreeSlits, repairStitchAnchor, notchLines, notchLinesPath,
     pathArcParams, simplifyPoly, offsetOpen, pathIntersections, booleanOutline, sewSlits, clipLoops,
   };
 });

@@ -1171,7 +1171,7 @@ t('matched re-spacing uses original A when B comes first and is selected', () =>
   const source = require('fs').readFileSync(require.resolve('../js/app.js'), 'utf8');
   const start = source.indexOf('  function rebuildStitchRuns(');
   const end = source.indexOf('\n  function cancelStitchChange', start);
-  const b = {length:10,stitchSlits:[{pair:'p',pairSide:'B'}]};
+  const b = {length:20.2,stitchSlits:[{pair:'p',pairSide:'B'}]};
   const a = {length:20,stitchSlits:[{pair:'p',pairSide:'A'}]};
   const groups = [b,a].map(piece=>({piece,indices:[0]}));
   const fields = {'sp-run-spacing':{value:'4'},'sp-run-inset':{value:'3'},'sp-slit-inset':{},'status-hint':{},'st-spacing':{},'st-off':{}};
@@ -1538,23 +1538,23 @@ t('failed stitching restores the document and shows the reason beside the action
 
 t('matched stitching skips the union of unsafe pair indices without moving surviving holes', () => {
   const source=require('fs').readFileSync(require.resolve('../js/app.js'),'utf8'),vm=require('vm');
-  const a={path:{closed:true,nodes:[N(0,0),N(5,0),N(5,2),N(0,2)]},cutouts:[{nodes:[N(1.2,.1),N(1.4,.1),N(1.4,.4),N(1.2,.4)]}],stitchSlits:[]};
-  const b={path:{closed:true,nodes:[N(0,0),N(5,0),N(5,2),N(0,2)]},holes:[{x:3.7,y:.25,r:.1}],stitchSlits:[]};
+  const a={path:{closed:true,nodes:[N(0,0),N(5,0),N(5,2),N(0,2)]},cutouts:[{nodes:[N(1.45,.1),N(1.55,.1),N(1.55,.4),N(1.45,.4)]}],stitchSlits:[]};
+  const b={path:{closed:true,nodes:[N(0,0),N(5,0),N(5,2),N(0,2)]},holes:[{x:3.5,y:.25,r:.1}],stitchSlits:[]};
   const fields={'st-spacing':{value:'.5'},'st-len':{value:'.18'},'st-off':{value:'.25'},'st-width':{value:'.5'},'status-hint':{}};
   let changes=0;const ctx={Geo,$:id=>fields[id],stitchAngle:()=>-45,stitchAngleAbs:()=>false,uid:()=> 'pair',nextStitchRun:()=>1,
     stitchChains:piece=>[{piece,path:[N(.1,.25),N(4.9,.25)],loop:false,anchor:{kind:'outline',segs:[0]}}],
     beginChange:()=>changes++,endChange:()=>{},updateStitchUi:()=>{},renderAll:()=>{},fmt:x=>x.toFixed(2)};
   for(const [start,end] of [['  function stitchPlaceRun(','  // single mode:'],['  function stitchMatched(','  // the panel button / Enter:']])vm.runInNewContext(source.slice(source.indexOf(start),source.indexOf(end,source.indexOf(start))),ctx);
   ctx.stitchMatched(a,b);
-  assert.equal(changes,1);assert.equal(a.stitchSlits.length,8);assert.equal(b.stitchSlits.length,8);
+  assert.equal(changes,1);assert.equal(a.stitchSlits.length,7);assert.equal(b.stitchSlits.length,7);
   for(const p of [a,b])for(const [i,sl] of p.stitchSlits.entries()) {
     assert(Geo.slitFitsPiece(p,sl));assert.equal(sl.ang,-45);assert.equal(sl.pair,'pair');
     const line=Geo.slitLine(p.path.nodes[sl.seg],p.path.nodes[(sl.seg+1)%4],sl,1);
-    assert(Math.abs((line.a.x+line.b.x)/2-[.34,.82,1.78,2.26,2.74,3.22,4.18,4.66][i])<1e-6);
+    assert(Math.abs((line.a.x+line.b.x)/2-[.5,1,2,2.5,3,4,4.5][i])<1e-6);
   }
   assert.match(fields['status-hint'].textContent,/Skipped 2 pair/);
   const blocked={...a,cutouts:[{nodes:[N(0,.05),N(5,.05),N(5,.5),N(0,.5)]}],stitchSlits:[]};
-  assert.throws(()=>ctx.stitchMatched(blocked,b),/No safe pairs remain/);assert.equal(changes,1);assert.equal(blocked.stitchSlits.length,0);assert.equal(b.stitchSlits.length,8);
+  assert.throws(()=>ctx.stitchMatched(blocked,b),/No safe pairs remain/);assert.equal(changes,1);assert.equal(blocked.stitchSlits.length,0);assert.equal(b.stitchSlits.length,7);
 });
 
 t('length matching preserves unaffected marks on adjoining collinear edges', () => {
@@ -1584,7 +1584,7 @@ t('new and retroactive end slots follow source edges while preserving centers an
   assert.equal(Geo.repairStitchAnchor(piece,{...old,abs:true}),null);
   assert.equal(Geo.repairStitchAnchor(piece,{...old,sourceSegments:undefined}),null);
   const src=require('fs').readFileSync(require.resolve('../js/app.js'),'utf8'),vm=require('vm'),ctx={Geo,nextStitchRun:()=>1};
-  vm.runInNewContext(src.slice(src.indexOf('  function stitchPlaceRun('),src.indexOf('  function stitchFractions(')),ctx);
+  vm.runInNewContext(src.slice(src.indexOf('  function stitchPlaceRun('),src.indexOf('  // single mode:')),ctx);
   ctx.stitchPlaceRun({piece,path:[N(.25,4.85),N(.25,.15)],loop:false,anchor:{kind:'outline',segs:[3]}},[0,1],.18,{width:.05,ang:-45,abs:false});
   assert.deepEqual(piece.stitchSlits.map(s=>s.seg),[3,3]);
   for(const sl of piece.stitchSlits)assert.equal(sl.ang,-45);
@@ -1608,6 +1608,130 @@ t('mirror copy remaps saved stitch source edges with its anchors', () => {
   vm.runInNewContext(src.slice(src.indexOf('  function duplicatePiece('),src.indexOf('  // ---------- file ops')),ctx);
   ctx.duplicatePiece(p,true);const copy=ctx.doc.pieces[0],sl=copy.stitchSlits[0];
   assert.equal(sl.seg,1);assert.equal(sl.sourceSegments[0],1);assert.equal(Geo.repairStitchAnchor(copy,sl),null);assert.equal(sl.ang,-45);
+});
+
+t('open stitching keeps exact iron pitch and equal margins; closed loops retain their layout', () => {
+  for (const length of [10,10.01,9.9]) {
+    const fr = Geo.stitchFractions(length,.3,false);
+    for (let i=1;i<fr.length;i++) assert(Math.abs((fr[i]-fr[i-1])*length-.3)<1e-10);
+    assert(Math.abs(fr[0]-(1-fr.at(-1)))<1e-10);
+  }
+  const a=Geo.stitchFractions(10,.3,false), b=Geo.stitchFractions(10.2,.3,false,a.length);
+  assert.equal(a.length,33); assert.equal(b.length,33);
+  assert(Math.abs(a[0]*10-.2)<1e-10);
+  assert.throws(()=>Geo.stitchFractions(5,.3,false,a.length),/too short/);
+  assert.throws(()=>Geo.stitchFractions(.2,.3,false),/too short/);
+  assert.deepEqual(Geo.stitchFractions(1,.3,true),[0,1/3,2/3]);
+});
+
+t('stamps preserve every source offset, slit size and slant under translation and rotation', () => {
+  const source=[{free:true,x:1,y:1,len:.18,width:.05,ang:-45,run:1,pair:'original'},
+    {free:true,x:1.3,y:1,len:.18,width:.05,ang:-20}, {free:true,x:1.3,y:1.5,len:.2,width:0,ang:30}];
+  const before=JSON.stringify(source), copy=Geo.stampSlits(source,5,6,90);
+  assert.equal(JSON.stringify(source),before);
+  assert(Math.abs(copy[1].x-5)<1e-12);assert(Math.abs(copy[1].y-6.3)<1e-12);
+  for(let i=0;i<source.length;i++) {
+    assert.equal(copy[i].len,source[i].len);assert.equal(copy[i].width,source[i].width);
+    assert.equal(copy[i].ang,source[i].ang+90);assert.equal(copy[i].seg,undefined);assert.equal(copy[i].pair,undefined);
+    for(let j=0;j<i;j++)assert(Math.abs(Geo.dist(copy[i],copy[j])-Geo.dist(source[i],source[j]))<1e-12);
+  }
+  assert.throws(()=>Geo.stampSlits(source,NaN,0,0),/finite/);
+});
+
+t('free slots, including line cuts, must clear full boundaries, cutouts and circular holes', () => {
+  const piece={path:{closed:true,nodes:[N(0,0),N(10,0),N(10,10),N(0,10)]},
+    cutouts:[{nodes:[N(3,3),N(4,3),N(4,4),N(3,4)]}],holes:[{x:6,y:6,r:.2}]};
+  for(const width of [0,.05]) {
+    const sl={free:true,x:1,y:1,len:.2,width,ang:0,abs:true};
+    assert(Geo.slitFitsPiece(piece,sl));
+    for(const at of [{x:.01,y:1},{x:3.5,y:3.5},{x:2.95,y:3.5},{x:6.25,y:6}]) assert(!Geo.slitFitsPiece(piece,{...sl,...at}));
+  }
+});
+
+t('free holes serialize and export as CUT slots without adding a body cutout or stitch guide', () => {
+  const piece={path:{closed:true,nodes:[N(0,0),N(10,0),N(10,10),N(0,10)]},
+    stitchSlits:[{free:true,x:2,y:3,len:.2,width:.05,ang:-45,abs:true},{free:true,x:2.3,y:3,len:.2,width:0,ang:0,abs:true}]};
+  const shapes=DXF.pieceShapes(JSON.parse(JSON.stringify(piece)));
+  assert.equal(shapes.polylines.length,2);assert.equal(shapes.lines.length,1);
+  assert(shapes.polylines.every(p=>p.layer==='CUT'));assert.equal(shapes.lines[0].layer,'CUT');
+  const center=Geo.centroid(shapes.polylines[1].pts);assert(Geo.dist(center,{x:2,y:3})<1e-10);
+});
+
+t('free holes follow piece movement, rotation and mirror; outline remapping leaves coordinates alone', () => {
+  const fs=require('fs'),vm=require('vm'),src=fs.readFileSync(require.resolve('../js/app.js'),'utf8');
+  const p={path:{closed:true,nodes:[N(0,0),N(10,0),N(10,10),N(0,10)]},stitchSlits:[{free:true,x:2,y:3,len:.2,width:.05,ang:-45,abs:true}]};
+  const ctx={Geo,pieceById:()=>p};
+  for(const [a,b] of [['  function movePiece(','  // ---- select tool'],['  function rotatePieces(','  function selectionCentre('],['  function remapAfterInsert(','  // extrude an edge:']])vm.runInNewContext(src.slice(src.indexOf(a),src.indexOf(b,src.indexOf(a))),ctx);
+  ctx.remapAfterInsert(p,0,.5);assert.equal(p.stitchSlits[0].seg,undefined);
+  ctx.movePiece(p,1,2);assert.equal(p.stitchSlits[0].x,3);assert.equal(p.stitchSlits[0].y,5);
+  ctx.rotatePieces(['p'],0,0,Math.PI/2);assert(Geo.dist(p.stitchSlits[0],{x:-5,y:3})<1e-10);assert.equal(p.stitchSlits[0].ang,45);
+  const copyCtx={Geo,uid:()=> 'copy',decorate:()=> 'copy',movePiece:()=>{},beginChange:()=>{},endChange:()=>{},selectPiece:()=>{},renderAll:()=>{},doc:{pieces:[]}};
+  vm.runInNewContext(src.slice(src.indexOf('  function duplicatePiece('),src.indexOf('  // ---------- file ops')),copyCtx);
+  copyCtx.duplicatePiece(p,true);const copy=copyCtx.doc.pieces[0];
+  assert.equal(copy.stitchSlits[0].seg,undefined);assert.equal(copy.stitchSlits[0].ang,135);
+  const bounds=Geo.bbox(Geo.pathPolyline(p.path.nodes,true,.1));assert(Math.abs(copy.stitchSlits[0].x-(bounds.minX+bounds.maxX+5))<1e-10);
+});
+
+t('free holes survive seam endpoint matching and fold unfolding independently of edge indices', () => {
+  const p={path:{closed:true,nodes:[N(0,0),N(10,0),N(10,10),N(0,10)]},stitchSlits:[{free:true,x:2,y:3,len:.2,width:.05,ang:-45,abs:true,run:1}]};
+  const adjusted=Geo.matchChainLength(p,[0],10.5,'end').piece;
+  assert.deepEqual(adjusted.stitchSlits,p.stitchSlits);
+  const unfolded=DXF.unfoldPiece({...p,foldSeg:1});assert.equal(unfolded.stitchSlits.length,2);
+  const centres=unfolded.stitchSlits.map(s=>({x:s.x,y:s.y}));assert(centres.some(c=>Geo.dist(c,{x:2,y:3})<1e-8));assert(centres.some(c=>Geo.dist(c,{x:18,y:3})<1e-8));
+  assert.notEqual(unfolded.stitchSlits[0].run,unfolded.stitchSlits[1].run);
+});
+
+t('Boolean preserves surviving free slots from both operands and removes complete footprints crossed by a trim', () => {
+  const source=require('fs').readFileSync(require.resolve('../js/app.js'),'utf8'),vm=require('vm');
+  const rect=(id,x,y,w,h)=>({id,name:id,path:{closed:true,nodes:[N(x,y),N(x+w,y),N(x+w,y+h),N(x,y+h)]},stitchSlits:[]});
+  const slot=(x,y)=>({free:true,x,y,len:.2,width:.05,ang:0,abs:true,run:1});
+  const run=(a,b,op)=>{
+    const ctx={Geo,doc:{pieces:[a,b]},beginChange(){},endChange(){},selectPiece(){},renderAll(){},setTool(){},$:()=>({}),alert:m=>assert.fail(m)};
+    vm.runInNewContext(source.slice(source.indexOf('  function booleanPieces('),source.indexOf('  // ---- stitch tool ----')),ctx);
+    ctx.booleanPieces(a,b,op);return ctx.doc.pieces[0];
+  };
+  for(const contained of [false,true]) for(const reverse of [false,true]) {
+    const a=rect('a',0,0,10,10),b=contained?rect('b',2,2,4,4):rect('b',5,0,10,10);
+    a.stitchSlits=[slot(3,3)];b.stitchSlits=[slot(contained?4:12,4)];
+    const result=reverse?run(b,a,'union'):run(a,b,'union');
+    assert.equal(result.stitchSlits.length,2);assert.notEqual(result.stitchSlits[0].run,result.stitchSlits[1].run);
+    assert(result.stitchSlits.every(sl=>Geo.slitFitsPiece(result,sl)));
+  }
+  const a=rect('a',0,0,10,10),b=rect('b',6,-1,6,12);
+  a.stitchSlits=[slot(5.95,5),slot(2,5)];const result=run(a,b,'subtract');
+  assert.equal(result.stitchSlits.length,1);assert.equal(result.stitchSlits[0].x,2);
+  assert(result.stitchSlits.every(sl=>Geo.slitFitsPiece(result,sl)));
+  const outer=rect('outer',0,0,10,10),inner=rect('inner',2,2,4,4);
+  outer.stitchSlits=[slot(3,3),slot(1,1)];inner.stitchSlits=[slot(4,4)];
+  assert.equal(run(outer,inner,'intersect').stitchSlits.length,2);
+  const base=rect('base',0,0,10,10),hole=rect('hole',6,3,2,4);
+  base.stitchSlits=[slot(5.95,5),slot(2,5)];assert.equal(run(base,hole,'subtract').stitchSlits.length,1);
+});
+
+t('Knife drops a free slot crossed by the cut and retains complete slots on both resulting pieces', () => {
+  const source=require('fs').readFileSync(require.resolve('../js/app.js'),'utf8'),vm=require('vm');
+  const p={id:'body',name:'Body',path:{closed:true,nodes:[N(0,0),N(10,0),N(10,10),N(0,10)]},stitchSlits:[2,5.95,8].map(x=>({free:true,x,y:5,len:.2,width:.05,ang:0,abs:true,run:1}))};
+  const cut=[N(6,-1),N(6,11)];
+  const ctx={Geo,doc:{pieces:[p]},beginChange(){},endChange(){},selectPiece(){},renderAll(){},$:()=>({}),uniqueName:s=>s,uid:()=> 'other',alert:m=>assert.fail(m)};
+  for(const [a,b] of [['  function insertNodeAt(','  // knife precision:'],['  function remapAfterInsert(','  // extrude an edge:'],['  function resolveCutNodes(','  // ---- round tool:']])vm.runInNewContext(source.slice(source.indexOf(a),source.indexOf(b,source.indexOf(a))),ctx);
+  ctx.performCut(p,cut,Geo.pathIntersections(p.path.nodes,true,cut,false),null);
+  assert.equal(ctx.doc.pieces.length,2);assert.equal(ctx.doc.pieces.reduce((n,p)=>n+p.stitchSlits.length,0),2);
+  assert(ctx.doc.pieces.every(p=>p.stitchSlits.every(sl=>Geo.slitFitsPiece(p,sl))));
+});
+
+t('single runs skip unsafe holes without shifting surviving pitch positions', () => {
+  const source=require('fs').readFileSync(require.resolve('../js/app.js'),'utf8'),vm=require('vm');
+  const piece={name:'Handle',path:{closed:true,nodes:[N(0,0),N(5,0),N(5,2),N(0,2)]},cutouts:[{nodes:[N(1.45,.1),N(1.55,.1),N(1.55,.4),N(1.45,.4)]}],stitchSlits:[]};
+  const fields={'st-spacing':{value:'.5'},'st-len':{value:'.18'},'st-off':{value:'.25'},'st-width':{value:'.5'},'status-hint':{}};
+  const ctx={Geo,$:id=>fields[id],stitchMulti:[{}],stitchAngle:()=>-45,stitchAngleAbs:()=>false,nextStitchRun:()=>1,
+    stitchChains:()=>[{piece,path:[N(.1,.25),N(4.9,.25)],loop:false,anchor:{kind:'outline',segs:[0]}}],beginChange(){},endChange(){},updateStitchUi(){},renderAll(){}};
+  vm.runInNewContext(source.slice(source.indexOf('  function stitchPlaceRun('),source.indexOf('  // matched mode: side A')),ctx);
+  ctx.stitchApplySingle();assert.equal(piece.stitchSlits.length,8);
+  assert.match(fields['status-hint'].textContent,/Skipped 1/);
+  assert.deepEqual(piece.stitchSlits.map(sl=>{const ln=Geo.slitLine(piece.path.nodes[sl.seg],piece.path.nodes[(sl.seg+1)%4],sl,1);return Math.round(Geo.lerp(ln.a,ln.b,.5).x*1000)/1000;}),[.5,1,2,2.5,3,3.5,4,4.5]);
+  assert(piece.stitchSlits.every(sl=>Geo.slitFitsPiece(piece,sl)));
+  piece.cutouts=[{nodes:[N(0,.05),N(5,.05),N(5,.5),N(0,.5)]}];piece.stitchSlits=[];
+  ctx.stitchMulti=[{}];assert.throws(()=>ctx.stitchApplySingle(),/No safe/);assert.equal(piece.stitchSlits.length,0);
 });
 
 console.log(`\n${passed} tests passed${process.exitCode ? ' (with failures)' : ''}`);
