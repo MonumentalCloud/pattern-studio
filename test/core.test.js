@@ -1830,11 +1830,51 @@ t('curve-following attachment mirrors preserve iron slant after rotation and rej
   vm.runInNewContext(src.slice(src.indexOf('  function stitchEditSettings('),src.indexOf('  function stitchRunTargets(')),ctx);
   fields['sp-slit-ang'].value=String(p.stitchSlits[0].ang);fields['sp-slit-len'].value='2';
   ctx.applySlitAngle(false);assert.equal(p.stitchSlits[0].curveSlant,-45);assert.equal(p.stitchSlits[0].len,.2);
+  delete p.stitchSlits[0].curveSlant; // A legacy hole must also remember an explicit page edit.
   fields['sp-slit-ang'].value='30';
-  ctx.applySlitAngle(false);assert.equal(p.stitchSlits[0].curveSlant,undefined);assert.equal(p.stitchSlits[0].ang,30);assert.equal(p.stitchSlits[1].curveSlant,-45);
+  ctx.applySlitAngle(false);assert.equal(p.stitchSlits[0].curveSlant,null);assert.equal(p.stitchSlits[0].ang,30);assert.equal(p.stitchSlits[1].curveSlant,-45);
   const unsafe={path:{closed:true,nodes:[N(0,0),N(10,0),N(10,10),N(0,10)]},stitchSlits:[{free:true,x:5,y:.02,ang:0,curveSlant:-45,len:.18,width:.01,abs:true}]};
   let message='';ctx.alert=m=>message=m;const count=ctx.doc.pieces.length;ctx.duplicatePiece(unsafe,true);
   assert.match(message,/No copy created/);assert.equal(ctx.doc.pieces.length,count);
+});
+
+t('legacy attachment repair recovers linked iron angle and an exact detached mirror without moving holes', () => {
+  const nodes=[N(0,0,null,{x:2,y:.5}),N(10,0,{x:-2,y:.5},null),N(10,10),N(0,10)];
+  const source={id:'body',path:{closed:true,nodes},stitchSlits:[0,1,2,3].map((pairIndex)=>({free:true,x:3+pairIndex,y:4,ang:-70+pairIndex*27,len:.18,width:.05,abs:true,attachment:true,pair:'pair',pairSide:'B',pairIndex,run:1}))};
+  const handle={id:'handle',path:{closed:true,nodes},stitchSlits:[0,1,2,3,0].map(pairIndex=>({seg:0,t:.5,ang:-45,attachment:true,pair:'pair',pairSide:'A',pairIndex}))};
+  const copy=JSON.parse(JSON.stringify(source));copy.id='copy';
+  copy.path.nodes=nodes.map(n=>({x:23-n.x,y:n.y,hin:n.hout?{x:-n.hout.x,y:n.hout.y}:null,hout:n.hin?{x:-n.hin.x,y:n.hin.y}:null})).reverse();
+  copy.stitchSlits.forEach(sl=>{sl.x=23-sl.x;sl.ang=180-sl.ang;delete sl.pair;delete sl.pairSide;});
+  const pieces=[source,handle,copy],before=JSON.stringify(pieces),plan=Geo.attachmentSlantRepairs(pieces);
+  const app=require('fs').readFileSync(require.resolve('../js/app.js'),'utf8'),vm=require('vm');
+  const ctx={Geo,doc:{pieces:JSON.parse(JSON.stringify(pieces))},uid:()=> 'new-copy',decorate:()=> 'copy',movePiece:()=>{},beginChange(){},endChange(){},selectPiece(){},renderAll(){},alert:m=>assert.fail(m)};
+  vm.runInNewContext(app.slice(app.indexOf('  function duplicatePiece('),app.indexOf('  // ---------- file ops')),ctx);
+  ctx.duplicatePiece(ctx.doc.pieces[0],true);
+  ctx.doc.pieces.at(-1).stitchSlits.forEach((sl,i)=>{
+    assert.equal(sl.curveSlant,-45);assert(Math.abs(Math.sin((sl.ang-(180-source.stitchSlits[i].ang-90))*Math.PI/180))<1e-9);
+  });
+
+  assert.equal(plan.changes.length,8);assert.equal(JSON.stringify(pieces),before);
+  for(const c of plan.changes){const old=c.piece.stitchSlits[c.i];assert.equal(c.next.x,old.x);assert.equal(c.next.y,old.y);assert.equal(c.next.curveSlant,-45);}
+  const fixed=plan.changes.filter(c=>c.piece===copy);
+  fixed.forEach((c,i)=>assert(Math.abs(Math.sin((c.next.ang-(180-source.stitchSlits[i].ang-90))*Math.PI/180))<1e-9));
+  for(const c of plan.changes)c.piece.stitchSlits[c.i]=c.next;
+  assert.equal(Geo.attachmentSlantRepairs(pieces).changes.length,0);
+  // Missing, inconsistent, explicitly page-edited or ambiguous sources must not be guessed.
+  const original=JSON.parse(before);
+  assert.equal(Geo.attachmentSlantRepairs([original[0],original[2]]).changes.length,0);
+  original[1].stitchSlits[0].abs=true;assert.equal(Geo.attachmentSlantRepairs(original).changes.length,0);
+  const opted=JSON.parse(before);opted[0].stitchSlits[0].curveSlant=null;assert.equal(Geo.attachmentSlantRepairs(opted).changes.length,0);
+  const duplicate=JSON.parse(before);duplicate.push({...duplicate[0],id:'another'});
+  assert.equal(Geo.attachmentSlantRepairs(duplicate).changes.filter(c=>c.piece===duplicate[2]).length,0);
+  const moved=JSON.parse(before);moved[2].stitchSlits[0].x+=.01;
+  assert.equal(Geo.attachmentSlantRepairs(moved).changes.filter(c=>c.piece===moved[2]).length,0);
+  const unsafe=JSON.parse(before);
+  unsafe[0].stitchSlits[0].y=.02;unsafe[0].stitchSlits[0].ang=0;unsafe[0].stitchSlits[0].width=.01;
+  unsafe[2].stitchSlits[0].y=.02;unsafe[2].stitchSlits[0].ang=180;unsafe[2].stitchSlits[0].width=.01;
+  const blocked=Geo.attachmentSlantRepairs(unsafe);assert.equal(blocked.blocked,4);
+  assert.equal(blocked.changes.filter(c=>c.piece===unsafe[2]).length,0);
+
 });
 
 t('attachment body inset preserves zero curves, offsets either winding and rejects collapsed loops', () => {

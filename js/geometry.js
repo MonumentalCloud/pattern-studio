@@ -1044,6 +1044,66 @@
     };
   }
 
+  // Recover only linked iron references and exact old mirror copies, never estimated tangents.
+  function attachmentSlantRepairs(pieces) {
+    const changes=[], sources=[]; let blocked=0;
+    const owns=(s)=>Object.prototype.hasOwnProperty.call(s,'curveSlant');
+    const axisEqual=(a,b)=>Math.abs(Math.sin((a-b)*Math.PI/180))<1e-7;
+    const normalize=a=>((a+180)%360+360)%360-180;
+    const groups=p=>{
+      const runs=new Map();
+      (p.stitchSlits || []).forEach((sl,i)=>{
+        if (!sl.free || !sl.attachment) return;
+        const key=`${sl.pair || ''}:${sl.run}`;
+        if (!runs.has(key)) runs.set(key,[]);
+        runs.get(key).push({sl,i});
+      });
+      return [...runs.values()];
+    };
+    for (const piece of pieces) for (const run of groups(piece)) {
+      const first=run[0].sl;
+      if (!first.pair || run.some(({sl})=>sl.pairSide!=='B' || sl.curveSlant===null)) continue;
+      const a=pieces.flatMap(p=>(p.stitchSlits || []).filter(sl=>sl.pair===first.pair && sl.pairSide==='A'));
+      if (!a.length || a.some(sl=>sl.free || sl.abs || !Number.isFinite(sl.ang) || sl.ang!==a[0].ang)) continue;
+      const angle=a[0].ang;
+      if (run.some(({sl})=>owns(sl) && sl.curveSlant!==angle)) continue;
+      sources.push({piece,run,angle});
+      for (const {sl,i} of run) if (!owns(sl)) changes.push({piece,i,next:{...sl,curveSlant:angle}});
+    }
+    const mirroredPath=(a,b)=>{
+      if (!a.path.closed || !b.path.closed || a.path.nodes.length!==b.path.nodes.length) return false;
+      const ab=bbox(a.path.nodes),bb=bbox(b.path.nodes),sumX=ab.minX+bb.maxX,dy=bb.minY-ab.minY;
+      return a.path.nodes.every((nd,i)=>{
+        const target=b.path.nodes[a.path.nodes.length-1-i];
+        if (dist({x:sumX-nd.x,y:nd.y+dy},target)>1e-5) return false;
+        return [['hout','hin'],['hin','hout']].every(([from,to])=>
+          !nd[from] && !target[to] || nd[from] && target[to] && dist({x:-nd[from].x,y:nd[from].y},target[to])<1e-5);
+      });
+    };
+    for (const piece of pieces) for (const run of groups(piece)) {
+      if (run.some(({sl})=>sl.pair || owns(sl))) continue;
+      const candidates=sources.filter(source=>{
+        if (source.piece===piece || source.run.length!==run.length || !mirroredPath(source.piece,piece)) return false;
+        const ab=bbox(source.piece.path.nodes),bb=bbox(piece.path.nodes),sumX=ab.minX+bb.maxX,dy=bb.minY-ab.minY;
+        const indices=new Set(source.run.map(({sl})=>sl.pairIndex));
+        if (indices.size!==run.length || new Set(run.map(({sl})=>sl.pairIndex)).size!==run.length) return false;
+        return run.every(({sl})=>{
+          const ref=source.run.find(r=>r.sl.pairIndex===sl.pairIndex)?.sl;
+          return ref && sl.len===ref.len && sl.width===ref.width &&
+            dist(sl,{x:sumX-ref.x,y:ref.y+dy})<1e-5 && axisEqual(sl.ang,180-ref.ang);
+        });
+      });
+      if (candidates.length!==1) continue;
+      const source=candidates[0];
+      const repaired=run.map(({sl,i})=>({piece,i,next:{...sl,ang:normalize(sl.ang+2*source.angle),curveSlant:source.angle}}));
+      if (repaired.some(c=>!slitFitsPiece(piece,c.next))) { blocked+=run.length; continue; }
+      changes.push(...repaired);
+    }
+    const covered=new Set(changes.map(c=>c.piece.id+':'+c.i));
+    const unknown=pieces.reduce((n,p)=>n+(p.stitchSlits || []).filter((sl,i)=>sl.free && sl.attachment && !owns(sl) && !covered.has(p.id+':'+i)).length,0);
+    return {changes,blocked,unknown};
+  }
+
   // Rigid copies use the first source hole as their placement reference.
   function stampSlits(slits, x, y, degrees) {
     if (!slits.length || ![x,y,degrees].every(Number.isFinite)) throw new Error('Choose source holes and a finite position and rotation.');
@@ -1328,7 +1388,7 @@
     cubicPoint, cubicTangent, flattenCubic,
     pathPolyline, pathLength, polyArea, bbox, centroid, polyCentroid, labelBox, dedupe,
     outwardSign, offsetClosed, nearestOnPath, pointInPolygon, splitSeg, setSegLength, deletePointKeepCurve, selectedEdgeLength, matchChainLength,
-    reverseNodes, weldClosedPaths, reflectPoint, reflectNodes, segArcParams, slitLine, stitchFractions, attachmentLoopPath, attachmentFractions, stampSlits, slitContour, slitFitsPiece, survivingFreeSlits, repairStitchAnchor, notchLines, notchLinesPath,
+    reverseNodes, weldClosedPaths, reflectPoint, reflectNodes, segArcParams, slitLine, stitchFractions, attachmentLoopPath, attachmentFractions, attachmentSlantRepairs, stampSlits, slitContour, slitFitsPiece, survivingFreeSlits, repairStitchAnchor, notchLines, notchLinesPath,
     pathArcParams, simplifyPoly, offsetOpen, pathIntersections, booleanOutline, sewSlits, clipLoops,
   };
 });

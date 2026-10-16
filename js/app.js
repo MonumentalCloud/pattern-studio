@@ -4537,6 +4537,9 @@
   function duplicatePiece(piece, mirror) {
     const copy = JSON.parse(JSON.stringify(piece));
     copy.id = uid();
+    if (mirror) for (const repair of Geo.attachmentSlantRepairs(doc.pieces).changes) {
+      if (repair.piece===piece) copy.stitchSlits[repair.i]=repair.next;
+    }
     for (const sl of copy.stitchSlits || []) { delete sl.pair; delete sl.pairSide; }
     copy.name = decorate(piece.name, mirror ? '(mirror)' : 'copy');
     if (mirror) {
@@ -5283,7 +5286,8 @@
   });
   // re-angle existing holes: the selected ones, or every hole of their run(s)
   $('st-repair-slants').addEventListener('click',()=>{
-    const changes=[];let blocked=0,unknown=0;
+    const attachment=Geo.attachmentSlantRepairs(doc.pieces);
+    const changes=[...attachment.changes];let blocked=attachment.blocked,unknown=attachment.unknown;
     const verified=new Map();
     for(const piece of doc.pieces)for(let i=0;i<(piece.stitchSlits||[]).length;i++) {
       const old=piece.stitchSlits[i];
@@ -5305,7 +5309,7 @@
     }
     if(changes.length){beginChange();for(const c of changes)c.piece.stitchSlits[c.i]=c.next;endChange();renderAll();}
     const notice=$('st-edit-notice');
-    notice.textContent=`Repaired ${changes.length} end-slot angle(s). Positions and counts unchanged.${blocked?` ${blocked} left unchanged because rotating them would cross a boundary.`:''}${unknown?` ${unknown} hole(s) have unverified source edges and were left unchanged.`:''}`;
+    notice.textContent=`Repaired ${changes.length} stitch reference(s)/angle(s), including ${attachment.changes.length} attachment holes. Positions and counts unchanged.${blocked?` ${blocked} left unchanged because rotating them would cross a boundary.`:''}${unknown?` ${unknown} hole(s) have unverified stitch sources and were left unchanged.`:''}`;
     notice.hidden=false;notice.scrollIntoView({block:'nearest'});
   });
 
@@ -5332,7 +5336,7 @@
         const s = group.piece.stitchSlits[i];
         if (s.free && (values.inset !== 0 || !values.abs)) throw new Error("Free holes use page angles and have no edge inset. Use arrow keys to position them, or stamp at exact coordinates.");
         const next = {...s, len:values.len, width:values.width, ang:values.ang, abs:values.abs};
-        if (values.abs && (!s.abs || values.ang !== s.ang)) delete next.curveSlant;
+        if (values.abs && (!s.abs || values.ang !== s.ang) && (s.curveSlant != null || s.free && s.attachment)) next.curveSlant=null;
         if (!s.free) next.off = (s.off || 0) + values.inset;
         if (!Geo.slitFitsPiece(group.piece, next)) throw new Error('A slot crosses the cutting outline or a cutout. Increase inset or reduce length/width.');
         changes.push({piece:group.piece, i, next});

@@ -19,7 +19,7 @@ can be saved/opened as `.pattern.json` files. In Chrome/Edge, **Save writes stra
 to a file on your computer** (it asks where once, then `Ctrl+S` saves in place;
 `Shift`-click Save = Save As); other browsers fall back to a download.
 
-## Tool inspectors (build 81)
+## Tool inspectors (build 82)
 
 The active tool's controls stay above the Pieces list. File contains local/cloud
 save and open; Export contains DXF/SVG and engraving options. Round, Notch, Hole,
@@ -195,4 +195,4 @@ For older runs, use **Stitch → Edit holes/runs → Repair existing seam slants
 This undoable action preserves centers, counts and dimensions; unverified source
 edges or unsafe rotations are reported and left unchanged.
 
-Curve-following attachment holes created in build 81 or later keep their pricking-iron slant relative to the curve when mirrored. Earlier attachment holes lack this reference: recreate them before mirroring. Length/width edits retain this reference; changing the page angle removes it. Ordinary page-angle and manually placed free holes retain their existing mirror behavior.
+Curve-following attachment holes created in build 82 or later keep their pricking-iron slant relative to the curve when mirrored. For older linked attachments, Mirror copy recovers the iron angle from the linked handle. Use Stitch → Edit holes / runs → Repair existing seam slants to repair an already mirrored attachment: only exact panel/slot mirror matches with a verified source are repaired; unmatched runs are left unchanged. Length/width edits retain this reference; changing the page angle removes it. Ordinary page-angle and manually placed free holes retain their existing mirror behavior.
