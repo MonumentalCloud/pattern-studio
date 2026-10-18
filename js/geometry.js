@@ -986,6 +986,10 @@
     return [{ a: walk(-1), b: apex }, { a: walk(1), b: apex }];
   }
 
+  function boundaryPath(piece,cut) {
+    return cut == null ? piece.path : {nodes:piece.cutouts[cut].nodes,closed:true};
+  }
+
   function slitLine(a, b, sl, outSign) {
     let p = sl.free ? {x:sl.x, y:sl.y} : segPoint(a, b, sl.t);
     const tan = sl.free ? {x:1, y:0} : segTangent(a, b, sl.t);
@@ -1388,7 +1392,7 @@
     cubicPoint, cubicTangent, flattenCubic,
     pathPolyline, pathLength, polyArea, bbox, centroid, polyCentroid, labelBox, dedupe,
     outwardSign, offsetClosed, nearestOnPath, pointInPolygon, splitSeg, setSegLength, deletePointKeepCurve, selectedEdgeLength, matchChainLength,
-    reverseNodes, weldClosedPaths, reflectPoint, reflectNodes, segArcParams, slitLine, stitchFractions, attachmentLoopPath, attachmentFractions, attachmentSlantRepairs, stampSlits, slitContour, slitFitsPiece, survivingFreeSlits, repairStitchAnchor, notchLines, notchLinesPath,
+    reverseNodes, weldClosedPaths, reflectPoint, reflectNodes, segArcParams, boundaryPath, slitLine, stitchFractions, attachmentLoopPath, attachmentFractions, attachmentSlantRepairs, stampSlits, slitContour, slitFitsPiece, survivingFreeSlits, repairStitchAnchor, notchLines, notchLinesPath,
     pathArcParams, simplifyPoly, offsetOpen, pathIntersections, booleanOutline, sewSlits, clipLoops,
   };
 });

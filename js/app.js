@@ -120,7 +120,7 @@
     stitchMulti = []; stitchSideA = null;
     // selection may point at removed things
     if (sel.pieceId && !pieceById(sel.pieceId)) clearSel();
-    else { sel.kind = null; sel.handle = null; }
+    else { sel.kind = null; sel.cut = null; sel.handle = null; }
     autosave();
     renderAll();
     if(tool==='stitch')updateStitchUi();
@@ -202,8 +202,8 @@
   // would fall through to the point and delete the whole thing.
   const sel = { pieceId: null, kind: null, idx: -1, nodes: [], handle: null };
   let multiSel = []; // piece ids from a marquee selection (moves/deletes as a group)
-  function clearSel() { delete sel.slitGroups; sel.pieceId = null; sel.kind = null; sel.idx = -1; sel.nodes = []; sel.handle = null; multiSel = []; }
-  function selectPiece(id) { delete sel.slitGroups; sel.pieceId = id; sel.kind = null; sel.idx = -1; sel.nodes = []; sel.handle = null; multiSel = []; }
+  function clearSel() { delete sel.slitGroups; sel.cut = null; sel.pieceId = null; sel.kind = null; sel.idx = -1; sel.nodes = []; sel.handle = null; multiSel = []; }
+  function selectPiece(id) { delete sel.slitGroups; sel.cut = null; sel.pieceId = id; sel.kind = null; sel.idx = -1; sel.nodes = []; sel.handle = null; multiSel = []; }
   const selPiece = () => (sel.pieceId ? pieceById(sel.pieceId) : null);
 
   // ---------- snapping ----------
@@ -212,7 +212,7 @@
   let alignGuides = []; // transient dashed lines while a snap lines up with far points
   let snapMarks = []; // transient markers for a snap that isn't on a drawn point
 
-  function snap(p, skipPieceId, skipNodeIdx) {
+  function snap(p, skipPieceId, skipNodeIdx, skipCut) {
     alignGuides = [];
     snapMarks = [];
     // priority: existing points, then edge middles, then points anywhere along
@@ -235,14 +235,14 @@
       if (piece.visible === false) continue;
       const own = piece.id === skipPieceId;
       piece.path.nodes.forEach((n, i) => {
-        if (own && i === skipNodeIdx) return;
+        if (own && skipCut == null && i === skipNodeIdx) return;
         pts.push(n);
       });
-      midsOf(piece.path.nodes, piece.path.closed, own ? skipNodeIdx : null);
-      for (const c of piece.cutouts || []) {
-        for (const n of c.nodes) pts.push(n);
-        if (c.nodes && c.nodes.length > 1) midsOf(c.nodes, true, null);
-      }
+      midsOf(piece.path.nodes, piece.path.closed, own && skipCut == null ? skipNodeIdx : null);
+      (piece.cutouts || []).forEach((c,cut)=>{
+        c.nodes.forEach((nd,i)=>{if (!(own && cut===skipCut && i===skipNodeIdx)) pts.push(nd);});
+        if (c.nodes.length>1) midsOf(c.nodes,true,own && cut===skipCut ? skipNodeIdx : null);
+      });
     }
     const draftPts = draft && draft.nodes ? draft.nodes : [];
     // the draft's own edges get middles too, but not the rubber-band segment
@@ -558,26 +558,26 @@
     if (multiSel.length > 1) return; // group selection: no per-node overlay
     const piece = selPiece();
     if (!piece || tool === 'pen') return;
-    const nodes = piece.path.nodes;
+    const nodes = Geo.boundaryPath(piece,sel.kind==='cut'?sel.idx:sel.cut).nodes;
     const n = nodes.length;
     const r = px(4);
 
     if (sel.kind === 'notch' && piece.notches?.[sel.idx]) {
-      const sign = Geo.outwardSign(Geo.pathPolyline(nodes, piece.path.closed, 0.05));
-      for (const ln of Geo.notchLinesPath(nodes, piece.path.closed, piece.notches[sel.idx], sign, piece.notchLength || 0.4, piece.notchStyle)) {
+      const sign = Geo.outwardSign(Geo.pathPolyline(nodes, Geo.boundaryPath(piece,sel.cut).closed, 0.05));
+      for (const ln of Geo.notchLinesPath(nodes, Geo.boundaryPath(piece,sel.cut).closed, piece.notches[sel.idx], sign, piece.notchLength || 0.4, piece.notchStyle)) {
         el('line', { class: 'seg-highlight', x1: ln.a.x, y1: ln.a.y, x2: ln.b.x, y2: ln.b.y }, gOverlay);
       }
     }
     // multi-edge selection highlight
     if (sel.kind === 'segs') {
       for (const i of sel.segs) {
-        if (i >= (piece.path.closed ? n : n - 1)) continue;
+        if (i >= (Geo.boundaryPath(piece,sel.cut).closed ? n : n - 1)) continue;
         el('path', { class: 'seg-highlight', d: segD(nodes[i], nodes[(i + 1) % n]) }, gOverlay);
       }
     }
 
     // selected segment highlight + length
-    if (sel.kind === 'seg' && sel.idx < (piece.path.closed ? n : n - 1)) {
+    if (sel.kind === 'seg' && sel.idx < (Geo.boundaryPath(piece,sel.cut).closed ? n : n - 1)) {
       const a = nodes[sel.idx], b = nodes[(sel.idx + 1) % n];
       el('path', { class: 'seg-highlight', d: segD(a, b) }, gOverlay);
       el('circle', { class: 'seg-start-dot', cx: a.x, cy: a.y, r: px(3) }, gOverlay);
@@ -755,7 +755,7 @@
     }
 
     // selection props
-    const showNode = piece && sel.kind === 'node' && piece.path.nodes[sel.idx];
+    const showNode = piece && sel.kind === 'node' && Geo.boundaryPath(piece,sel.cut).nodes[sel.idx];
     const showSeg = piece && sel.kind === 'seg';
     const showSegs = piece && sel.kind === 'segs' && sel.segs && sel.segs.length > 0;
     const cutSel = piece && sel.kind === 'cut' && (piece.cutouts || [])[sel.idx];
@@ -805,7 +805,7 @@
     $('sel-seg-anchor-row').hidden = !showSeg;
     $('sel-segs-total-row').hidden = !showSegs;
     if (showSegs) {
-      const nodes = piece.path.nodes;
+      const nodes = Geo.boundaryPath(piece,sel.cut).nodes;
       const total = sel.segs.reduce((sum, i) => sum + Geo.segLength(nodes[i], nodes[(i + 1) % nodes.length]), 0);
       $('sp-segs-total').textContent = total.toFixed(2);
     }
@@ -813,7 +813,7 @@
     $('sel-fold-row').hidden = !showSeg;
     $('sel-clear-slits-row').hidden = true;
     if (showNode) {
-      const nd = piece.path.nodes[sel.idx];
+      const nd = Geo.boundaryPath(piece,sel.cut).nodes[sel.idx];
       if (document.activeElement !== $('sp-x')) $('sp-x').value = fmt(nd.x);
       if (document.activeElement !== $('sp-y')) $('sp-y').value = fmt(nd.y);
       $('sel-handle-row').hidden = !(nd.hin || nd.hout);
@@ -826,37 +826,37 @@
           ? 'Drag the point again to move it · click a handle then Del, or double-click it, to delete just that handle — hollow handles belong to the next point along and bend the same edge.'
           : 'Drag the point again to move it · double-click it to toggle corner / smooth · Del removes the point.');
     } else if (showSeg) {
-      const n = piece.path.nodes.length;
-      const a = piece.path.nodes[sel.idx], b = piece.path.nodes[(sel.idx + 1) % n];
+      const n = Geo.boundaryPath(piece,sel.cut).nodes.length;
+      const a = Geo.boundaryPath(piece,sel.cut).nodes[sel.idx], b = Geo.boundaryPath(piece,sel.cut).nodes[(sel.idx + 1) % n];
       if (document.activeElement !== $('sp-seglen')) {
         $('sp-seglen').value = fmt(Geo.segLength(a, b));
       }
-      $('sel-fold-row').hidden = !piece.path.closed || !!piece.guide;
+      $('sel-fold-row').hidden = sel.cut != null || !piece.path.closed || !!piece.guide;
       $('sp-fold').textContent = piece.foldSeg === sel.idx ? 'Remove fold line' : 'Make fold line';
       // guides carry one run over the whole path — the button clears all of it
       const slitCount = piece.guide
         ? (piece.stitchSlits || []).length
-        : (piece.stitchSlits || []).filter((sl) => sl.cut == null && sl.seg === sel.idx).length;
+        : (piece.stitchSlits || []).filter((sl) => (sl.cut == null ? sel.cut == null : sl.cut === sel.cut) && sl.seg === sel.idx).length;
       $('sel-clear-slits-row').hidden = !slitCount;
       if (slitCount) $('sp-clear-slits').textContent = `Remove ${slitCount} stitch hole${slitCount > 1 ? 's' : ''}`;
       // ...and the whole stitch line(s) touching this edge, corners included
       if (slitCount) {
-        const onEdge = (s2) => piece.guide || (s2.cut == null && s2.seg === sel.idx);
+        const onEdge = (s2) => piece.guide || ((s2.cut == null ? sel.cut == null : s2.cut === sel.cut) && s2.seg === sel.idx);
         const runsHere = new Set((piece.stitchSlits || []).filter(onEdge).map((s2) => s2.run).filter((r) => r != null));
         const runTotal = (piece.stitchSlits || []).filter((s2) =>
           (s2.run != null ? runsHere.has(s2.run) : onEdge(s2))).length;
         $('sel-del-run-row').hidden = false;
         $('sp-del-run').textContent = `Delete stitch line (${runTotal} hole${runTotal > 1 ? 's' : ''})`;
       }
-      $('sel-hint').textContent = piece.foldSeg === sel.idx
+      $('sel-hint').textContent = sel.cut == null && piece.foldSeg === sel.idx
         ? 'This edge is the fold — the piece unfolds across it on export.'
-        : 'Drag the edge again to move it · type a length to resize (● = start) · double-click inserts a point · right-click divides · the Offset tool (O) slides/protrudes it along its normal.';
+        : 'Drag the edge again to move it · type a length to resize (● = start) · double-click inserts a point · right-click divides' + (sel.cut == null ? ' · the Offset tool (O) slides/protrudes it along its normal.' : ' · Select whole cutout moves the entire hole.');
     } else if (showSegs) {
       $('sel-hint').textContent = tool === 'offset'
         ? `${sel.segs.length} edges selected — drag one to apply the mode live, or type a distance and Apply.`
         : `${sel.segs.length} edges selected — drag one (or arrows / Move by) to move them together · Shift-click adds/removes · the Offset tool (O) slides/protrudes the set.`;
       // stitch holes across ALL selected edges delete together
-      const inSel = (s2) => piece.guide || (s2.cut == null && sel.segs.includes(s2.seg));
+      const inSel = (s2) => piece.guide || ((s2.cut == null ? sel.cut == null : s2.cut === sel.cut) && sel.segs.includes(s2.seg));
       const slitCount = (piece.stitchSlits || []).filter(inSel).length;
       $('sel-clear-slits-row').hidden = !slitCount;
       if (slitCount) {
@@ -956,7 +956,8 @@
     $('grain-props').hidden = tool !== 'grain';
     $('grain-remove').disabled = !piece || !piece.grain;
     $('piece-title').textContent = multiSel.length > 1 ? `${multiSel.length} pieces selected` : 'Whole piece';
-    $('selection-title').textContent = 'Selected ' + ({seg:'edge',segs:'edges',node:'point',nodes:'points',hole:'hole',cut:'cutout'}[sel.kind] || 'object');
+    $('sel-cutout-row').hidden = !piece || (sel.cut == null && sel.kind !== 'cut');
+    $('selection-title').textContent = (sel.cut != null ? 'Inner ' : 'Selected ') + ({seg:'edge',segs:'edges',node:'point',nodes:'points',hole:'hole',cut:'cutout'}[sel.kind] || 'object');
     $('pp-dup').textContent = 'Duplicate ' + (multiSel.length > 1 ? `${multiSel.length} pieces` : 'piece');
     $('pp-del').textContent = 'Delete ' + (multiSel.length > 1 ? `${multiSel.length} pieces` : 'whole piece');
     $('pp-mirror').textContent = multiSel.length > 1 ? 'Mirror first piece' : 'Mirror copy';
@@ -1060,9 +1061,10 @@
       if (p && (sel.kind === 'slit' || sel.kind === 'slits')) $('st-workflow').value = 'edit';
       else if (p && (sel.kind === 'seg' || sel.kind === 'segs')) {
         $('st-workflow').value = 'create';
-        stitchMulti = selectedSegsOf(p).map(seg => ({pieceId:p.id, seg}));
+        stitchMulti = sel.cut != null ? [{pieceId:p.id,cut:sel.cut,seg:0}] : selectedSegsOf(p).map(seg => ({pieceId:p.id, seg}));
       }
     }
+    if (t === 'offset' && sel.cut != null) {selectPiece(sel.pieceId);$('status-hint').textContent='Offset works on outer edges; use Select to reshape the inner cutout.';}
     if (t !== 'pen') finishDraft(false);
     if (t !== 'weld') weldFirst = null;
     if (t !== 'stitch') {
@@ -1256,8 +1258,8 @@
       return;
     }
     if (drag.type === 'node') {
-      const p = snap(w, drag.pieceId, drag.idx);
-      const nd = pieceById(drag.pieceId).path.nodes[drag.idx];
+      const p = snap(w, drag.pieceId, drag.idx, drag.cut);
+      const nd = Geo.boundaryPath(pieceById(drag.pieceId),drag.cut).nodes[drag.idx];
       nd.x = p.x; nd.y = p.y;
       renderAll(true); renderSidebar();
       return;
@@ -1326,8 +1328,8 @@
     }
     if (drag.type === 'seg') { // select tool: move the edge freely
       const piece = pieceById(drag.pieceId);
-      const n = piece.path.nodes.length;
-      const a = piece.path.nodes[drag.idx], b = piece.path.nodes[(drag.idx + 1) % n];
+      const n = Geo.boundaryPath(piece,drag.cut).nodes.length;
+      const a = Geo.boundaryPath(piece,drag.cut).nodes[drag.idx], b = Geo.boundaryPath(piece,drag.cut).nodes[(drag.idx + 1) % n];
       const dx = w.x - drag.start.x, dy = w.y - drag.start.y;
       const s = snapOn() ? snapStep() : 0.0001;
       const sdx = Math.round(dx / s) * s, sdy = Math.round(dy / s) * s;
@@ -1391,7 +1393,7 @@
       const ddx = sdx - drag.applied.x, ddy = sdy - drag.applied.y;
       if (ddx || ddy) {
         for (const i of drag.idxs) {
-          const nd = piece.path.nodes[i];
+          const nd = Geo.boundaryPath(piece,drag.cut).nodes[i];
           if (nd) { nd.x += ddx; nd.y += ddy; }
         }
         drag.applied = { x: sdx, y: sdy };
@@ -1442,7 +1444,7 @@
       return;
     }
     if (drag.type === 'handle') {
-      const nd = pieceById(drag.pieceId).path.nodes[drag.idx];
+      const nd = Geo.boundaryPath(pieceById(drag.pieceId),drag.cut).nodes[drag.idx];
       const v = { x: w.x - nd.x, y: w.y - nd.y };
       // dropping a handle onto its own point deletes it
       const kill = Geo.len(v) < px(5);
@@ -1719,18 +1721,19 @@
             if (!prevPiece) {
               $('status-hint').textContent = 'Select a piece first, then box-select its ' + target + '.';
             } else {
+              const cut=sel.cut, path=Geo.boundaryPath(prevPiece,cut);
               const inside = p => p.x >= x0 && p.x <= x1 && p.y >= y0 && p.y <= y1;
               const kind = target === 'points' ? 'nodes' : target === 'edges' ? 'segs' : 'slits';
               const set = new Set(drag.shift && sel.kind === kind ? sel[kind] : []);
-              if (target === 'points') prevPiece.path.nodes.forEach((nd, i) => { if (inside(nd)) set.add(i); });
+              if (target === 'points') path.nodes.forEach((nd, i) => { if (inside(nd)) set.add(i); });
               else if (target === 'edges') {
-                const nodes = prevPiece.path.nodes;
-                for (let i = 0; i < nodes.length - (prevPiece.path.closed ? 0 : 1); i++) if (inside(nodes[i]) && inside(nodes[(i + 1) % nodes.length])) set.add(i);
+                const nodes = path.nodes;
+                for (let i = 0; i < nodes.length - (path.closed ? 0 : 1); i++) if (inside(nodes[i]) && inside(nodes[(i + 1) % nodes.length])) set.add(i);
               } else (prevPiece.stitchSlits || []).forEach((sl, i) => {
                 const ln = slitLineFor(prevPiece, sl);
                 if (ln && inside(Geo.lerp(ln.a, ln.b, 0.5))) set.add(i);
               });
-              selectPiece(prevPiece.id);
+              selectPiece(prevPiece.id);sel.cut=target==='holes'?null:cut;
               sel.kind = set.size ? kind : null; sel[kind] = [...set]; sel.idx = -1;
               $('status-hint').textContent = `${set.size} ${target} selected`;
             }
@@ -1796,7 +1799,7 @@
     if (tool !== 'select') return;
     const piece = selPiece();
     if (!piece) return;
-    const nodes = piece.path.nodes;
+    const path=Geo.boundaryPath(piece,sel.cut),nodes=path.nodes;
     // double-click a handle dot: delete that handle
     const killHandle = (t) => {
       beginChange();
@@ -1810,7 +1813,7 @@
     // double-click node: toggle corner/smooth
     const ni = hitNode(piece, w);
     if (ni >= 0) {
-      toggleNodeSmooth(piece, ni);
+      toggleNodeSmooth(piece, ni,sel.cut);
       sel.kind = 'node'; sel.idx = ni;
       renderAll();
       return;
@@ -1820,9 +1823,9 @@
     const far = hitHandle(piece, w, false);
     if (far) { killHandle(far); return; }
     // double-click edge: insert node
-    const hit = Geo.nearestOnPath(nodes, piece.path.closed, w);
+    const hit = Geo.nearestOnPath(nodes, path.closed, w);
     if (hit && hit.dist < px(8)) {
-      if (piece.foldSeg === hit.seg) {
+      if (sel.cut == null && piece.foldSeg === hit.seg) {
         $('status-hint').textContent = 'The fold line must stay a single straight edge — remove the fold first.';
         return;
       }
@@ -1833,8 +1836,8 @@
       nodes[hit.seg] = a2;
       nodes[(hit.seg + 1) % n] = b2;
       nodes.splice(hit.seg + 1, 0, mid);
-      remapAfterInsert(piece, hit.seg, hit.t);
-      if (piece.foldSeg != null && piece.foldSeg > hit.seg) piece.foldSeg += 1;
+      remapAfterInsert(piece, hit.seg, hit.t,sel.cut);
+      if (sel.cut == null && piece.foldSeg != null && piece.foldSeg > hit.seg) piece.foldSeg += 1;
       endChange();
       sel.kind = 'node'; sel.idx = hit.seg + 1;
       renderAll();
@@ -1900,10 +1903,10 @@
   });
 
   // when a segment is split, notches/slits on that segment must be remapped
-  function remapAfterInsert(piece, seg, t) {
+  function remapAfterInsert(piece, seg, t, cut = null) {
     for (const arr of [piece.notches || [], piece.stitchSlits || []]) {
       for (const nt of arr) {
-        if (nt.free || nt.cut != null) continue; // cutout-anchored: outline splits don't touch it
+        if (nt.free || (nt.cut ?? null) !== cut) continue; // Only marks on the edited boundary move.
         if (nt.seg > seg) nt.seg += 1;
         else if (nt.seg === seg) {
           if (nt.t <= t) nt.t = t > 0 ? nt.t / t : 0;
@@ -1997,7 +2000,7 @@
   // edge stays curved with nothing on screen to grab.
   function handleTargets(piece) {
     if (!piece || sel.kind !== 'node') return [];
-    const nodes = piece.path.nodes, n = nodes.length;
+    const nodes = Geo.boundaryPath(piece,sel.pieceId===piece.id?sel.cut:null).nodes, n = nodes.length;
     if (!nodes[sel.idx]) return [];
     const out = [];
     const add = (idx, key, own) => {
@@ -2007,7 +2010,7 @@
     };
     add(sel.idx, 'hin', true);
     add(sel.idx, 'hout', true);
-    const closed = piece.path.closed;
+    const closed = Geo.boundaryPath(piece,sel.pieceId===piece.id?sel.cut:null).closed;
     const prev = sel.idx > 0 ? sel.idx - 1 : (closed ? n - 1 : -1);
     const next = sel.idx < n - 1 ? sel.idx + 1 : (closed ? 0 : -1);
     if (prev >= 0 && prev !== sel.idx) add(prev, 'hout', false);
@@ -2026,11 +2029,41 @@
   function hitNode(piece, w) {
     const tol = px(8);
     let best = -1, bd = tol;
-    piece.path.nodes.forEach((nd, i) => {
+    Geo.boundaryPath(piece,sel.pieceId===piece.id?sel.cut:null).nodes.forEach((nd, i) => {
       const d = Geo.dist(nd, w);
       if (d < bd) { bd = d; best = i; }
     });
     return best;
+  }
+
+  function hitBoundaryNode(piece,w) {
+    let best=null, distance=px(8);
+    [null,...(piece.cutouts || []).map((_,i)=>i)].forEach(cut=>{
+      Geo.boundaryPath(piece,cut).nodes.forEach((nd,idx)=>{
+        const d=Geo.dist(nd,w);
+        if(d<distance){distance=d;best={idx,cut};}
+      });
+    });
+    return best;
+  }
+  function selectBoundary(cut) {
+    if ((sel.cut ?? null)!==cut) {sel.kind=null;sel.idx=-1;sel.nodes=[];sel.segs=[];sel.handle=null;}
+    sel.cut=cut;
+  }
+  function selectBoundaryEdge(piece,hit,cut,ev,w) {
+    selectBoundary(cut);
+    const nodes=Geo.boundaryPath(piece,cut).nodes;
+    if(ev.shiftKey){
+      const set=new Set(selectedSegsOf(piece));
+      if(set.has(hit.seg))set.delete(hit.seg);else set.add(hit.seg);
+      setSegSelection(piece,[...set].sort((a,b)=>a-b));
+    } else if(sel.kind==='segs' && sel.segs.includes(hit.seg)) {
+      const indices=new Set();for(const i of sel.segs){indices.add(i);indices.add((i+1)%nodes.length);}
+      beginChange();drag={type:'nodes',pieceId:piece.id,cut,idxs:[...indices],start:w,applied:{x:0,y:0},dead:downPt(ev)};
+    } else if(sel.kind==='seg' && sel.idx===hit.seg) {
+      beginChange();drag={type:'seg',pieceId:piece.id,cut,idx:hit.seg,start:w,applied:{x:0,y:0},dead:downPt(ev)};
+    } else {sel.kind='seg';sel.idx=hit.seg;sel.nodes=[];sel.handle=null;}
+    renderAll(true);renderSidebar();
   }
 
   // corner scale handles for the selected piece / group: they sit a little
@@ -2105,15 +2138,17 @@
       if (own) {
         sel.handle = { idx: own.idx, key: own.key };
         beginChange();
-        drag = { type: 'handle', pieceId: piece.id, idx: own.idx, key: own.key, dead: downPt(ev) };
+        drag = { type: 'handle', pieceId: piece.id, cut:sel.cut, idx: own.idx, key: own.key, dead: downPt(ev) };
         renderAll(true); renderSidebar();
         return;
       }
     }
     // 2. node of the selected piece
     if (piece) {
-      const ni = hitNode(piece, w);
+      const picked = hitBoundaryNode(piece,w);
+      const ni = picked ? picked.idx : -1;
       if (ni >= 0) {
+        selectBoundary(picked.cut);
         if(ev.shiftKey) {
           const selected=new Set(sel.kind==='nodes'?sel.nodes:sel.kind==='node'?[sel.idx]:[]);
           if(selected.has(ni))selected.delete(ni);else selected.add(ni);
@@ -2125,12 +2160,12 @@
         if (sel.kind === 'nodes' && sel.nodes.includes(ni)) {
           // drag the whole point selection together
           beginChange();
-          drag = { type: 'nodes', pieceId: piece.id, idxs: sel.nodes.slice(), start: w, applied: { x: 0, y: 0 }, dead: downPt(ev) };
+          drag = { type: 'nodes', pieceId: piece.id, cut:sel.cut, idxs: sel.nodes.slice(), start: w, applied: { x: 0, y: 0 }, dead: downPt(ev) };
           return;
         }
         if (sel.kind === 'node' && sel.idx === ni) { // already the selection: now it moves
           beginChange();
-          drag = { type: 'node', pieceId: piece.id, idx: ni, dead: downPt(ev) };
+          drag = { type: 'node', pieceId: piece.id, cut:sel.cut, idx: ni, dead: downPt(ev) };
           renderAll(true); renderSidebar(); // the press just dropped any handle focus
           return;
         }
@@ -2144,15 +2179,16 @@
       if (far) {
         sel.handle = { idx: far.idx, key: far.key };
         beginChange();
-        drag = { type: 'handle', pieceId: piece.id, idx: far.idx, key: far.key, dead: downPt(ev) };
+        drag = { type: 'handle', pieceId: piece.id, cut:sel.cut, idx: far.idx, key: far.key, dead: downPt(ev) };
         renderAll(true); renderSidebar();
         return;
       }
       // 2b. notch / slit / hole of the selected piece
       const nti = hitNotch(piece, w);
-      if (nti >= 0) { sel.kind = 'notch'; sel.idx = nti; renderAll(true); renderSidebar(); return; }
+      if (nti >= 0) { sel.cut=null; sel.kind = 'notch'; sel.idx = nti; renderAll(true); renderSidebar(); return; }
       const sli = hitSlit(piece, w);
       if (sli >= 0) {
+        sel.cut=null;
         delete sel.slitGroups;
         if (ev.shiftKey || sel.kind === 'slits') {
           // gather several stitch holes; click toggles once a set exists
@@ -2170,7 +2206,7 @@
         sel.kind = 'slit'; sel.idx = sli; renderAll(true); renderSidebar(); return;
       }
       const hi = (piece.holes || []).findIndex((h) => Geo.dist(h, w) < px(8));
-      if (hi >= 0) { sel.kind = 'hole'; sel.idx = hi; renderAll(true); renderSidebar(); return; }
+      if (hi >= 0) { sel.cut=null; sel.kind = 'hole'; sel.idx = hi; renderAll(true); renderSidebar(); return; }
       // 2c. internal cutout ring of the selected piece
       const ci = (piece.cutouts || []).findIndex((c) => {
         if (!c.nodes || c.nodes.length < 3) return false;
@@ -2183,40 +2219,14 @@
           drag = { type: 'cutout', pieceId: piece.id, idx: ci, start: w, applied: { x: 0, y: 0 }, dead: downPt(ev) };
           return;
         }
-        sel.kind = 'cut'; sel.idx = ci; sel.nodes = [];
-        renderAll(true); renderSidebar();
-        return;
+        const hit=Geo.nearestOnPath(piece.cutouts[ci].nodes,true,w);
+        return selectBoundaryEdge(piece,hit,ci,ev,w);
       }
       // 3. segment of the selected piece — dragging moves the edge freely;
       // Shift-click gathers several edges into a set (the Offset tool then
       // slides/protrudes the same set along its normals)
       const hit = Geo.nearestOnPath(piece.path.nodes, piece.path.closed, w);
-      if (hit && hit.dist < px(6) && multiSel.length <= 1) {
-        if (ev.shiftKey) {
-          const cur = new Set(selectedSegsOf(piece));
-          if (cur.has(hit.seg)) cur.delete(hit.seg); else cur.add(hit.seg);
-          setSegSelection(piece, [...cur].sort((x, y) => x - y));
-          renderAll(true); renderSidebar();
-          return;
-        }
-        if (sel.kind === 'segs' && sel.segs.includes(hit.seg)) {
-          // drag any edge of the set: the whole set moves freely together
-          const nn = piece.path.nodes.length;
-          const ks = new Set();
-          for (const i of sel.segs) { ks.add(i); ks.add((i + 1) % nn); }
-          beginChange();
-          drag = { type: 'nodes', pieceId: piece.id, idxs: [...ks], start: w, applied: { x: 0, y: 0 }, dead: downPt(ev) };
-          return;
-        }
-        if (sel.kind === 'seg' && sel.idx === hit.seg) { // already the selection: now it moves
-          beginChange();
-          drag = { type: 'seg', pieceId: piece.id, idx: hit.seg, start: w, applied: { x: 0, y: 0 }, dead: downPt(ev) };
-          return;
-        }
-        sel.kind = 'seg'; sel.idx = hit.seg; sel.nodes = [];
-        renderAll(true); renderSidebar();
-        return;
-      }
+      if (hit && hit.dist < px(6) && multiSel.length <= 1) return selectBoundaryEdge(piece,hit,null,ev,w);
     }
     // 4. any piece body / outline (topmost = last drawn)
     for (let i = doc.pieces.length - 1; i >= 0; i--) {
@@ -2346,18 +2356,18 @@
       // a point first: right-click opens the node menu
       let np = null;
       if (sp) {
-        const ni = hitNode(sp, w);
-        if (ni >= 0) np = { piece: sp, idx: ni };
+        const hit = hitBoundaryNode(sp,w);
+        if (hit) np={piece:sp,...hit};
       }
       if (!np) {
         for (const p of doc.pieces) {
           if (p.visible === false || p.guide) continue;
-          const ni = hitNode(p, w);
-          if (ni >= 0) { np = { piece: p, idx: ni }; break; }
+          const hit = hitBoundaryNode(p,w);
+          if (hit) {np={piece:p,...hit};break;}
         }
       }
       if (np) {
-        selectPiece(np.piece.id);
+        selectPiece(np.piece.id);sel.cut=np.cut;
         sel.kind = 'node';
         sel.idx = np.idx;
         renderAll(true);
@@ -2367,13 +2377,16 @@
       }
       // otherwise an edge: divide dialog
       let pick = null;
-      if (sp && sp.path.nodes.length >= 2) {
-        const hit = Geo.nearestOnPath(sp.path.nodes, sp.path.closed, w);
-        if (hit && hit.dist < px(8)) pick = { piece: sp, hit };
+      if (sp && Geo.boundaryPath(sp,sel.cut).nodes.length >= 2) {
+        const hit = Geo.nearestOnPath(Geo.boundaryPath(sp,sel.cut).nodes,Geo.boundaryPath(sp,sel.cut).closed,w);
+        if (hit && hit.dist < px(8)) pick = { piece: sp, hit, cut:sel.cut };
       }
-      if (!pick) pick = nearestEdgeAt(w, true);
+      if (!pick) {
+        const inner=cutoutAt(w),outer=nearestEdgeAt(w,true);
+        pick=inner && (!outer || inner.dist<outer.hit.dist) ? {piece:inner.piece,cut:inner.cut,hit:Geo.nearestOnPath(inner.piece.cutouts[inner.cut].nodes,true,w)} : outer;
+      }
       if (pick) {
-        selectPiece(pick.piece.id);
+        selectPiece(pick.piece.id);sel.cut=pick.cut ?? null;
         sel.kind = 'seg';
         sel.idx = pick.hit.seg;
         renderAll(true);
@@ -2385,7 +2398,7 @@
 
   // ---- node dialog (right-click a point) ----
   function openNodeDialog(ev, piece, idx) {
-    const nd = piece.path.nodes[idx];
+    const nd = Geo.boundaryPath(piece,sel.cut).nodes[idx];
     $('nd-smooth').textContent = nd.hin || nd.hout
       ? 'Convert to corner (remove handles)'
       : 'Convert to curve point (add handles)';
@@ -2397,9 +2410,9 @@
   }
   function closeNodeDialog() { $('node-dialog').hidden = true; svg.focus(); }
 
-  function toggleNodeSmooth(piece, ni) {
+  function toggleNodeSmooth(piece, ni, cut = null) {
     beginChange();
-    const nodes = piece.path.nodes;
+    const nodes = Geo.boundaryPath(piece,cut).nodes;
     const nd = nodes[ni];
     if (nd.hin || nd.hout) {
       nd.hin = null;
@@ -2417,18 +2430,18 @@
 
   $('nd-smooth').addEventListener('click', () => {
     const p = selPiece();
-    if (!p || sel.kind !== 'node' || !p.path.nodes[sel.idx]) { closeNodeDialog(); return; }
-    toggleNodeSmooth(p, sel.idx);
+    if (!p || sel.kind !== 'node' || !Geo.boundaryPath(p,sel.cut).nodes[sel.idx]) { closeNodeDialog(); return; }
+    toggleNodeSmooth(p, sel.idx,sel.cut);
     closeNodeDialog();
     renderAll();
   });
   $('nd-round-btn').addEventListener('click', () => {
     const p = selPiece();
-    if (!p || sel.kind !== 'node' || !p.path.nodes[sel.idx]) { closeNodeDialog(); return; }
+    if (!p || sel.kind !== 'node' || !Geo.boundaryPath(p,sel.cut).nodes[sel.idx]) { closeNodeDialog(); return; }
     const R = parseFloat($('nd-round-r').value);
     if (!(R > 0)) { alert('Radius must be positive.'); return; }
     closeNodeDialog();
-    roundCorner(p, sel.idx, R);
+    roundCorner(p, sel.idx, R,sel.cut);
   });
   let keepCurveProposal=null;
   $('nd-keep-curve').addEventListener('click', () => {
@@ -2438,12 +2451,14 @@
     keepCurveProposal=null;
     clear($('keep-curve-preview'));
     try {
-      const plan=Geo.deletePointKeepCurve(p,sel.idx);
-      keepCurveProposal={id:p.id,plan};
+      const cut=sel.cut;
+      const boundary=cut==null?p:{path:Geo.boundaryPath(p,cut),notches:[],stitchSlits:(p.stitchSlits || []).filter(sl=>sl.cut===cut).map(({cut,...sl})=>sl)};
+      const plan=Geo.deletePointKeepCurve(boundary,sel.idx);
+      keepCurveProposal={id:p.id,cut,plan};
       const bb=plan.before, pad=Math.max(bb.maxX-bb.minX,bb.maxY-bb.minY,.1)*.08;
       $('keep-curve-preview').setAttribute('viewBox',`${bb.minX-pad} ${bb.minY-pad} ${bb.maxX-bb.minX+2*pad} ${bb.maxY-bb.minY+2*pad}`);
-      el('path',{d:pathD(p.path.nodes,p.path.closed),fill:'none',stroke:'#999','stroke-width':3,'vector-effect':'non-scaling-stroke','stroke-dasharray':'5 4'},$('keep-curve-preview'));
-      el('path',{d:pathD(plan.piece.path.nodes,p.path.closed),fill:'none',stroke:'#168c86','stroke-width':2,'vector-effect':'non-scaling-stroke'},$('keep-curve-preview'));
+      el('path',{d:pathD(boundary.path.nodes,boundary.path.closed),fill:'none',stroke:'#999','stroke-width':3,'vector-effect':'non-scaling-stroke','stroke-dasharray':'5 4'},$('keep-curve-preview'));
+      el('path',{d:pathD(plan.piece.path.nodes,boundary.path.closed),fill:'none',stroke:'#168c86','stroke-width':2,'vector-effect':'non-scaling-stroke'},$('keep-curve-preview'));
       const mm=v=>(v*10).toFixed(4);
       $('keep-curve-message').textContent=`${plan.exact?'Exact curve retained.':'Small approximation: sampled deviation '+mm(plan.deviation)+' mm.'} ${plan.removed} mark(s) attached to this point will be removed.`;
       $('keep-curve-measurements').textContent=`Before → after (mm)\nJoined seam: ${mm(plan.oldLength)} → ${mm(plan.newLength)}\nWidth: ${mm(bb.maxX-bb.minX)} → ${mm(plan.after.maxX-plan.after.minX)}\nHeight: ${mm(bb.maxY-bb.minY)} → ${mm(plan.after.maxY-plan.after.minY)}\nEndpoints stay fixed. Measurement tolerance: 0.0001 mm.`;
@@ -2462,7 +2477,12 @@
     const i=doc.pieces.findIndex(p=>p.id===keepCurveProposal.id);
     if(i<0)return;
     beginChange();
-    doc.pieces[i]=keepCurveProposal.plan.piece;
+    if(keepCurveProposal.cut==null)doc.pieces[i]=keepCurveProposal.plan.piece;
+    else {
+      const owner=doc.pieces[i],cut=keepCurveProposal.cut;
+      owner.cutouts[cut].nodes=keepCurveProposal.plan.piece.path.nodes;
+      owner.stitchSlits=(owner.stitchSlits || []).filter(sl=>sl.cut!==cut).concat((keepCurveProposal.plan.piece.stitchSlits || []).map(sl=>({...sl,cut})));
+    }
     endChange();
     clearSel();selectPiece(doc.pieces[i].id);
     $('keep-curve-dialog').close();renderAll();
@@ -2482,8 +2502,8 @@
 
   // ---- divide-edge dialog (right-click an edge with the Select tool) ----
   function openDivideDialog(ev, piece, seg) {
-    const n = piece.path.nodes.length;
-    const len = Geo.segLength(piece.path.nodes[seg], piece.path.nodes[(seg + 1) % n]);
+    const n = Geo.boundaryPath(piece,sel.cut).nodes.length;
+    const len = Geo.segLength(Geo.boundaryPath(piece,sel.cut).nodes[seg], Geo.boundaryPath(piece,sel.cut).nodes[(seg + 1) % n]);
     $('dv-dist').value = fmt(len / 2);
     $('dv-pct').value = 50;
     $('dv-hint').textContent = `Edge is ${fmt(len)} cm · measured from its start (●) · Esc closes`;
@@ -2509,8 +2529,8 @@
     clear(gPreview);
     const p = selPiece();
     if (!p || sel.kind !== 'seg' || $('divide-dialog').hidden) return;
-    const n = p.path.nodes.length;
-    const a = p.path.nodes[sel.idx], b = p.path.nodes[(sel.idx + 1) % n];
+    const n = Geo.boundaryPath(p,sel.cut).nodes.length;
+    const a = Geo.boundaryPath(p,sel.cut).nodes[sel.idx], b = Geo.boundaryPath(p,sel.cut).nodes[(sel.idx + 1) % n];
     const len = Geo.segLength(a, b);
     const fromEnd = $('dv-from').value === 'end';
     let fr = [];
@@ -2534,19 +2554,19 @@
   function divideSelectedEdge(fractions) {
     const p = selPiece();
     if (!p || sel.kind !== 'seg') { closeDivideDialog(); return; }
-    if (p.foldSeg === sel.idx) {
+    if (sel.cut == null && p.foldSeg === sel.idx) {
       alert('The fold line must stay a single straight edge — remove the fold first.');
       return;
     }
-    const n = p.path.nodes.length;
-    const a = p.path.nodes[sel.idx], b = p.path.nodes[(sel.idx + 1) % n];
+    const n = Geo.boundaryPath(p,sel.cut).nodes.length;
+    const a = Geo.boundaryPath(p,sel.cut).nodes[sel.idx], b = Geo.boundaryPath(p,sel.cut).nodes[(sel.idx + 1) % n];
     const ts = Geo.segArcParams(a, b, fractions);
     beginChange();
     // insert from the far end inward: each split keeps the lower part as
     // sel.idx, and bezier parameters rescale linearly
     let prev = 1;
     for (let i = ts.length - 1; i >= 0; i--) {
-      insertNodeAt(p, sel.idx, Math.min(0.999, Math.max(0.001, ts[i] / prev)));
+      insertNodeAt(p, sel.idx, Math.min(0.999, Math.max(0.001, ts[i] / prev)),sel.cut);
       prev = ts[i];
     }
     endChange();
@@ -2558,8 +2578,8 @@
   $('dv-dist-btn').addEventListener('click', () => {
     const p = selPiece();
     if (!p || sel.kind !== 'seg') return;
-    const n = p.path.nodes.length;
-    const len = Geo.segLength(p.path.nodes[sel.idx], p.path.nodes[(sel.idx + 1) % n]);
+    const n = Geo.boundaryPath(p,sel.cut).nodes.length;
+    const len = Geo.segLength(Geo.boundaryPath(p,sel.cut).nodes[sel.idx], Geo.boundaryPath(p,sel.cut).nodes[(sel.idx + 1) % n]);
     const d = parseFloat($('dv-dist').value);
     if (!(d > 0) || d >= len) { alert(`Distance must be between 0 and ${fmt(len)} cm.`); return; }
     const f = d / len;
@@ -3055,16 +3075,16 @@
   }
 
   // ---- knife tool: cut a piece in two along a line or open path ----
-  function insertNodeAt(piece, seg, t) {
-    const nodes = piece.path.nodes;
+  function insertNodeAt(piece, seg, t, cut = null) {
+    const nodes = Geo.boundaryPath(piece,cut).nodes;
     const n = nodes.length;
     const a = nodes[seg], b = nodes[(seg + 1) % n];
     const { a2, mid, b2 } = Geo.splitSeg(a, b, t);
     nodes[seg] = a2;
     nodes[(seg + 1) % n] = b2;
     nodes.splice(seg + 1, 0, mid);
-    remapAfterInsert(piece, seg, t);
-    if (piece.foldSeg != null && piece.foldSeg > seg) piece.foldSeg += 1;
+    remapAfterInsert(piece, seg, t, cut);
+    if (cut == null && piece.foldSeg != null && piece.foldSeg > seg) piece.foldSeg += 1;
     return seg + 1;
   }
 
@@ -4261,23 +4281,23 @@
       for (const id of multiSel) { const p = pieceById(id); if (p) movePiece(p, dx, dy); }
     } else if (sel.kind === 'nodes' && sel.nodes.length) {
       for (const i of sel.nodes) {
-        const nd = piece.path.nodes[i];
+        const nd = Geo.boundaryPath(piece,sel.cut).nodes[i];
         if (nd) { nd.x += dx; nd.y += dy; }
       }
-    } else if (sel.kind === 'node' && piece.path.nodes[sel.idx]) {
-      const nd = piece.path.nodes[sel.idx];
+    } else if (sel.kind === 'node' && Geo.boundaryPath(piece,sel.cut).nodes[sel.idx]) {
+      const nd = Geo.boundaryPath(piece,sel.cut).nodes[sel.idx];
       nd.x += dx; nd.y += dy;
-    } else if (sel.kind === 'seg' && sel.idx < piece.path.nodes.length) {
-      const n = piece.path.nodes.length;
-      const a = piece.path.nodes[sel.idx], b = piece.path.nodes[(sel.idx + 1) % n];
+    } else if (sel.kind === 'seg' && sel.idx < Geo.boundaryPath(piece,sel.cut).nodes.length) {
+      const n = Geo.boundaryPath(piece,sel.cut).nodes.length;
+      const a = Geo.boundaryPath(piece,sel.cut).nodes[sel.idx], b = Geo.boundaryPath(piece,sel.cut).nodes[(sel.idx + 1) % n];
       a.x += dx; a.y += dy;
       if (b !== a) { b.x += dx; b.y += dy; }
     } else if (sel.kind === 'segs' && sel.segs && sel.segs.length) {
-      const n = piece.path.nodes.length;
+      const n = Geo.boundaryPath(piece,sel.cut).nodes.length;
       const ks = new Set();
       for (const i of sel.segs) { ks.add(i); ks.add((i + 1) % n); }
       for (const k of ks) {
-        const nd = piece.path.nodes[k];
+        const nd = Geo.boundaryPath(piece,sel.cut).nodes[k];
         if (nd) { nd.x += dx; nd.y += dy; }
       }
     } else if (sel.kind === 'hole' && piece.holes && piece.holes[sel.idx]) {
@@ -4294,7 +4314,7 @@
         if (it && it.free) { it.x += dx; it.y += dy; continue; }
         const ctx = it && (sel.kind !== 'notch'
           ? slitContext(piece, it)
-          : (it.seg < piece.path.nodes.length ? { nodes: piece.path.nodes } : null));
+          : (it.seg < Geo.boundaryPath(piece,sel.cut).nodes.length ? { nodes: Geo.boundaryPath(piece,sel.cut).nodes } : null));
         if (ctx) {
           const n = ctx.nodes.length;
           const len = Geo.segLength(ctx.nodes[it.seg], ctx.nodes[(it.seg + 1) % n]);
@@ -4310,14 +4330,14 @@
   // Fillet geometry for rounding a corner with radius R. Pure computation —
   // used for the live preview and for the actual edit. Returns { error, maxR }
   // when the corner can't take R.
-  function filletParams(piece, idx, R) {
-    const nodes = piece.path.nodes;
+  function filletParams(piece, idx, R, cut = null) {
+    const nodes = Geo.boundaryPath(piece,cut).nodes;
     const n = nodes.length;
-    if (!piece.path.closed && (idx === 0 || idx === n - 1)) {
+    if (!Geo.boundaryPath(piece,cut).closed && (idx === 0 || idx === n - 1)) {
       return { error: 'End points of an open path have no corner to round.' };
     }
     const inSeg = (idx - 1 + n) % n, outSeg = idx;
-    if (piece.foldSeg === inSeg || piece.foldSeg === outSeg) {
+    if (cut == null && (piece.foldSeg === inSeg || piece.foldSeg === outSeg)) {
       return { error: 'This corner touches the fold line — remove the fold first.' };
     }
     const corner = nodes[idx], prev = nodes[inSeg], next = nodes[(idx + 1) % n];
@@ -4345,51 +4365,51 @@
   }
 
   // Round the selected corner with a circular fillet of radius R.
-  function roundCorner(piece, idx, R) {
-    const fp = filletParams(piece, idx, R);
+  function roundCorner(piece, idx, R, cut = null) {
+    const fp = filletParams(piece, idx, R,cut);
     if (fp.error) { alert(fp.error); return; }
     const inSeg = fp.inSeg;
     const tA = fp.tA, tB = fp.tB, ta = fp.ta, tb = fp.tb, k = fp.k;
     beginChange();
     // NOTE: insertNodeAt replaces the segment's endpoints with copies, so the
     // corner's index must be tracked arithmetically, not by reference
-    insertNodeAt(piece, inSeg, tA);
+    insertNodeAt(piece, inSeg, tA,cut);
     const ci = idx + (inSeg < idx ? 1 : 0);
-    insertNodeAt(piece, ci, tB); // the corner's outgoing edge is now seg ci
-    const n2 = piece.path.nodes.length;
-    const A = piece.path.nodes[(ci - 1 + n2) % n2];
-    const B = piece.path.nodes[(ci + 1) % n2];
+    insertNodeAt(piece, ci, tB,cut); // the corner's outgoing edge is now seg ci
+    const n2 = Geo.boundaryPath(piece,cut).nodes.length;
+    const A = Geo.boundaryPath(piece,cut).nodes[(ci - 1 + n2) % n2];
+    const B = Geo.boundaryPath(piece,cut).nodes[(ci + 1) % n2];
     // drop the corner node; its two stub edges become the arc
     const segA2 = (ci - 1 + n2) % n2, segB2 = ci;
-    piece.notches = (piece.notches || []).filter((nt) => nt.seg !== segA2 && nt.seg !== segB2);
-    for (const nt of piece.notches) if (nt.seg > ci) nt.seg -= 1;
-    piece.stitchSlits = (piece.stitchSlits || []).filter((sl) => sl.cut != null || (sl.seg !== segA2 && sl.seg !== segB2));
-    for (const sl of piece.stitchSlits) if (sl.cut == null && sl.seg > ci) sl.seg -= 1;
-    if (piece.foldSeg != null && piece.foldSeg > ci) piece.foldSeg -= 1;
-    piece.path.nodes.splice(ci, 1);
+    if (cut == null) piece.notches = (piece.notches || []).filter((nt) => nt.seg !== segA2 && nt.seg !== segB2);
+    for (const nt of cut == null ? piece.notches : []) if (nt.seg > ci) nt.seg -= 1;
+    piece.stitchSlits = (piece.stitchSlits || []).filter((sl) => sl.free || (sl.cut ?? null) !== cut || (sl.seg !== segA2 && sl.seg !== segB2));
+    for (const sl of piece.stitchSlits) if (!sl.free && (sl.cut ?? null) === cut && sl.seg > ci) sl.seg -= 1;
+    if (cut == null && piece.foldSeg != null && piece.foldSeg > ci) piece.foldSeg -= 1;
+    Geo.boundaryPath(piece,cut).nodes.splice(ci, 1);
     A.hout = { x: ta.x * k, y: ta.y * k };
     B.hin = { x: -tb.x * k, y: -tb.y * k };
     endChange();
     sel.kind = 'node';
-    sel.idx = piece.path.nodes.indexOf(A);
+    sel.idx = Geo.boundaryPath(piece,cut).nodes.indexOf(A);
     renderAll();
     $('status-hint').textContent = `Corner rounded with a ${fmt(R)} cm radius`;
   }
 
   // remove one node, dropping marks on its two edges and remapping the rest
-  function deleteNodeAt(piece, idx) {
-    const n = piece.path.nodes.length;
+  function deleteNodeAt(piece, idx, cut = null) {
+    const n = Geo.boundaryPath(piece,cut).nodes.length;
     const segA = (idx - 1 + n) % n, segB = idx;
-    piece.notches = (piece.notches || []).filter((nt) => nt.seg !== segA && nt.seg !== segB);
-    for (const nt of piece.notches) if (nt.seg > idx) nt.seg -= 1;
-    piece.stitchSlits = (piece.stitchSlits || []).filter((sl) => sl.cut != null || (sl.seg !== segA && sl.seg !== segB));
-    for (const sl of piece.stitchSlits) if (sl.cut == null && sl.seg > idx) sl.seg -= 1;
-    if (piece.foldSeg != null) {
+    if (cut == null) piece.notches = (piece.notches || []).filter((nt) => nt.seg !== segA && nt.seg !== segB);
+    for (const nt of cut == null ? piece.notches : []) if (nt.seg > idx) nt.seg -= 1;
+    piece.stitchSlits = (piece.stitchSlits || []).filter((sl) => sl.free || (sl.cut ?? null) !== cut || (sl.seg !== segA && sl.seg !== segB));
+    for (const sl of piece.stitchSlits) if (!sl.free && (sl.cut ?? null) === cut && sl.seg > idx) sl.seg -= 1;
+    if (cut == null && piece.foldSeg != null) {
       // deleting a fold-edge endpoint destroys the fold
       if (idx === piece.foldSeg || idx === (piece.foldSeg + 1) % n) piece.foldSeg = null;
       else if (piece.foldSeg > idx) piece.foldSeg -= 1;
     }
-    piece.path.nodes.splice(idx, 1);
+    Geo.boundaryPath(piece,cut).nodes.splice(idx, 1);
   }
 
   // ---------- clipboard (Ctrl+C/V/X/D) ----------
@@ -4460,6 +4480,13 @@
     renderAll();
   }
 
+  function removeCutout(piece,index) {
+    piece.cutouts.splice(index,1);
+    piece.stitchSlits=(piece.stitchSlits || []).filter(sl=>sl.cut!==index);
+    for(const sl of piece.stitchSlits)if(sl.cut!=null && sl.cut>index)sl.cut--;
+    sel.cut=null;sel.kind=null;sel.idx=-1;sel.nodes=[];sel.handle=null;
+  }
+
   function deleteSelection() {
     const piece = selPiece();
     if (!piece) return;
@@ -4473,7 +4500,7 @@
     }
     // a handle is picked up: Del takes that handle, not the point under it
     if (sel.handle) {
-      const hn = piece.path.nodes[sel.handle.idx];
+      const hn = Geo.boundaryPath(piece,sel.cut).nodes[sel.handle.idx];
       const key = sel.handle.key;
       sel.handle = null;
       if (hn && hn[key]) {
@@ -4495,21 +4522,21 @@
       $('status-hint').textContent = `Deleted ${groups.reduce((n,g)=>n+g.indices.length,0)} stitch holes`;
       return;
     }
-    if (sel.kind === 'node' && piece.path.nodes[sel.idx]) {
-      if (piece.path.nodes.length <= (piece.path.closed ? 3 : 2)) {
-        doc.pieces = doc.pieces.filter((p) => p.id !== piece.id);
-        clearSel();
+    if (sel.kind === 'node' && Geo.boundaryPath(piece,sel.cut).nodes[sel.idx]) {
+      if (Geo.boundaryPath(piece,sel.cut).nodes.length <= (Geo.boundaryPath(piece,sel.cut).closed ? 3 : 2)) {
+        if(sel.cut!=null)removeCutout(piece,sel.cut);
+        else {doc.pieces=doc.pieces.filter(p=>p.id!==piece.id);clearSel();}
       } else {
-        deleteNodeAt(piece, sel.idx);
+        deleteNodeAt(piece, sel.idx,sel.cut);
         sel.kind = null;
       }
     } else if (sel.kind === 'nodes' && sel.nodes.length) {
-      const min = piece.path.closed ? 3 : 2;
-      if (piece.path.nodes.length - sel.nodes.length < min) {
-        doc.pieces = doc.pieces.filter((p) => p.id !== piece.id);
-        clearSel();
+      const min = Geo.boundaryPath(piece,sel.cut).closed ? 3 : 2;
+      if (Geo.boundaryPath(piece,sel.cut).nodes.length - sel.nodes.length < min) {
+        if(sel.cut!=null)removeCutout(piece,sel.cut);
+        else {doc.pieces=doc.pieces.filter(p=>p.id!==piece.id);clearSel();}
       } else {
-        for (const i of sel.nodes.slice().sort((a, b) => b - a)) deleteNodeAt(piece, i);
+        for (const i of sel.nodes.slice().sort((a, b) => b - a)) deleteNodeAt(piece, i,sel.cut);
         sel.kind = null;
         sel.nodes = [];
       }
@@ -4520,11 +4547,9 @@
       piece.holes.splice(sel.idx, 1);
       sel.kind = null;
     } else if (sel.kind === 'cut' && piece.cutouts && piece.cutouts[sel.idx]) {
-      // internal cutout: remove it and any stitch run that rode on it
-      piece.cutouts.splice(sel.idx, 1);
-      piece.stitchSlits = (piece.stitchSlits || []).filter((sl) => sl.cut !== sel.idx);
-      for (const sl of piece.stitchSlits) if (sl.cut != null && sl.cut > sel.idx) sl.cut--;
-      sel.kind = null;
+      removeCutout(piece,sel.idx);
+    } else if(sel.cut!=null) {
+      removeCutout(piece,sel.cut);
     } else {
       doc.pieces = doc.pieces.filter((p) => p.id !== piece.id);
       clearSel();
@@ -5234,9 +5259,9 @@
   for (const axis of ['x', 'y']) {
     $('sp-' + axis).addEventListener('change', (e) => {
       const p = selPiece();
-      if (!p || sel.kind !== 'node' || !p.path.nodes[sel.idx]) return;
+      if (!p || sel.kind !== 'node' || !Geo.boundaryPath(p,sel.cut).nodes[sel.idx]) return;
       beginChange();
-      p.path.nodes[sel.idx][axis] = parseFloat(e.target.value) || 0;
+      Geo.boundaryPath(p,sel.cut).nodes[sel.idx][axis] = parseFloat(e.target.value) || 0;
       endChange();
       renderAll();
     });
@@ -5244,9 +5269,9 @@
   $('sp-seglen').addEventListener('change', (e) => {
     const p = selPiece();
     if (!p || sel.kind !== 'seg') return;
-    const nodes = p.path.nodes;
+    const nodes = Geo.boundaryPath(p,sel.cut).nodes;
     const n = nodes.length;
-    if (sel.idx >= (p.path.closed ? n : n - 1)) return;
+    if (sel.idx >= (Geo.boundaryPath(p,sel.cut).closed ? n : n - 1)) return;
     const ai = sel.idx, bi = (sel.idx + 1) % n;
     const target = parseFloat(e.target.value);
     const res = Geo.setSegLength(nodes[ai], nodes[bi], target, $('sp-seg-anchor').value);
@@ -5259,28 +5284,33 @@
   });
   $('sp-round-btn').addEventListener('click', () => {
     const p = selPiece();
-    if (!p || sel.kind !== 'node' || !p.path.nodes[sel.idx]) return;
+    if (!p || sel.kind !== 'node' || !Geo.boundaryPath(p,sel.cut).nodes[sel.idx]) return;
     const R = parseFloat($('sp-round-r').value);
     if (!(R > 0)) { alert('Radius must be positive.'); return; }
-    roundCorner(p, sel.idx, R);
+    roundCorner(p, sel.idx, R, sel.cut);
   });
   for (const key of ['hin', 'hout']) {
     $('sp-del-' + key).addEventListener('click', () => {
       const p = selPiece();
-      if (!p || sel.kind !== 'node' || !p.path.nodes[sel.idx]) return;
+      if (!p || sel.kind !== 'node' || !Geo.boundaryPath(p,sel.cut).nodes[sel.idx]) return;
       beginChange();
-      p.path.nodes[sel.idx][key] = null;
+      Geo.boundaryPath(p,sel.cut).nodes[sel.idx][key] = null;
       sel.handle = null;
       endChange();
       renderAll(); renderSidebar();
     });
   }
+  $('sp-select-cutout').addEventListener('click',()=>{
+    if(sel.cut==null)return;
+    sel.kind='cut';sel.idx=sel.cut;sel.cut=null;sel.handle=null;sel.nodes=[];
+    renderAll();
+  });
   $('sp-clear-slits').addEventListener('click', () => {
     const p = selPiece();
     if (!p || (sel.kind !== 'seg' && sel.kind !== 'segs')) return;
     const segsSel = new Set(sel.kind === 'segs' ? sel.segs : [sel.idx]);
     beginChange();
-    p.stitchSlits = p.guide ? [] : (p.stitchSlits || []).filter((sl) => sl.cut != null || !segsSel.has(sl.seg));
+    p.stitchSlits = p.guide ? [] : (p.stitchSlits || []).filter((sl) => sl.free || (sl.cut ?? null) !== (sel.cut ?? null) || !segsSel.has(sl.seg));
     endChange();
     renderAll(); renderSidebar();
   });
@@ -5472,7 +5502,7 @@
       keep = (s, i) => i !== sel.idx;
     } else if (sel.kind === 'seg' || sel.kind === 'segs') {
       const segsSel = new Set(sel.kind === 'segs' ? sel.segs : [sel.idx]);
-      const onEdge = (s2) => p.guide || (s2.cut == null && segsSel.has(s2.seg));
+      const onEdge = (s2) => p.guide || ((s2.cut ?? null) === (sel.cut ?? null) && segsSel.has(s2.seg));
       const runsHere = new Set((p.stitchSlits || []).filter(onEdge).map((s2) => s2.run).filter((r) => r != null));
       keep = (s) => !(s.run != null ? runsHere.has(s.run) : onEdge(s));
     }
@@ -5575,19 +5605,6 @@
     updateStitchUi();
     renderAll(true);
   });
-  // typing exact coordinates for the selected point
-  for (const key of ['x', 'y']) {
-    $('sp-' + key).addEventListener('change', () => {
-      const p = selPiece();
-      if (!p || sel.kind !== 'node' || !p.path.nodes[sel.idx]) return;
-      const v = parseFloat($('sp-' + key).value);
-      if (!isFinite(v)) return;
-      beginChange();
-      p.path.nodes[sel.idx][key] = v;
-      endChange();
-      renderAll(true);
-    });
-  }
   // exact Δx/Δy move for the current selection / the whole piece
   $('sp-move-btn').addEventListener('click', () => {
     if (!selPiece()) return;
@@ -5622,7 +5639,7 @@
   }
   $('sp-fold').addEventListener('click', () => {
     const p = selPiece();
-    if (!p || sel.kind !== 'seg' || !p.path.closed) return;
+    if (!p || sel.cut != null || sel.kind !== 'seg' || !p.path.closed) return;
     if (p.foldSeg === sel.idx) {
       beginChange(); p.foldSeg = null; endChange(); renderAll();
       return;

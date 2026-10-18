@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pattern Studio</title>
-<link rel="stylesheet" href="style.css?v=82">
+<link rel="stylesheet" href="style.css?v=83">
 </head>
 <body>
 <div id="app">
   <header id="topbar">
-    <span id="logo" title="build 82">✂ Pattern Studio</span>
+    <span id="logo" title="build 83">✂ Pattern Studio</span>
     <input id="doc-name" type="text" value="Untitled pattern" spellcheck="false" title="Pattern name">
     <details class="top-menu"><summary>File</summary><div class="menu-panel"><div class="row btns">    <button id="btn-new" title="New document">New</button>
     <button id="btn-open" title="Open .json project or import a .dxf">Open</button>
@@ -337,6 +337,7 @@
 <section id="grain-props" hidden><h3>Grainline</h3><p class="hint">Drag inside a piece to create or replace its grainline. A click removes it.</p><button id="grain-remove">Remove grainline</button></section>
 <section id="sel-props" hidden>
         <h3 id="selection-title">Selection</h3>
+        <div class="row" id="sel-cutout-row" hidden><button id="sp-select-cutout">Select whole cutout</button></div>
         <div class="row" id="sel-node-row" hidden>
           <label for="sp-x">Point</label>
           <input id="sp-x" type="number" step="0.1" title="x (cm)">
@@ -445,10 +446,10 @@
   </div>
 </div>
 <input id="file-input" type="file" accept=".json,.dxf,application/json" hidden>
-<script src="js/geometry.js?v=82"></script>
-<script src="js/strokefont.js?v=82"></script>
-<script src="js/dxf.js?v=82"></script>
-<script src="js/dxfimport.js?v=82"></script>
-<script src="js/app.js?v=82"></script>
+<script src="js/geometry.js?v=83"></script>
+<script src="js/strokefont.js?v=83"></script>
+<script src="js/dxf.js?v=83"></script>
+<script src="js/dxfimport.js?v=83"></script>
+<script src="js/app.js?v=83"></script>
 </body>
 </html>

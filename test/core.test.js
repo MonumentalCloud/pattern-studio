@@ -1899,4 +1899,57 @@ t('body inset follows a curved guide without moving its control points', () => {
   assert.equal(JSON.stringify(nodes),before);
 });
 
+t('inner boundary selection, edge moves and numeric point edits leave the panel and other ring intact', () => {
+  const src=require('fs').readFileSync(require.resolve('../js/app.js'),'utf8'),vm=require('vm');
+  const p={id:'p',path:{closed:true,nodes:[N(0,0),N(20,0),N(20,20),N(0,20)]},cutouts:[{nodes:[N(3,3),N(8,3),N(8,8),N(3,8)]},{nodes:[N(12,12),N(15,12),N(15,15),N(12,15)]}],stitchSlits:[]};
+  const original=JSON.stringify(p.path),other=JSON.stringify(p.cutouts[1]);
+  const sel={pieceId:'p',kind:null,idx:-1,nodes:[],cut:null},fields={},events={};let steps=0;
+  const ctx={Geo,sel,doc:{pieces:[p]},multiSel:[],selPiece:()=>p,pieceById:()=>p,px:x=>x/100,downPt:()=>({x:0,y:0}),scaleTargets:()=>[],hitNotch:()=>-1,hitSlit:()=>-1,beginChange:()=>steps++,endChange(){},renderAll(){},renderSidebar(){},$:id=>fields[id]||(fields[id]={addEventListener:(k,f)=>(events[id+':'+k] ||= []).push(f)}),selectedSegsOf:()=>sel.kind==='seg'?[sel.idx]:sel.kind==='segs'?sel.segs:[],setSegSelection:(piece,segs)=>{sel.kind=segs.length===1?'seg':'segs';sel.idx=segs[0];sel.segs=segs;}};
+  for(const [a,b] of [['  function handleTargets(','  // corner scale handles'],['  function selectDown(','  // ---- pen length'],['  function applyMove(','  // Fillet geometry']]){
+    const from=src.indexOf(a),end=src.indexOf(b,from);
+    // SelectDown is followed by the numerical pen dialog.
+    vm.runInNewContext(src.slice(from,end<0?src.indexOf('  function openPenDialog(',from):end),ctx);
+  }
+  ctx.selectDown({}, {x:5,y:3});assert.equal(sel.kind,'seg');assert.equal(sel.cut,0);assert.equal(sel.idx,0);assert.equal(steps,0);
+  ctx.applyMove(0,-1);assert.equal(p.cutouts[0].nodes[0].y,2);assert.equal(p.cutouts[0].nodes[1].y,2);
+  ctx.selectDown({}, {x:3,y:2});assert.equal(sel.kind,'node');assert.equal(sel.cut,0);
+  vm.runInNewContext(src.slice(src.indexOf("  for (const axis of ['x', 'y'])"),src.indexOf("  $('sp-clear-slits').addEventListener")),ctx);
+  const duplicateStart=src.indexOf('  // typing exact coordinates for the selected point');
+  if(duplicateStart>=0)vm.runInNewContext(src.slice(duplicateStart,src.indexOf('  // exact Δx/Δy move',duplicateStart)),ctx);
+  fields['sp-x'].value='4';for(const event of events['sp-x:change'])event({target:{value:'4'}});assert.equal(p.cutouts[0].nodes[0].x,4);
+  assert.equal(JSON.stringify(p.path),original);
+  ctx.selectDown({}, {x:0,y:0});assert.equal(sel.cut,null);assert.equal(sel.idx,0);assert.equal(JSON.stringify(p.cutouts[1]),other);
+});
+
+t('cutout split, corner deletion and rounding remap only that ring stitch anchors', () => {
+  const src=require('fs').readFileSync(require.resolve('../js/app.js'),'utf8'),vm=require('vm');
+  const p={id:'p',path:{closed:true,nodes:[N(0,0),N(20,0),N(20,20),N(0,20)]},cutouts:[{nodes:[N(3,3),N(9,3),N(9,9),N(3,9)]},{nodes:[N(12,12),N(15,12),N(15,15),N(12,15)]}],notches:[{seg:2,t:.5}],foldSeg:2,stitchSlits:[{seg:0,t:.8,len:.18,ang:-45},{cut:0,seg:0,t:.8,len:.18,ang:-45},{cut:0,seg:2,t:.5,len:.18,ang:-45},{cut:1,seg:0,t:.8,len:.18,ang:-45},{free:true,x:2,y:2,ang:-45,len:.18}]};
+  const unchanged=JSON.stringify([p.path,p.cutouts[1],p.notches,p.foldSeg,p.stitchSlits[0],p.stitchSlits[3],p.stitchSlits[4]]);
+  const ctx={Geo,sel:{},beginChange(){},endChange(){},renderAll(){},$:()=>({}),fmt:String,alert:m=>assert.fail(m)};
+  for(const [a,b] of [['  function remapAfterInsert(','  // extrude an edge'],['  function insertNodeAt(','  // knife precision'],['  function filletParams(','  // ---------- clipboard']])vm.runInNewContext(src.slice(src.indexOf(a),src.indexOf(b,src.indexOf(a))),ctx);
+  const old=Geo.segPoint(p.cutouts[0].nodes[0],p.cutouts[0].nodes[1],.8);
+  ctx.insertNodeAt(p,0,.5,0);assert.equal(p.cutouts[0].nodes.length,5);assert.equal(p.stitchSlits[1].seg,1);assert.equal(p.stitchSlits[2].seg,3);
+  const sl=p.stitchSlits[1],nodes=p.cutouts[0].nodes;assert(Geo.dist(Geo.segPoint(nodes[sl.seg],nodes[sl.seg+1],sl.t),old)<1e-9);
+  ctx.deleteNodeAt(p,1,0);assert.equal(p.cutouts[0].nodes.length,4);assert(!p.stitchSlits.includes(sl));assert.equal(p.stitchSlits.find(s=>s.cut===0).seg,2);
+  ctx.roundCorner(p,2,.5,0);assert.equal(p.cutouts[0].nodes.length,5);assert(p.cutouts[0].nodes.some(n=>n.hin||n.hout));
+  assert.equal(JSON.stringify([p.path,p.cutouts[1],p.notches,p.foldSeg,p.stitchSlits.find(s=>s.cut==null&&!s.free),p.stitchSlits.find(s=>s.cut===1),p.stitchSlits.find(s=>s.free)]),unchanged);
+});
+
+t('deleting the last inner points removes only that cutout and its stitching', () => {
+  const src=require('fs').readFileSync(require.resolve('../js/app.js'),'utf8'),vm=require('vm');
+  const p={id:'p',path:{closed:true,nodes:[N(0,0),N(20,0),N(20,20),N(0,20)]},cutouts:[{nodes:[N(3,3),N(9,3),N(6,9)]},{nodes:[N(12,12),N(15,12),N(15,15),N(12,15)]}],stitchSlits:[{seg:0,t:.5},{cut:0,seg:0,t:.5},{cut:1,seg:0,t:.5}]};
+  const sel={kind:'node',idx:1,cut:0},ctx={Geo,sel,selPiece:()=>p,multiSel:[],doc:{pieces:[p]},beginChange(){},endChange(){},renderAll(){},clearSel(){assert.fail('must retain panel');}};
+  vm.runInNewContext(src.slice(src.indexOf('  function removeCutout('),src.indexOf('  // ---------- piece operations')),ctx);
+  ctx.deleteSelection();assert.equal(ctx.doc.pieces.length,1);assert.equal(p.path.nodes.length,4);assert.equal(p.cutouts.length,1);assert.equal(p.stitchSlits.length,2);assert.equal(p.stitchSlits[1].cut,0);assert.equal(sel.cut,null);
+});
+
+t('undo clears an inner boundary selection before rendering a snapshot without that cutout', () => {
+  const src=require('fs').readFileSync(require.resolve('../js/app.js'),'utf8'),vm=require('vm');
+  const sel={pieceId:'p',kind:'node',cut:0,idx:2,handle:{idx:2,key:'hin'}};
+  const ctx={sel,Geo,doc:null,stitchMulti:[],stitchSideA:null,tool:'select',pieceById:id=>ctx.doc.pieces.find(p=>p.id===id),clearSel(){assert.fail('panel still exists');},autosave(){},renderAll(){assert.equal(sel.cut,null);Geo.boundaryPath(ctx.doc.pieces[0],sel.cut);}};
+  vm.runInNewContext(src.slice(src.indexOf('  function applySnapshot('),src.indexOf('  function undo(')),ctx);
+  ctx.applySnapshot(JSON.stringify({pieces:[{id:'p',path:{closed:true,nodes:[N(0,0),N(10,0),N(10,10),N(0,10)]},cutouts:[]}]}));
+  assert.equal(sel.kind,null);assert.equal(sel.cut,null);assert.equal(sel.handle,null);
+});
+
 console.log(`\n${passed} tests passed${process.exitCode ? ' (with failures)' : ''}`);
