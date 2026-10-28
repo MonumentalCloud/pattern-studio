@@ -4173,7 +4173,7 @@
     const t = ev.target;
     if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')) return;
     const k = ev.key.toLowerCase();
-    if ($('shape-size-dialog').open || $('keep-curve-dialog').open || $('match-seam-dialog').open) return;
+    if ($('sheet-planner').open || $('shape-size-dialog').open || $('keep-curve-dialog').open || $('match-seam-dialog').open) return;
     if (k === 'alt' && drag && drag.type === 'shape') { ev.preventDefault(); openShapeSize(); return; }
     if (ev.code === 'Space') { spaceDown = true; svg.classList.add('panning'); ev.preventDefault(); return; }
     if ((ev.ctrlKey || ev.metaKey) && k === 'z') { ev.shiftKey ? redo() : undo(); ev.preventDefault(); return; }
@@ -5080,6 +5080,10 @@
   $('btn-save').addEventListener('click', (ev) => saveJSON(ev.shiftKey));
   $('ex-labels').addEventListener('change', () => {
     $('ex-label-h-row').hidden = !$('ex-labels').checked;
+  });
+  $('btn-sheet-plan').addEventListener('click', () => {
+    document.querySelectorAll('.top-menu').forEach(m => m.open = false);
+    SheetPlannerUI.open(doc, exportOpts(), safeName(), download);
   });
   $('btn-export-dxf').addEventListener('click', exportDXF);
   $('btn-export-svg').addEventListener('click', exportSVG);

@@ -348,6 +348,11 @@
       if (piece.visible === false) continue;
       all.push(pieceShapes(piece, opts));
     }
+    return exportShapes(all);
+  }
+
+  // Optional fixed bounds keep a sheet's origin and size, including blank margins.
+  function exportShapes(all, bounds) {
     const every = [];
     for (const s of all) {
       for (const pl of s.polylines) every.push(...pl.pts);
@@ -356,7 +361,7 @@
         every.push({ x: c.c.x - c.r, y: c.c.y - c.r }, { x: c.c.x + c.r, y: c.c.y + c.r });
       }
     }
-    const bb = Geo.bbox(every);
+    const bb = bounds || Geo.bbox(every);
     const MARGIN = 0; // cm
     // cm y-down -> mm y-up, translated into +x/+y quadrant
     const tx = (p) => ({
@@ -382,5 +387,5 @@
     return w.toString();
   }
 
-  return { exportDXF, pieceShapes, unfoldPiece };
+  return { exportDXF, exportShapes, pieceShapes, unfoldPiece };
 });

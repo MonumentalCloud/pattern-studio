@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pattern Studio</title>
-<link rel="stylesheet" href="style.css?v=84">
+<link rel="stylesheet" href="style.css?v=85">
 </head>
 <body>
 <div id="app">
   <header id="topbar">
-    <span id="logo" title="build 84">✂ Pattern Studio</span>
+    <span id="logo" title="build 85">✂ Pattern Studio</span>
     <input id="doc-name" type="text" value="Untitled pattern" spellcheck="false" title="Pattern name">
     <details class="top-menu"><summary>File</summary><div class="menu-panel"><div class="row btns">    <button id="btn-new" title="New document">New</button>
     <button id="btn-open" title="Open .json project or import a .dxf">Open</button>
@@ -33,6 +33,7 @@
         </div>
       </section></div></details>
     <details class="top-menu"><summary>Export</summary><div class="menu-panel"><div class="row btns">    <button id="btn-export-dxf" class="accent" title="Export DXF (mm) for laser cutting">Export DXF</button>
+    <button id="btn-sheet-plan">Plan cutting sheets</button>
     <button id="btn-export-svg" title="Export SVG (true-size mm)">Export SVG</button></div>      <section id="export-props">
         <h3>Export</h3>
         <div class="row">
@@ -445,12 +446,41 @@
     </aside>
   </div>
 </div>
+<dialog id="sheet-planner" aria-labelledby="plan-title">
+  <div class="plan-heading"><h2 id="plan-title">Plan cutting sheets</h2><button id="plan-close" type="button">Close / cancel</button></div>
+  <p class="hint">Paper/card templates · one of each visible panel · split sections join edge-to-edge with tape. Your draft stays intact.</p>
+  <details id="plan-options" open><summary>Bed and sheet settings</summary>
+  <fieldset id="plan-settings">
+    <div class="plan-grid">
+      <label>Machine preset<select id="plan-machine"><option value="20w">xTool S1 20W</option><option value="40w">xTool S1 40W</option><option value="custom">Custom</option></select></label>
+      <label>Bed width (mm)<input id="plan-bedWidth" type="number" step="any" value="498"></label>
+      <label>Bed height (mm)<input id="plan-bedHeight" type="number" step="any" value="330"></label>
+      <label>Paper/card size<select id="plan-paper"><option value="bed">Bed-sized sheet</option><option value="a3">A3 · 420 × 297 mm</option><option value="a4">A4 · 297 × 210 mm</option><option value="custom">Custom</option></select></label>
+      <label>Sheet width (mm)<input id="plan-paperWidth" type="number" step="any" value="498"></label>
+      <label>Sheet height (mm)<input id="plan-paperHeight" type="number" step="any" value="330"></label>
+      <label>Edge margin (mm)<input id="plan-margin" type="number" step="any" value="5"></label>
+      <label>Space between sections (mm)<input id="plan-gap" type="number" step="any" value="3"></label>
+    </div>
+  </fieldset></details>
+  <p class="hint">Uses the smaller of your bed and sheet dimensions. Choose your actual paper size before cutting. Tests quarter turns, two split orientations and two packing orders to reduce sheet use; a mathematical minimum is not guaranteed. Curves use the existing 0.1 mm export tolerance.</p>
+  <button id="plan-run" class="accent">Arrange sheets</button>
+  <p id="plan-message" role="status" aria-live="polite"></p>
+  <section id="plan-results" hidden>
+    <div class="plan-heading"><button id="plan-prev">Previous</button><strong id="plan-sheet"></strong><button id="plan-next">Next</button><span class="spacer"></span><button id="plan-dxf">Export this sheet DXF</button><button id="plan-svg">Export this sheet SVG</button></div>
+    <div id="plan-preview" aria-label="Cutting sheet preview"></div>
+    <p class="hint">Red = cut · blue = engrave/mark. Grey section numbers are preview labels. Split sections also receive blue engraved numbers and join ticks. Export at 1:1; do not use “fit to page”.</p>
+    <ul id="plan-manifest"></ul>
+    <details><summary>Assembly reference — how the sections join</summary><p>Match the numbered join edges and their two ticks, butt the edges together and tape. This map is a reference, not a cutting sheet.</p><button id="plan-map">Save assembly reference SVG</button><div id="plan-assembly"></div></details>
+  </section>
+</dialog>
 <input id="file-input" type="file" accept=".json,.dxf,application/json" hidden>
-<script src="js/geometry.js?v=84"></script>
-<script src="js/koreanfont.js?v=84"></script>
-<script src="js/strokefont.js?v=84"></script>
-<script src="js/dxf.js?v=84"></script>
-<script src="js/dxfimport.js?v=84"></script>
-<script src="js/app.js?v=84"></script>
+<script src="js/geometry.js?v=85"></script>
+<script src="js/koreanfont.js?v=85"></script>
+<script src="js/strokefont.js?v=85"></script>
+<script src="js/dxf.js?v=85"></script>
+<script src="js/dxfimport.js?v=85"></script>
+<script src="js/sheetplanner.js?v=85"></script>
+<script src="js/sheetplanner-ui.js?v=85"></script>
+<script src="js/app.js?v=85"></script>
 </body>
 </html>
