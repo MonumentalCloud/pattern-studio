@@ -4717,10 +4717,10 @@
   // Names the stroke font can't draw fall back to a TEXT entity, whose look
   // depends on the reader's font — say so rather than let it surprise them at
   // the laser. Pieces too small to hold legible text are dropped entirely.
-  function reportLabelIssues(opts) {
+  function reportLabelIssues(opts, format = 'DXF', exportedDoc = doc) {
     if (!opts.labels) return;
     const fellBack = [], tooSmall = [];
-    for (const p of doc.pieces) {
+    for (const p of exportedDoc.pieces) {
       if (p.visible === false || p.guide || !p.name || !p.path.closed) continue;
       const s = DXF.pieceShapes(p, opts);
       if (s.texts && s.texts.length) fellBack.push(p.name);
@@ -4728,29 +4728,37 @@
     }
     const bits = [];
     if (fellBack.length) {
-      bits.push(`${fellBack.length} name${fellBack.length > 1 ? 's' : ''} exported as DXF text ` +
+      bits.push(`${fellBack.length} name${fellBack.length > 1 ? 's' : ''} exported as ${format} text ` +
         `(no engraving strokes for those characters): ${fellBack.slice(0, 3).join(', ')}`);
     }
     if (tooSmall.length) {
       bits.push(`${tooSmall.length} piece${tooSmall.length > 1 ? 's' : ''} too small to label: ` +
         tooSmall.slice(0, 3).join(', '));
     }
-    if (bits.length) $('status-hint').textContent = bits.join(' · ');
+    $('status-hint').textContent = bits.length ? bits.join(' · ') : 'Piece names exported as engraving paths on MARK.';
   }
 
-  function exportDXF() {
-    const ok = doc.pieces.some((p) => p.visible !== false && p.path.nodes.length >= 2);
-    if (!ok) { alert('Nothing to export — draw a piece first.'); return; }
-    const opts = exportOpts();
-    download(safeName() + '.dxf', DXF.exportDXF(doc, opts), 'application/dxf');
-    reportLabelIssues(opts);
+  async function prepareNameOutlines(opts, exportedDoc) {
+    if(!opts.labels || !exportedDoc.pieces.some(p=>p.visible!==false && !p.guide && p.path.closed && KoreanFont.needsFont(p.name)))return true;
+    try { await KoreanFont.load();return true; }
+    catch(error){$('status-hint').textContent=error.message;alert(error.message);return false;}
   }
 
-  function exportSVG() {
+  async function exportDXF() {
     const ok = doc.pieces.some((p) => p.visible !== false && p.path.nodes.length >= 2);
     if (!ok) { alert('Nothing to export — draw a piece first.'); return; }
-    const svgOpts = exportOpts();
-    const shapes = doc.pieces
+    const opts = exportOpts(),exportedDoc=JSON.parse(JSON.stringify(doc)),filename=safeName();
+    if(!await prepareNameOutlines(opts,exportedDoc))return;
+    download(filename + '.dxf', DXF.exportDXF(exportedDoc, opts), 'application/dxf');
+    reportLabelIssues(opts,'DXF',exportedDoc);
+  }
+
+  async function exportSVG() {
+    const ok = doc.pieces.some((p) => p.visible !== false && p.path.nodes.length >= 2);
+    if (!ok) { alert('Nothing to export — draw a piece first.'); return; }
+    const svgOpts = exportOpts(),exportedDoc=JSON.parse(JSON.stringify(doc)),filename=safeName();
+    if(!await prepareNameOutlines(svgOpts,exportedDoc))return;
+    const shapes = exportedDoc.pieces
       .filter((p) => p.visible !== false && p.path.nodes.length >= 2)
       .map((p) => ({ piece: p, s: DXF.pieceShapes(p, svgOpts) }));
     const every = [];
@@ -4790,8 +4798,8 @@
       `<?xml version="1.0" encoding="UTF-8"?>\n` +
       `<svg xmlns="http://www.w3.org/2000/svg" width="${wMM.toFixed(2)}mm" height="${hMM.toFixed(2)}mm" ` +
       `viewBox="0 0 ${wMM.toFixed(2)} ${hMM.toFixed(2)}">\n<!-- Pattern Studio export, units: mm -->\n${body}</svg>\n`;
-    download(safeName() + '.svg', svgText, 'image/svg+xml');
-    reportLabelIssues(svgOpts);
+    download(filename + '.svg', svgText, 'image/svg+xml');
+    reportLabelIssues(svgOpts,'SVG',exportedDoc);
   }
 
   /* global DXFImport */

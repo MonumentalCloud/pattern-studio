@@ -1,4 +1,4 @@
-/* Pattern Studio — single-stroke (engraving) font.
+/* Pattern Studio — single-stroke Latin lettering with Korean engraving contours.
  * Pure functions, no DOM. Works in browser (window.StrokeFont) and Node.
  *
  * Why a stroke font and not DXF TEXT: laser software renders TEXT with
@@ -12,9 +12,9 @@
  * converts to document coords (cm, y-down).
  */
 (function (root, factory) {
-  if (typeof module !== 'undefined' && module.exports) module.exports = factory();
-  else root.StrokeFont = factory();
-})(typeof self !== 'undefined' ? self : this, function () {
+  if (typeof module !== 'undefined' && module.exports) module.exports = factory(require('./koreanfont.js'));
+  else root.StrokeFont = factory(root.KoreanFont);
+})(typeof self !== 'undefined' ? self : this, function (KoreanFont) {
   'use strict';
 
   const ADVANCE = 0.62;  // pen travel per character, in cap heights
@@ -99,20 +99,19 @@
     return GLYPHS[up] || null;
   }
 
-  // Can every character be drawn? Anything outside the table (Hangul, CJK,
-  // accents, emoji) cannot — the caller decides what to do about it.
+  // Korean contours supplement the single-stroke table; other missing glyphs are reported.
   function supports(str) {
-    for (const ch of String(str)) {
+    for (const ch of String(str).normalize('NFC')) {
       if (ch === ' ' || ch === '\t') continue;
-      if (!glyphFor(ch)) return false;
+      if (!glyphFor(ch) && !KoreanFont.supports(ch)) return false;
     }
     return true;
   }
   function unsupportedChars(str) {
     const bad = [];
-    for (const ch of String(str)) {
+    for (const ch of String(str).normalize('NFC')) {
       if (ch === ' ' || ch === '\t') continue;
-      if (!glyphFor(ch) && bad.indexOf(ch) < 0) bad.push(ch);
+      if (!glyphFor(ch) && !KoreanFont.supports(ch) && bad.indexOf(ch) < 0) bad.push(ch);
     }
     return bad;
   }
@@ -120,8 +119,10 @@
   function width(str, height) {
     const h = height || 1;
     let w = 0;
-    for (const ch of String(str)) w += (ch === ' ' || ch === '\t' ? SPACE : ADVANCE) * h;
-    return w > 0 ? w - (ADVANCE - 0.5) * h : 0; // trim the trailing side bearing
+    const chars=Array.from(String(str).normalize('NFC'));
+    for (const ch of chars) w += (ch === ' ' || ch === '\t' ? SPACE : KoreanFont.supports(ch) ? KoreanFont.ADVANCE : ADVANCE) * h;
+    const trim=KoreanFont.supports(chars[chars.length-1]) ? KoreanFont.ADVANCE-1 : ADVANCE-.5;
+    return w > 0 ? w - trim * h : 0; // trim the trailing side bearing
   }
 
   // Strokes for a string as document polylines (cm, y-DOWN).
@@ -133,8 +134,9 @@
     let x = o.x;
     if (align === 'center') x -= width(str, h) / 2;
     const out = [];
-    for (const ch of String(str)) {
+    for (const ch of String(str).normalize('NFC')) {
       if (ch === ' ' || ch === '\t') { x += SPACE * h; continue; }
+      if(KoreanFont.supports(ch)){out.push(...KoreanFont.strokes(ch,{x,y:o.y},h));x+=KoreanFont.ADVANCE*h;continue;}
       const g = glyphFor(ch);
       if (!g) continue;
       for (const stroke of g) {

@@ -281,9 +281,9 @@ t('stroke font: known glyphs stroke, unknown ones are reported', () => {
   const SF = require('../js/strokefont.js');
   assert(SF.supports('FRONT PANEL 2 (MIRROR)'), 'ASCII names are strokeable');
   assert(SF.supports('front panel'), 'lowercase maps onto the capitals');
-  assert(!SF.supports('앞판'), 'Hangul has no glyphs');
-  assert(JSON.stringify(SF.unsupportedChars('Front 앞판')) === JSON.stringify(['앞', '판']),
-    'and it names which characters: ' + JSON.stringify(SF.unsupportedChars('Front 앞판')));
+  assert(SF.supports('앞판'), 'Hangul has bundled engraving outlines');
+  assert(JSON.stringify(SF.unsupportedChars('Front 🙂')) === JSON.stringify(['🙂']),
+    'and it names which characters: ' + JSON.stringify(SF.unsupportedChars('Front 🙂')));
   const st = SF.strokes('AB', { x: 0, y: 0 }, 1);
   assert(st.length === 4, 'A (2 strokes) + B (2 strokes) = 4, got ' + st.length);
   for (const stroke of st) for (const p of stroke) {
@@ -291,6 +291,15 @@ t('stroke font: known glyphs stroke, unknown ones are reported', () => {
     assert(p.y <= 1e-9, 'baseline at y=0 and glyphs go up (y-down doc coords): ' + p.y);
   }
   assert(SF.width('A', 2) > SF.width('A', 1), 'width scales with height');
+});
+
+t('Korean outline asset covers every modern Hangul syllable with finite closed contours', () => {
+  const data=require('../js/korean-glyphs.js'),KF=require('../js/koreanfont.js');
+  for(let cp=0xac00;cp<=0xd7a3;cp++)assert(KF.supports(String.fromCodePoint(cp)));
+  for(const ch of Object.keys(data))for(const contour of KF.strokes(ch,{x:0,y:0},.8)){
+    assert(contour.length>=3);assert(Geo.dist(contour[0],contour[contour.length-1])===0);
+    for(const p of contour)assert(Number.isFinite(p.x)&&Number.isFinite(p.y));
+  }
 });
 
 t('polyCentroid ignores how finely edges were flattened', () => {
@@ -352,18 +361,33 @@ t('export labels: a piece too small to read is left unlabelled', () => {
   assert(openMark(s).length === 0 && !s.texts, 'nothing engraved rather than mush');
 });
 
-t('export labels: non-Latin names fall back to a DXF TEXT entity', () => {
+t('export labels: unsupported non-Korean names retain the DXF TEXT fallback', () => {
   const piece = {
-    id: 'p', name: '앞판', visible: true, seamAllowance: 0, notchLength: 0.4,
+    id: 'p', name: '🙂', visible: true, seamAllowance: 0, notchLength: 0.4,
     path: { closed: true, nodes: [N(0, 0), N(20, 0), N(20, 12), N(0, 12)] },
     notches: [], holes: [], grain: null, foldSeg: null, cutouts: [], stitchSlits: [],
   };
   const s = DXF.pieceShapes(piece, { labels: true, labelHeight: 1 });
   assert(s.texts && s.texts.length === 1, 'falls back rather than dropping the name');
-  assert(s.texts[0].value === '앞판' && s.texts[0].layer === 'MARK', JSON.stringify(s.texts[0]));
+  assert(s.texts[0].value === '🙂' && s.texts[0].layer === 'MARK', JSON.stringify(s.texts[0]));
   const dxf = DXF.exportDXF({ version: 2, name: 't', pieces: [piece] }, { labels: true, labelHeight: 1 });
   assert(/\r\nTEXT\r\n/.test(dxf), 'and the entity reaches the file');
-  assert(dxf.indexOf('앞판') > 0, 'with the name intact');
+  assert(dxf.indexOf('🙂') > 0, 'with the name intact');
+});
+
+t('export labels: Korean and mixed names are real MARK outlines without TEXT', () => {
+  const SF=require('../js/strokefont.js');
+  const piece={name:'앞판 LB x1',visible:true,path:{closed:true,nodes:[N(0,0),N(20,0),N(20,12),N(0,12)]},cutouts:[],stitchSlits:[]};
+  const before=JSON.stringify(piece),off=DXF.pieceShapes(piece,{labels:false});
+  assert(SF.supports(piece.name));
+  const s=DXF.pieceShapes(piece,{labels:true,labelHeight:.8});
+  assert(!s.texts);const outlines=s.polylines.filter(p=>p.layer==='MARK');assert(outlines.length>0);
+  for(const p of outlines)for(const v of p.pts)assert(Number.isFinite(v.x)&&Number.isFinite(v.y));
+  assert.deepEqual(s.polylines.filter(p=>p.layer==='CUT'),off.polylines.filter(p=>p.layer==='CUT'));
+  assert.equal(JSON.stringify(piece),before);
+  const file=DXF.exportDXF({pieces:[piece]},{labels:true,labelHeight:.8});
+  assert(!/\r\nTEXT\r\n/.test(file));assert(/\r\nMARK\r\n/.test(file));
+  assert.deepEqual(SF.strokes('앞판'.normalize('NFD'),{x:0,y:0},1),SF.strokes('앞판',{x:0,y:0},1));
 });
 
 t('export labels: guide/stitch-line pieces are not labelled', () => {
