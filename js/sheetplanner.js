@@ -266,6 +266,12 @@
     return {...best,...cfg,sources:sources.map(s=>({no:s.no,name:s.name,outer:s.outer})),warnings};
   }
   function sheetShapes(layout,index){const out=blank();for(const item of layout.sheets[index])merge(out,item.shape);return out;}
+  function allSheets(layout,gapMM){
+    if(gapMM==null||String(gapMM).trim()===''||!Number.isFinite(Number(gapMM))||Number(gapMM)<0)throw new Error('Enter a non-negative gap between sheets, in mm.');
+    const gap=Number(gapMM)/10,shape=blank();
+    layout.sheets.forEach((_,i)=>merge(shape,transformShapes(sheetShapes(layout,i),p=>point(p.x+i*(layout.width+gap),p.y))));
+    return {shape,width:layout.width*layout.sheets.length+gap*(layout.sheets.length-1),height:layout.height};
+  }
   function svgShapes(s,width,height){
     const n=x=>(x*10).toFixed(4),xy=p=>`${n(p.x)},${n(p.y)}`,color=l=>l==='CUT'?'#d00000':'#0044cc';
     let body='';
@@ -274,5 +280,5 @@
     for(const c of s.circles)body+=`<circle cx="${n(c.c.x)}" cy="${n(c.c.y)}" r="${n(c.r)}" stroke="${color(c.layer)}"/>\n`;
     return `<svg xmlns="http://www.w3.org/2000/svg" width="${n(width)}mm" height="${n(height)}mm" viewBox="0 0 ${n(width)} ${n(height)}"><g fill="none" stroke-width="0.2">${body}</g></svg>`;
   }
-  return {plan,settings,sheetShapes,svgShapes,clipRing,clipSegment,overlaps};
+  return {plan,settings,sheetShapes,allSheets,svgShapes,clipRing,clipSegment,overlaps};
 });

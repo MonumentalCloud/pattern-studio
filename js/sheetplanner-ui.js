@@ -66,6 +66,16 @@
   $('plan-next').addEventListener('click',()=>{index++;showSheet();});
   $('plan-svg').addEventListener('click',()=>{if(layout)download(`${filename}-sheet-${index+1}.svg`,SheetPlanner.svgShapes(SheetPlanner.sheetShapes(layout,index),layout.width,layout.height),'image/svg+xml');});
   $('plan-dxf').addEventListener('click',()=>{if(layout)download(`${filename}-sheet-${index+1}.dxf`,DXF.exportShapes([SheetPlanner.sheetShapes(layout,index)],{minX:0,minY:0,maxX:layout.width,maxY:layout.height}),'application/dxf');});
+  function exportAll(format){
+    if(!layout)return;
+    try{
+      const all=SheetPlanner.allSheets(layout,$('plan-export-gap').value);
+      const data=format==='svg'?SheetPlanner.svgShapes(all.shape,all.width,all.height):DXF.exportShapes([all.shape],{minX:0,minY:0,maxX:all.width,maxY:all.height});
+      download(`${filename}-all-sheets.${format}`,data,format==='svg'?'image/svg+xml':'application/dxf');
+    }catch(e){$('plan-message').textContent=e.message;}
+  }
+  $('plan-all-dxf').addEventListener('click',()=>exportAll('dxf'));
+  $('plan-all-svg').addEventListener('click',()=>exportAll('svg'));
   $('plan-map').addEventListener('click',()=>{if(layout)download(`${filename}-assembly-reference.svg`,assemblySvg(),'image/svg+xml');});
   $('plan-close').addEventListener('click',()=>dlg.close());
   dlg.addEventListener('close',()=>{generation++;busy=false;$('plan-run').disabled=false;$('plan-settings').disabled=false;});

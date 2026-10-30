@@ -218,3 +218,6 @@ Split sections have numbered engraving marks, paired join-edge ticks and a downl
 Name engraving follows the Export checkbox and existing **2.5 mm** minimum. Mandatory section/join identifiers also use 2.5 mm lettering: if a complete identifier cannot fit safely, it is omitted with a warning identifying it; use the assembly map. Names requiring font-dependent text (outside supported Latin/Korean paths) are reported rather than silently rotated or split as text. Geometry outside a panel's outer bounding box cannot be scribed on that paper template and is excluded by the tile boundaries.
 
 Verification: `node test/sheetplanner.test.js` and `node test/sheetplanner-ui.test.js`, plus existing core/name-export tests. Physical cutting and taped assembly still require a real-machine trial.
+
+
+**All sheets in one file (build 86):** after arranging, use **All sheets in one DXF** or **All sheets in one SVG** to import every planned section into xTool together. Sheets are placed side-by-side at 1:1, separated by an editable blank gap (initially 20 mm); no sheet frames are cut. Move the pieces or batches onto the bed as needed. Existing **Export this sheet** buttons still export only the displayed sheet. Packing, split numbering and template quantities are unchanged.

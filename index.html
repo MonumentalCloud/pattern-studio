@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pattern Studio</title>
-<link rel="stylesheet" href="style.css?v=85">
+<link rel="stylesheet" href="style.css?v=86">
 </head>
 <body>
 <div id="app">
   <header id="topbar">
-    <span id="logo" title="build 85">✂ Pattern Studio</span>
+    <span id="logo" title="build 86">✂ Pattern Studio</span>
     <input id="doc-name" type="text" value="Untitled pattern" spellcheck="false" title="Pattern name">
     <details class="top-menu"><summary>File</summary><div class="menu-panel"><div class="row btns">    <button id="btn-new" title="New document">New</button>
     <button id="btn-open" title="Open .json project or import a .dxf">Open</button>
@@ -466,6 +466,8 @@
   <button id="plan-run" class="accent">Arrange sheets</button>
   <p id="plan-message" role="status" aria-live="polite"></p>
   <section id="plan-results" hidden>
+    <div class="plan-heading"><label for="plan-export-gap">Gap between sheets</label><input id="plan-export-gap" type="number" step="any" value="20" style="width:85px"> <span>mm</span><button id="plan-all-dxf" class="accent">All sheets in one DXF</button><button id="plan-all-svg">All sheets in one SVG</button></div>
+    <p class="hint">One file contains every planned sheet, side-by-side with this blank gap. Import once, then move the pieces or sheet batches onto the xTool bed. No cutting frames are added.</p>
     <div class="plan-heading"><button id="plan-prev">Previous</button><strong id="plan-sheet"></strong><button id="plan-next">Next</button><span class="spacer"></span><button id="plan-dxf">Export this sheet DXF</button><button id="plan-svg">Export this sheet SVG</button></div>
     <div id="plan-preview" aria-label="Cutting sheet preview"></div>
     <p class="hint">Red = cut · blue = engrave/mark. Grey section numbers are preview labels. Split sections also receive blue engraved numbers and join ticks. Export at 1:1; do not use “fit to page”.</p>
@@ -474,13 +476,13 @@
   </section>
 </dialog>
 <input id="file-input" type="file" accept=".json,.dxf,application/json" hidden>
-<script src="js/geometry.js?v=85"></script>
-<script src="js/koreanfont.js?v=85"></script>
-<script src="js/strokefont.js?v=85"></script>
-<script src="js/dxf.js?v=85"></script>
-<script src="js/dxfimport.js?v=85"></script>
-<script src="js/sheetplanner.js?v=85"></script>
-<script src="js/sheetplanner-ui.js?v=85"></script>
-<script src="js/app.js?v=85"></script>
+<script src="js/geometry.js?v=86"></script>
+<script src="js/koreanfont.js?v=86"></script>
+<script src="js/strokefont.js?v=86"></script>
+<script src="js/dxf.js?v=86"></script>
+<script src="js/dxfimport.js?v=86"></script>
+<script src="js/sheetplanner.js?v=86"></script>
+<script src="js/sheetplanner-ui.js?v=86"></script>
+<script src="js/app.js?v=86"></script>
 </body>
 </html>
