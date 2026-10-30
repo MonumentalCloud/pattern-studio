@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pattern Studio</title>
-<link rel="stylesheet" href="style.css?v=86">
+<link rel="stylesheet" href="style.css?v=87">
 </head>
 <body>
 <div id="app">
   <header id="topbar">
-    <span id="logo" title="build 86">✂ Pattern Studio</span>
+    <span id="logo" title="build 87">✂ Pattern Studio</span>
     <input id="doc-name" type="text" value="Untitled pattern" spellcheck="false" title="Pattern name">
     <details class="top-menu"><summary>File</summary><div class="menu-panel"><div class="row btns">    <button id="btn-new" title="New document">New</button>
     <button id="btn-open" title="Open .json project or import a .dxf">Open</button>
@@ -452,17 +452,18 @@
   <details id="plan-options" open><summary>Bed and sheet settings</summary>
   <fieldset id="plan-settings">
     <div class="plan-grid">
-      <label>Machine preset<select id="plan-machine"><option value="20w">xTool S1 20W</option><option value="40w">xTool S1 40W</option><option value="custom">Custom</option></select></label>
+      <label>Machine preset<select id="plan-machine"><option value="20w">xTool S1 20W — white framing area</option><option value="20w-full">xTool S1 20W — full laser range (includes grey)</option><option value="40w">xTool S1 40W</option><option value="custom">Custom</option></select></label>
       <label>Bed width (mm)<input id="plan-bedWidth" type="number" step="any" value="498"></label>
-      <label>Bed height (mm)<input id="plan-bedHeight" type="number" step="any" value="330"></label>
+      <label>Bed height (mm)<input id="plan-bedHeight" type="number" step="any" value="308.2"></label>
       <label>Paper/card size<select id="plan-paper"><option value="bed">Bed-sized sheet</option><option value="a3">A3 · 420 × 297 mm</option><option value="a4">A4 · 297 × 210 mm</option><option value="custom">Custom</option></select></label>
       <label>Sheet width (mm)<input id="plan-paperWidth" type="number" step="any" value="498"></label>
-      <label>Sheet height (mm)<input id="plan-paperHeight" type="number" step="any" value="330"></label>
+      <label>Sheet height (mm)<input id="plan-paperHeight" type="number" step="any" value="308.2"></label>
       <label>Edge margin (mm)<input id="plan-margin" type="number" step="any" value="5"></label>
       <label>Space between sections (mm)<input id="plan-gap" type="number" step="any" value="3"></label>
     </div>
   </fieldset></details>
   <p class="hint">Uses the smaller of your bed and sheet dimensions. Choose your actual paper size before cutting. Tests quarter turns, two split orientations and two packing orders to reduce sheet use; a mathematical minimum is not guaranteed. Curves use the existing 0.1 mm export tolerance.</p>
+  <p id="plan-framing-note" class="hint"></p>
   <button id="plan-run" class="accent">Arrange sheets</button>
   <p id="plan-message" role="status" aria-live="polite"></p>
   <section id="plan-results" hidden>
@@ -476,13 +477,13 @@
   </section>
 </dialog>
 <input id="file-input" type="file" accept=".json,.dxf,application/json" hidden>
-<script src="js/geometry.js?v=86"></script>
-<script src="js/koreanfont.js?v=86"></script>
-<script src="js/strokefont.js?v=86"></script>
-<script src="js/dxf.js?v=86"></script>
-<script src="js/dxfimport.js?v=86"></script>
-<script src="js/sheetplanner.js?v=86"></script>
-<script src="js/sheetplanner-ui.js?v=86"></script>
-<script src="js/app.js?v=86"></script>
+<script src="js/geometry.js?v=87"></script>
+<script src="js/koreanfont.js?v=87"></script>
+<script src="js/strokefont.js?v=87"></script>
+<script src="js/dxf.js?v=87"></script>
+<script src="js/dxfimport.js?v=87"></script>
+<script src="js/sheetplanner.js?v=87"></script>
+<script src="js/sheetplanner-ui.js?v=87"></script>
+<script src="js/app.js?v=87"></script>
 </body>
 </html>

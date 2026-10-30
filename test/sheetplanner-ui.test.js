@@ -10,6 +10,16 @@ async function main(){
   const ctx={document:{getElementById:el,createElement:()=>el('li')},window:{},performance:{now:()=>0},setTimeout,Geo:{},KoreanFont:{needsFont:()=>true,load:()=>font},SheetPlanner:{plan:async(doc)=>{calls.push(doc.name);return result;},sheetShapes:()=>({}),allSheets:require('../js/sheetplanner.js').allSheets,svgShapes:()=>'<svg></svg>'},DXF:require('../js/dxf.js')};
   vm.runInNewContext(fs.readFileSync(require.resolve('../js/sheetplanner-ui.js'),'utf8'),ctx);
   const UI=ctx.window.SheetPlannerUI;
+  // Approved 20W default excludes the 21.8mm framing strip; full travel stays opt-in.
+  el('plan-paper').value='bed';el('plan-machine').value='20w';el('plan-machine').events.change();
+  assert.equal(Number(el('plan-bedHeight').value),308.2);assert.match(el('plan-framing-note').textContent,/Y = 26.8 mm/);assert.equal(Number(el('plan-paperHeight').value),308.2);
+  el('plan-machine').value='20w-full';el('plan-machine').events.change();assert.equal(Number(el('plan-bedHeight').value),330);assert.equal(el('plan-framing-note').hidden,true);
+  el('plan-machine').value='40w';el('plan-machine').events.change();assert.equal(Number(el('plan-bedHeight').value),319);
+  el('plan-paper').value='a4';el('plan-paperWidth').value='297';el('plan-paperHeight').value='210';
+  el('plan-machine').value='20w';el('plan-machine').events.change();assert.equal(Number(el('plan-paperHeight').value),210);
+  const html=fs.readFileSync(require.resolve('../index.html'),'utf8');
+  assert(/id="plan-bedHeight"[^>]*value="308.2"/.test(html));assert(/id="plan-paperHeight"[^>]*value="308.2"/.test(html));
+
   UI.open({name:'Old',pieces:[{name:'앞판'}]},{labels:true},'old',()=>{});
   const first=el('plan-run').events.click();assert(el('plan-run').disabled);
   el('sheet-planner').close();assert(!el('plan-run').disabled);

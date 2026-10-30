@@ -10,6 +10,11 @@ async function main(){
   const doc={pieces:[rect('Front x2',0,0,20,25),rect('Back x4',35,0,20,25)]},before=JSON.stringify(doc);
   let p=await P.plan(doc,cfg);assert.equal(items(p).length,2);assert.equal(p.sheets.length,1);assert.equal(JSON.stringify(doc),before);
   assert(items(p).every(i=>!i.split));assert.equal(new Set(items(p).map(i=>i.piece)).size,2);
+  const square={pieces:[rect('White area fit',0,0,30,30)]},squareBefore=JSON.stringify(square);
+  const full=await P.plan(square,cfg),white=await P.plan(square,{...cfg,bedHeight:308.2,paperHeight:308.2});
+  assert.equal(items(full).length,1);assert(items(white).length>1);
+  assert(items(white).every(i=>i.w<=48.8+1e-8&&i.h<=29.82+1e-8));
+  assert(Math.abs(items(white).reduce((n,i)=>n+i.area,0)-900)<1e-7);assert.equal(JSON.stringify(square),squareBefore);
   const many={pieces:[rect('One',0,0,48,31),rect('Two',60,0,48,31),rect('Three',120,0,48,31)]};
   many.pieces[1].holes=[{x:70,y:8,r:.3}];
   const multi=await P.plan(many,cfg),saved=JSON.stringify(multi);

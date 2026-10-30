@@ -7,12 +7,18 @@
   const fields=['bedWidth','bedHeight','paperWidth','paperHeight','margin','gap'];
   const input=key=>$('plan-'+key);
   const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
-  function invalidate(){layout=null;$('plan-results').hidden=true;$('plan-message').textContent='Settings changed. Arrange sheets to update the preview.';}
+  function updateFramingHint(){
+    $('plan-framing-note').hidden=$('plan-machine').value!=='20w';
+    const margin=Number(input('margin').value);
+    const position=Number.isFinite(margin)&&margin>=0?`Set the top of each batch to Y = ${(21.8+margin).toFixed(1)} mm to retain your edge margin.`:'Enter a valid edge margin before exporting.';
+    $('plan-framing-note').textContent=`S1 20W white area: excludes the top 21.8 mm grey framing strip. xTool may centre imports. ${position} Keep size; do not scale to fit.`;
+  }
+  function invalidate(){updateFramingHint();layout=null;$('plan-results').hidden=true;$('plan-message').textContent='Settings changed. Arrange sheets to update the preview.';}
   function syncPaper(){if($('plan-paper').value==='bed'){input('paperWidth').value=input('bedWidth').value;input('paperHeight').value=input('bedHeight').value;}}
   for(const key of fields)input(key).addEventListener('input',()=>{if(key.startsWith('bed')){$('plan-machine').value='custom';syncPaper();}if(key.startsWith('paper'))$('plan-paper').value='custom';invalidate();});
   $('plan-machine').addEventListener('change',()=>{
     const preset=$('plan-machine').value;
-    if(preset!=='custom'){input('bedWidth').value=498;input('bedHeight').value=preset==='20w'?330:319;syncPaper();}invalidate();
+    if(preset!=='custom'){input('bedWidth').value=498;input('bedHeight').value=preset==='20w'?308.2:preset==='20w-full'?330:319;syncPaper();}invalidate();
   });
   $('plan-paper').addEventListener('change',()=>{
     const preset=$('plan-paper').value;
@@ -80,7 +86,7 @@
   $('plan-close').addEventListener('click',()=>dlg.close());
   dlg.addEventListener('close',()=>{generation++;busy=false;$('plan-run').disabled=false;$('plan-settings').disabled=false;});
   window.SheetPlannerUI={open(doc,exportOptions,name,save){
-    if(busy)return;snapshot=JSON.parse(JSON.stringify(doc));opts={...exportOptions};filename=name;download=save;layout=null;
+    if(busy)return;updateFramingHint();snapshot=JSON.parse(JSON.stringify(doc));opts={...exportOptions};filename=name;download=save;layout=null;
     $('plan-options').open=true;$('plan-results').hidden=true;$('plan-message').textContent='Each visible closed panel is used once. Hidden panels are excluded. Name engraving follows your Export setting.';dlg.showModal();
   }};
 })();
